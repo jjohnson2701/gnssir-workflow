@@ -1,0 +1,269 @@
+{
+  "FORA": {
+    "station_id_4char_lower": "fora",
+    "ellipsoidal_height_m": -30.917,
+    "latitude_deg": 35.9393968812,
+    "longitude_deg": -75.7081602909,
+    "gnssir_json_params_path": "config/fora_params.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "doi-gnss",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/FORA/FORA{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "search_radius_km": 50,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": "02043433",
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "NAVD88",
+      "usgs_latitude": 36.37444444,
+      "usgs_longitude": -75.8344444,
+      "notes": "Using Albemarle Sound at Ck Lighthouse NC (02043433) at 49.7km - nearest coastal USGS gauge"
+    },
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": true,
+        "search_radius_km": 100,
+        "preferred_stations": [
+          "8651370",
+          "8652587"
+        ],
+        "data_products": [
+          "predictions",
+          "water_level"
+        ],
+        "datum": "NAVD88",
+        "time_zone": "lst_ldt",
+        "interval": "h"
+      },
+      "ndbc_buoys": {
+        "enabled": true,
+        "search_radius_km": 200,
+        "preferred_buoys": [
+          "44025",
+          "44014",
+          "41025"
+        ],
+        "data_types": [
+          "meteorological",
+          "wave_spec"
+        ],
+        "update_interval_hours": 1,
+        "max_days_back": 45
+      }
+    }
+  },
+  "UMNQ": {
+    "station_id_4char_lower": "umnq",
+    "ellipsoidal_height_m": 36.9963,
+    "latitude_deg": 70.67755,
+    "longitude_deg": -52.115436,
+    "gnssir_json_params_path": "config/umnq.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "doi-gnss",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/UMNQ/UMNQ{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "GLBX": {
+    "station_id_4char_lower": "glbx",
+    "ellipsoidal_height_m": -12.535,
+    "latitude_deg": 58.455146658,
+    "longitude_deg": -135.8884838318,
+    "gnssir_json_params_path": "config/glbx.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "doi-gnss",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/GLBX/GLBX{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "search_radius_km": 75,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": "15057596",
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "NAVD88",
+      "notes": "Using SALMON R AT GUSTAVUS AK (15057596) at 8.6km - has active data and NAVD88 datum. Nearest gauge 15057600 (ALDER C) at 0.82km has no recent data."
+    },
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": true,
+        "search_radius_km": 100,
+        "preferred_stations": [
+          "9452634",
+          "9452210"
+        ],
+        "nearest_station": {
+          "id": "9452634",
+          "name": "Elfin Cove",
+          "distance_km": 39.4
+        },
+        "data_products": [
+          "predictions",
+          "water_level"
+        ],
+        "datum": "NAVD88",
+        "time_zone": "gmt",
+        "interval": "h"
+      },
+      "ndbc_buoys": {
+        "enabled": false,
+        "search_radius_km": 200,
+        "preferred_buoys": [],
+        "data_types": [
+          "meteorological",
+          "wave_spec"
+        ],
+        "update_interval_hours": 1,
+        "max_days_back": 45
+      },
+      "last_updated": "2025-06-02T10:48:01.914496"
+    }
+  },
+  "DESO": {
+    "station_id_4char_lower": "deso",
+    "ellipsoidal_height_m": -18.787,
+    "latitude_deg": 27.5239577411,
+    "longitude_deg": -82.6439784939,
+    "gnssir_json_params_path": "config/deso.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "doi-gnss",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/DESO/DESO{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "search_radius_km": 50,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "VALR": {
+    "station_id_4char_lower": "valr",
+    "ellipsoidal_height_m": 26.107,
+    "latitude_deg": 21.3665613818,
+    "longitude_deg": -157.939405742,
+    "gnssir_json_params_path": "config/valr.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "doi-gnss",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/VALR/VALR{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": "16229000",
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown",
+      "notes": "Using Kalihi Stream near Honolulu (16229000) at 9.8km - closest Hawaiian USGS gauge with active water level data."
+    },
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": true,
+        "search_radius_km": 100,
+        "preferred_stations": [
+          "1612401",
+          "1612340"
+        ],
+        "nearest_station": {
+          "id": "1612401",
+          "name": "Pearl Harbor",
+          "distance_km": 2.04,
+          "latitude": 21.3642,
+          "longitude": -157.9589
+        },
+        "data_products": [
+          "predictions",
+          "water_level"
+        ],
+        "datum": "MSL",
+        "time_zone": "gmt",
+        "interval": "6"
+      },
+      "ndbc_buoys": {
+        "enabled": true,
+        "search_radius_km": 200,
+        "preferred_buoys": [
+          "51003",
+          "51002"
+        ],
+        "data_types": [
+          "meteorological",
+          "wave_spec"
+        ],
+        "update_interval_hours": 1,
+        "max_days_back": 45
+      }
+    }
+  },
+  "MDAI": {
+    "station_id_4char_lower": "mdai",
+    "ellipsoidal_height_m": -33.159,
+    "latitude_deg": 38.1390532246,
+    "longitude_deg": -75.1888452235,
+    "gnssir_json_params_path": "config/mdai.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "doi-gnss",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/MDAI/MDAI{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "priority_param_codes": [
+        "62610",
+        "62611",
+        "62620",
+        "00065"
+      ],
+      "target_usgs_site": "0148472405",
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "NAVD88",
+      "notes": "Using BUNTINGS GUT NEAR CEDARTOWN, MD (0148472405) at 0.46km - optimal nearby gauge"
+    },
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": true,
+        "search_radius_km": 100,
+        "preferred_stations": [],
+        "data_products": [
+          "predictions",
+          "water_level"
+        ],
+        "datum": "NAVD88",
+        "time_zone": "lst_ldt",
+        "interval": "h"
+      },
+      "ndbc_buoys": {
+        "enabled": true,
+        "search_radius_km": 200,
+        "preferred_buoys": [],
+        "data_types": [
+          "meteorological",
+          "wave_spec"
+        ],
+        "update_interval_hours": 1,
+        "max_days_back": 45
+      }
+    }
+  }
+}

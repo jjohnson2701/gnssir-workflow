@@ -1,0 +1,63 @@
+{
+  "station": "fora",
+  "lat": 35.9393968812,
+  "lon": -75.7081602909,
+  "ht": -30.917,
+  "minH": 5.0,
+  "maxH": 15.0,
+  "e1": 4.0,
+  "e2": 13.0,
+  "NReg": [
+    5.0,
+    15.0
+  ],
+  "PkNoise": 2.7,
+  "polyV": 4,
+  "pele": [
+    4.0,
+    30
+  ],
+  "ediff": 2.0,
+  "desiredP": 0.005,
+  "azval2": [
+    0.0,
+    80.0,
+    340.0,
+    360.0
+  ],
+  "freqs": [
+    1,
+    20,
+    5,
+    101,
+    102,
+    201,
+    205,
+    206,
+    207,
+    208,
+    302,
+    306
+  ],
+  "reqAmp": [
+    6.4
+  ],
+  "refraction": true,
+  "overwriteResults": true,
+  "seekRinex": false,
+  "wantCompression": false,
+  "plt_screen": false,
+  "onesat": null,
+  "screenstats": false,
+  "pltname": "fora_lsp.png",
+  "delTmax": 75.0,
+  "gzip": false,
+  "ellist": [],
+  "ampl": [
+    6.4,
+    999.0
+  ],
+  "peak2noise": [
+    3.0
+  ]
+}

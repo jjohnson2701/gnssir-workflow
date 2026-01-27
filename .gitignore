@@ -1,0 +1,82 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing and coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.cache/
+coverage.xml
+*.cover
+.hypothesis/
+pytest.ini.bak
+
+# Project-specific outputs and reports
+config_audit_report.txt
+test_coverage_assessment.txt
+*_assessment.txt
+*_report.txt
+debug_*.txt
+test_output/
+data/
+*.tar.gz
+temp_*.py
+*_temp.py
+run_log.txt
+*.txt
+!requirements.txt
+*.24o
+*txt.gen
+*.png
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Virtual environments
+venv/
+env/
+ENV/
+llm/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# GNSS-IR specific
+gnssrefl_data_workspace/
+results_annual/
+data/*/logs_daily/
+logs/
+*.log
+cache/
