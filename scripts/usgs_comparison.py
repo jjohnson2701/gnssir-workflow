@@ -1,7 +1,6 @@
 """
-Enhanced USGS Comparison for Phase 3 GNSS-IR Processing
-This script compares GNSS-IR reflector height data with USGS gauge data,
-with support for WSE_ellips calculation and time lag analysis.
+ABOUTME: USGS comparison for GNSS-IR processing.
+ABOUTME: Compares reflector height data with USGS gauge data, with WSE_ellips and time lag analysis.
 """
 
 import sys
@@ -50,10 +49,10 @@ import matplotlib.pyplot as plt
 # Define project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-def enhanced_usgs_comparison(station_name, year, doy_range=None, max_lag_days=10, output_dir=None, 
-                          perform_segmented_analysis=True):
+def usgs_comparison(station_name, year, doy_range=None, max_lag_days=10, output_dir=None,
+                    perform_segmented_analysis=True):
     """
-    Run enhanced USGS comparison analysis with vertical datum alignment and time lag analysis.
+    Run USGS comparison analysis with vertical datum alignment and time lag analysis.
     
     Args:
         station_name (str): Station name in uppercase (e.g., "FORA")
@@ -150,7 +149,50 @@ def enhanced_usgs_comparison(station_name, year, doy_range=None, max_lag_days=10
     if 'datum' not in gauge_info or not gauge_info['datum'] or gauge_info['datum'] == 'Unknown datum':
         gauge_info['datum'] = usgs_gauge_stated_datum
         logging.info(f"Using stated datum from config: {usgs_gauge_stated_datum}")
-    
+
+    # === Create subdaily_matched.csv by matching raw GNSS-IR to USGS IV ===
+    # Load raw GNSS-IR data for subdaily matching
+    raw_csv_path = PROJECT_ROOT / "results_annual" / station_name / f"{station_name}_{year}_combined_raw.csv"
+    if raw_csv_path.exists():
+        logging.info(f"Loading raw GNSS-IR data for subdaily matching from {raw_csv_path}")
+        gnssir_raw_df = pd.read_csv(raw_csv_path)
+
+        # Prepare gauge_info dict for subdaily function
+        subdaily_gauge_info = {
+            'site_code': usgs_site_code,
+            'site_name': gauge_info.get('site_name', ''),
+            'vertical_datum': usgs_gauge_stated_datum,
+            'gnss_lat': station_config.get('latitude_deg'),
+            'gnss_lon': station_config.get('longitude_deg'),
+            'usgs_lat': gauge_info.get('latitude'),
+            'usgs_lon': gauge_info.get('longitude')
+        }
+
+        try:
+            from visualizer.comparison import plot_subdaily_ribbon_comparison
+            # Reset index to make datetime a column (USGS IV data has datetime as index)
+            usgs_iv_for_subdaily = usgs_df.reset_index()
+            subdaily_results = plot_subdaily_ribbon_comparison(
+                gnssir_raw_df=gnssir_raw_df,
+                usgs_iv_df=usgs_iv_for_subdaily,
+                station_name=station_name,
+                usgs_gauge_info=subdaily_gauge_info,
+                output_dir=output_dir,
+                antenna_height=antenna_ellipsoidal_height,
+                year=int(year),
+                gap_threshold_hours=2.0,
+                ribbon_window=5,
+                show_residuals=True
+            )
+            if subdaily_results.get('matched_data'):
+                logging.info(f"Created subdaily_matched.csv: {subdaily_results['matched_data']}")
+            else:
+                logging.warning("subdaily_matched.csv was not created")
+        except Exception as e:
+            logging.warning(f"Could not create subdaily_matched.csv: {e}")
+    else:
+        logging.warning(f"Raw GNSS-IR data not found at {raw_csv_path}, skipping subdaily matching")
+
     # Add station coordinates to gauge_info
     if 'latitude_deg' in station_config and 'longitude_deg' in station_config:
         gauge_info['gnss_lat'] = station_config['latitude_deg']
@@ -363,8 +405,8 @@ def enhanced_usgs_comparison(station_name, year, doy_range=None, max_lag_days=10
     else:
         logging.warning("Not enough overlapping data points for time lag analysis (need at least 3 points)")
     
-    # Generate enhanced plots
-    logging.info(f"Generating enhanced plots in {output_dir}")
+    # Generate comparison plots
+    logging.info(f"Generating comparison plots in {output_dir}")
     
     # Generate WSE vs USGS plot (dual y-axis)
     wse_plot_path = output_dir / f"{station_name}_{year}_wse_usgs_comparison.png"
@@ -501,8 +543,8 @@ def enhanced_usgs_comparison(station_name, year, doy_range=None, max_lag_days=10
         reason = "lag not significant" if wse_lag is None or abs(wse_lag) == 0 else f"insufficient confidence ({wse_lag_conf})"
         logging.info(f"No lag-adjusted plot generated: {reason}")
     
-    # Save enhanced results to CSV
-    enhanced_csv_path = output_dir / f"{station_name}_{year}_enhanced_comparison.csv"
+    # Save comparison results to CSV
+    comparison_csv_path = output_dir / f"{station_name}_{year}_comparison.csv"
     try:
         # Add WSE ellipsoidal info to merged_df
         merged_df['antenna_ellipsoidal_height_m'] = antenna_ellipsoidal_height
@@ -515,11 +557,11 @@ def enhanced_usgs_comparison(station_name, year, doy_range=None, max_lag_days=10
         merged_df['usgs_value'] = merged_df[usgs_value_col]
         
         # Save to CSV
-        merged_df.to_csv(enhanced_csv_path, index=False)
-        logging.info(f"Saved enhanced comparison data to {enhanced_csv_path}")
+        merged_df.to_csv(comparison_csv_path, index=False)
+        logging.info(f"Saved comparison data to {comparison_csv_path}")
     except Exception as e:
-        logging.error(f"Error saving enhanced comparison data: {e}")
-        enhanced_csv_path = None
+        logging.error(f"Error saving comparison data: {e}")
+        comparison_csv_path = None
     
     # Perform segmented correlation analysis if requested
     segmented_results = {}
@@ -547,7 +589,7 @@ def enhanced_usgs_comparison(station_name, year, doy_range=None, max_lag_days=10
     elif perform_segmented_analysis:
         logging.warning(f"Not enough data points for meaningful segmented analysis (found {len(merged_df)})")
     
-    # Return enhanced results
+    # Return results
     return {
         'success': True,
         'gnssir_daily_df': gnssir_daily_df,
@@ -563,7 +605,7 @@ def enhanced_usgs_comparison(station_name, year, doy_range=None, max_lag_days=10
             'demeaned_plot_path': demeaned_plot_path,
             'lag_plot_path': lag_plot_path
         },
-        'enhanced_csv_path': enhanced_csv_path,
+        'comparison_csv_path': comparison_csv_path,
         'segmented_results': segmented_results
     }
 
@@ -723,7 +765,7 @@ def perform_segmented_correlation_analysis(merged_df: pd.DataFrame,
         'summary_file': str(summary_path)
     }
 def main():
-    """Main function to run enhanced USGS comparison analysis"""
+    """Main function to run USGS comparison analysis"""
     # Configure argument parser
     parser = argparse.ArgumentParser(description='Enhanced USGS Comparison for GNSS-IR')
     parser.add_argument('--station', type=str, required=True, help='Station ID (4-char uppercase)')
@@ -746,7 +788,7 @@ def main():
         level=getattr(logging, args.log_level),
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(f"{args.station}_{args.year}_enhanced_comparison.log"),
+            logging.FileHandler(f"{args.station}_{args.year}_comparison.log"),
             logging.StreamHandler()
         ]
     )
@@ -763,8 +805,8 @@ def main():
         output_dir = Path(args.output_dir)
         logging.info(f"Using custom output directory: {output_dir}")
     
-    # Run enhanced analysis
-    results = enhanced_usgs_comparison(
+    # Run analysis
+    results = usgs_comparison(
         args.station, 
         args.year, 
         doy_range=doy_range,
@@ -805,8 +847,8 @@ def main():
                 if path:
                     logging.info(f"{name}: {path}")
         
-        if results.get('enhanced_csv_path'):
-            logging.info(f"Enhanced comparison data: {results['enhanced_csv_path']}")
+        if results.get('comparison_csv_path'):
+            logging.info(f"Enhanced comparison data: {results['comparison_csv_path']}")
             
         # Log segmented correlation results
         if 'segmented_results' in results and results['segmented_results']:

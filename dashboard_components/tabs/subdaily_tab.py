@@ -230,7 +230,7 @@ def render_subdaily_tab(
     station_id: str,
     year: int,
     rh_data=None,
-    enhanced_data=None
+    comparison_data=None
 ):
     """
     Render the subdaily comparison tab.
@@ -239,7 +239,7 @@ def render_subdaily_tab(
         station_id: Station identifier
         year: Analysis year
         rh_data: GNSS-IR daily data (for context)
-        enhanced_data: Enhanced comparison data (for context)
+        comparison_data: Enhanced comparison data (for context)
     """
     st.header("🌊 Subdaily Comparison")
 

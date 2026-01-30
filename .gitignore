@@ -80,3 +80,16 @@ data/*/logs_daily/
 logs/
 *.log
 cache/
+
+# Claude Code specific (contains local paths)
+CLAUDE.md
+
+# Session logs
+processing_session_log.md
+*_session_log.md
+
+# Large data files (keep test fixtures)
+*.gif
+bartlett_cove_*.csv
+*_coops_*.csv
+!tests/fixtures/*.csv

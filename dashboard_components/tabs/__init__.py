@@ -1,7 +1,6 @@
 """
-Dashboard Tabs Package
-
-Individual tab implementations for the enhanced dashboard.
+ABOUTME: Dashboard Tabs Package
+ABOUTME: Individual tab implementations for the GNSS-IR dashboard.
 """
 
 from .overview_tab import render_overview_tab

@@ -113,7 +113,7 @@ GNSSIRWorkflow/
 │
 ├── scripts/                         # Processing scripts
 │   ├── run_gnssir_processing.py     # Main processing entry point
-│   ├── enhanced_usgs_comparison.py  # USGS validation analysis
+│   ├── usgs_comparison.py  # USGS validation analysis
 │   ├── core_processing/             # Core processing modules
 │   │   ├── config_loader.py         # Configuration management
 │   │   ├── daily_gnssir_worker.py   # Single-day processing
@@ -177,7 +177,7 @@ GNSSIRWorkflow/
 ├── tests/                           # Test suite
 ├── tools/                           # External binaries (gfzrnx)
 │
-├── enhanced_dashboard_v4.py         # Main dashboard application
+├── dashboard.py         # Main dashboard application
 ├── requirements.txt                 # Python dependencies
 └── CLAUDE.md                        # Project documentation
 ```
@@ -563,7 +563,7 @@ monthly_correlations, monthly_data = perform_segmented_correlation(
 ### 9.1 Launch Dashboard
 
 ```bash
-streamlit run enhanced_dashboard_v4.py
+streamlit run dashboard.py
 ```
 
 ### 9.2 Dashboard Tabs
@@ -645,7 +645,7 @@ python scripts/run_gnssir_processing.py \
 
 ```bash
 # Enhanced USGS comparison with time lag analysis
-python scripts/enhanced_usgs_comparison.py \
+python scripts/usgs_comparison.py \
     --station FORA \
     --year 2024 \
     --max_lag_days 5 \
@@ -655,7 +655,7 @@ python scripts/enhanced_usgs_comparison.py \
 ### 10.5 Launch Dashboard
 
 ```bash
-streamlit run enhanced_dashboard_v4.py
+streamlit run dashboard.py
 ```
 
 ### 10.6 Quick Test

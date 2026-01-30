@@ -9,18 +9,24 @@ from pathlib import Path
 def setup_main_logger(log_file, log_level=logging.INFO):
     """
     Setup the main logger for both console and file output.
-    
+
     Args:
         log_file (str or Path): Path to the main log file
         log_level (int, optional): Logging level (e.g., logging.INFO, logging.DEBUG).
                                   Defaults to logging.INFO.
     """
     log_format = "%(asctime)s - %(levelname)s - %(message)s"
-    
+
     # Ensure log directory exists
     log_file_path = Path(log_file)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
+    # Silence noisy third-party loggers
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)

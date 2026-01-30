@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-# ABOUTME: Main entry point for GNSS-IR Dashboard v4 with subdaily comparison.
-# ABOUTME: Adds station-aware reference sources and improved data loading.
+# ABOUTME: Main entry point for GNSS-IR Dashboard with subdaily comparison.
+# ABOUTME: Provides station-aware reference sources and data loading.
 
 """
-GNSS-IR Dashboard v4 - Enhanced with Subdaily Comparison
-=========================================================
+GNSS-IR Dashboard
+=================
 
-Key improvements over v3:
+Features:
 - Subdaily comparison tab showing individual retrievals vs reference
 - Station-aware reference source detection (USGS vs CO-OPS)
-- Antenna heights loaded from config (not hardcoded)
-- Better error messages for missing data files
-- Fixed diagnostics tab navigation
+- Antenna heights loaded from config
+- Diagnostics tab for quality analysis
 
 Usage:
-    streamlit run enhanced_dashboard_v4.py
+    streamlit run dashboard.py
 """
 
 import streamlit as st
@@ -218,10 +217,10 @@ def main():
         with st.spinner("Loading GNSS-IR and comparison data..."):
             # Load station data
             try:
-                rh_data, enhanced_data, usgs_data, coops_file_data = load_station_data(selected_station, selected_year)
+                rh_data, comparison_data, usgs_data, coops_file_data = load_station_data(selected_station, selected_year)
             except ValueError:
                 # Fallback for older version (3 return values)
-                rh_data, enhanced_data, usgs_data = load_station_data(selected_station, selected_year)
+                rh_data, comparison_data, usgs_data = load_station_data(selected_station, selected_year)
                 coops_file_data = None
 
         # Check for missing data and provide helpful messages
@@ -243,10 +242,10 @@ def main():
         if rh_data is not None and not rh_data.empty:
             rh_data = rh_data[(rh_data['doy'] >= doy_range[0]) & (rh_data['doy'] <= doy_range[1])]
 
-        # Also filter enhanced_data by DOY range if it exists
-        if enhanced_data is not None and not enhanced_data.empty:
-            enhanced_data['doy'] = enhanced_data['merge_date'].dt.dayofyear
-            enhanced_data = enhanced_data[(enhanced_data['doy'] >= doy_range[0]) & (enhanced_data['doy'] <= doy_range[1])]
+        # Also filter comparison_data by DOY range if it exists
+        if comparison_data is not None and not comparison_data.empty:
+            comparison_data['doy'] = comparison_data['merge_date'].dt.dayofyear
+            comparison_data = comparison_data[(comparison_data['doy'] >= doy_range[0]) & (comparison_data['doy'] <= doy_range[1])]
 
         # Initialize external data variables
         coops_data = None
@@ -305,7 +304,7 @@ def main():
                 station_id=selected_station,
                 year=selected_year,
                 rh_data=rh_data,
-                enhanced_data=enhanced_data
+                comparison_data=comparison_data
             )
 
         # Tab 4: Yearly Analysis (residual analysis)
@@ -320,7 +319,7 @@ def main():
             # Create data dictionary for consistency with new API
             data_dict = {
                 'rh_data': rh_data,
-                'enhanced_data': enhanced_data,
+                'comparison_data': comparison_data,
                 'usgs_data': usgs_data,
                 'coops_data': coops_data,
                 'ndbc_data': ndbc_data

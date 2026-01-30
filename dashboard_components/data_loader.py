@@ -52,12 +52,12 @@ def load_station_data(station_id="FORA", year=2024):
         rh_data = pd.read_csv(rh_file)
         rh_data['date'] = pd.to_datetime(rh_data['date'])
     
-    # Load enhanced comparison data (includes lag analysis)
-    enhanced_file = results_dir / f"{station_id}_{year}_enhanced_comparison.csv"
-    enhanced_data = None
-    if enhanced_file.exists():
-        enhanced_data = pd.read_csv(enhanced_file)
-        enhanced_data['merge_date'] = pd.to_datetime(enhanced_data['merge_date'])
+    # Load comparison data (includes lag analysis)
+    comparison_file = results_dir / f"{station_id}_{year}_comparison.csv"
+    comparison_data = None
+    if comparison_file.exists():
+        comparison_data = pd.read_csv(comparison_file)
+        comparison_data['merge_date'] = pd.to_datetime(comparison_data['merge_date'])
     
     # Load USGS gauge data
     usgs_file = results_dir / f"{station_id}_{year}_usgs_gauge_data.csv"
@@ -71,15 +71,15 @@ def load_station_data(station_id="FORA", year=2024):
             usgs_data['date'] = pd.to_datetime(usgs_data['date'])
             usgs_data['datetime'] = usgs_data['date']  # Create datetime column for consistency
     
-    # If we have enhanced comparison data with USGS values, use that instead
-    if enhanced_data is not None and not enhanced_data.empty and 'usgs_value' in enhanced_data.columns:
-        # Use enhanced data as primary USGS source since it has better alignment
-        usgs_enhanced = enhanced_data[['merge_date', 'usgs_value']].copy()
-        usgs_enhanced['datetime'] = usgs_enhanced['merge_date']
-        usgs_enhanced = usgs_enhanced.dropna(subset=['usgs_value'])
+    # If we have comparison data with USGS values, use that instead
+    if comparison_data is not None and not comparison_data.empty and 'usgs_value' in comparison_data.columns:
+        # Use comparison data as primary USGS source since it has better alignment
+        usgs_aligned = comparison_data[['merge_date', 'usgs_value']].copy()
+        usgs_aligned['datetime'] = usgs_aligned['merge_date']
+        usgs_aligned = usgs_aligned.dropna(subset=['usgs_value'])
         
-        if not usgs_enhanced.empty:
-            usgs_data = usgs_enhanced  # Use the enhanced aligned data
+        if not usgs_aligned.empty:
+            usgs_data = usgs_aligned  # Use the aligned data
             # Ensure we have a 'date' column for compatibility
             if 'date' not in usgs_data.columns and 'datetime' in usgs_data.columns:
                 usgs_data['date'] = usgs_data['datetime']
@@ -124,7 +124,7 @@ def load_station_data(station_id="FORA", year=2024):
         coops_data['source'] = 'NOAA CO-OPS'
         coops_data['station_id'] = coops_station_id
     
-    return rh_data, enhanced_data, usgs_data, coops_data
+    return rh_data, comparison_data, usgs_data, coops_data
 
 
 @st.cache_data
@@ -404,7 +404,7 @@ def load_data_with_progress(station_id, year, include_external=True):
         # Step 1: Load local data (fast)
         progress_text.text("Loading GNSS-IR data...")
         progress_bar.progress(0.2)
-        rh_data, enhanced_data, usgs_data = load_station_data(station_id, year)
+        rh_data, comparison_data, usgs_data = load_station_data(station_id, year)
         
         # Step 2: Load external data if requested (potentially slow)
         coops_data = None
@@ -435,7 +435,7 @@ def load_data_with_progress(station_id, year, include_external=True):
         
         return {
             'rh_data': rh_data,
-            'enhanced_data': enhanced_data,
+            'comparison_data': comparison_data,
             'usgs_data': usgs_data,
             'coops_data': coops_data,
             'ndbc_data': ndbc_data

@@ -1,5 +1,4 @@
 {
-    "_comment": "NOTE: gfzrnx_path may vary depending on SSH mount location. Use /net/tiampostorage3/volume3/ for current setup, or /home/jjohnson/ if mounted differently",
     "gfzrnx_path": "/home/jjohnson/JoelShare3E/GNSSIR/GNSSIRWorkflow-standalone/tools/gfzrnx",
     "rinex2snr_path": "/home/jjohnson/miniconda3/envs/py39/bin/rinex2snr",
     "gnssir_path": "/home/jjohnson/miniconda3/envs/py39/bin/gnssir",

@@ -9,6 +9,28 @@ import logging
 import pandas as pd
 from pathlib import Path
 
+# Canonical gnssir v3 output column names (17 columns)
+# Based on gnssrefl v3.10.0 output format
+GNSSIR_V3_COLUMNS = [
+    'year',      # (1) Year
+    'doy',       # (2) Day of year
+    'RH',        # (3) Reflector height in meters
+    'sat',       # (4) Satellite number
+    'UTCtime',   # (5) UTC time in hours
+    'Azim',      # (6) Azimuth in degrees
+    'Amp',       # (7) Amplitude (v/v)
+    'eminO',     # (8) Minimum elevation angle in degrees
+    'emaxO',     # (9) Maximum elevation angle in degrees
+    'NumbOf',    # (10) Number of values used
+    'freq',      # (11) Frequency code
+    'rise',      # (12) Rising (1) or setting (-1)
+    'EdotF',     # (13) Edot/F value in hours
+    'PkNoise',   # (14) Peak to noise ratio
+    'DelT',      # (15) Delta T in minutes
+    'MJD',       # (16) Modified Julian Date
+    'refr_model' # (17) Refraction model (0 is none)
+]
+
 def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, annual_results_dir):
     """
     Combine daily reflector height results into a single annual CSV file.
@@ -93,9 +115,9 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
                 # Now read the data, skipping the header lines
                 try:
                     df = pd.read_csv(
-                        rh_file, 
+                        rh_file,
                         skiprows=header_lines,
-                        delim_whitespace=True,
+                        sep=r'\s+',  # Space-delimited (replaces deprecated delim_whitespace)
                         header=None
                     )
                 except pd.errors.EmptyDataError:
@@ -109,17 +131,22 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
                     processing_errors.append(f"{rh_file.name}: Empty DataFrame after parsing")
                     continue
                 
-                # Assign column names based on extracted descriptions if available
-                if column_descriptions and len(column_descriptions) > 0:
-                    # Assign names to columns based on the descriptions, up to the number of columns available
-                    for i in range(min(len(column_descriptions), len(df.columns))):
-                        df = df.rename(columns={i: column_descriptions[i]})
-                    
-                    logging.debug(f"Renamed columns based on descriptions: {df.columns.tolist()}")
+                # Assign column names using canonical gnssir v3 format
+                # The gnssir output has 17 space-delimited columns with a fixed format
+                num_cols = len(df.columns)
+                if num_cols == len(GNSSIR_V3_COLUMNS):
+                    # Perfect match - use canonical names
+                    df.columns = GNSSIR_V3_COLUMNS
+                    logging.debug(f"Assigned canonical gnssir v3 column names: {df.columns.tolist()}")
+                elif num_cols < len(GNSSIR_V3_COLUMNS):
+                    # Fewer columns than expected - use canonical names for available columns
+                    df.columns = GNSSIR_V3_COLUMNS[:num_cols]
+                    logging.warning(f"File has {num_cols} columns, expected {len(GNSSIR_V3_COLUMNS)}. Using partial canonical names.")
                 else:
-                    # If no descriptions available, use generic column names
-                    df = df.rename(columns=lambda x: f"Col{x+1}")
-                    logging.debug(f"Using generic column names: {df.columns.tolist()}")
+                    # More columns than expected - use canonical names + generic for extras
+                    col_names = GNSSIR_V3_COLUMNS + [f"Col{i}" for i in range(num_cols - len(GNSSIR_V3_COLUMNS))]
+                    df.columns = col_names
+                    logging.warning(f"File has {num_cols} columns, expected {len(GNSSIR_V3_COLUMNS)}. Added generic names for extras.")
                 
                 # Extract the DOY from the filename
                 filename_parts = rh_file.stem.split('_')

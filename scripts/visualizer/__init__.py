@@ -8,8 +8,8 @@ and advanced visualizations with auxiliary data.
 
 from .timeseries import plot_annual_rh_timeseries
 from .comparison import plot_comparison_timeseries, plot_ribbon_comparison, plot_subdaily_ribbon_comparison
-from .enhanced_comparison import (
-    create_enhanced_comparison_plot,
+from .comparison_plots import (
+    create_comparison_plot,
     create_quality_diagnostic_plot,
     investigate_seasonal_correlation_issues,
     detect_outliers_and_anomalies,
@@ -60,7 +60,7 @@ __all__ = [
     'plot_subdaily_ribbon_comparison',
     
     # Enhanced comparison and diagnostics
-    'create_enhanced_comparison_plot',
+    'create_comparison_plot',
     'create_quality_diagnostic_plot',
     'investigate_seasonal_correlation_issues',
     'detect_outliers_and_anomalies',

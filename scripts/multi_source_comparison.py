@@ -9,7 +9,7 @@ Enhanced comparison module that integrates GNSS-IR data with multiple external s
 - NDBC buoy meteorological and wave data (new)
 - Environmental correlation analysis (new)
 
-This module extends the existing enhanced_usgs_comparison.py with multi-source
+This module extends the existing usgs_comparison.py with multi-source
 validation and environmental context analysis.
 
 Usage:
@@ -31,9 +31,9 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 # Import existing modules
 try:
-    from scripts.enhanced_usgs_comparison import enhanced_usgs_comparison
+    from scripts.usgs_comparison import usgs_comparison
 except ImportError:
-    from enhanced_usgs_comparison import enhanced_usgs_comparison
+    from usgs_comparison import usgs_comparison
 
 try:
     from scripts.usgs_comparison_analyzer import load_gnssir_data
@@ -68,10 +68,10 @@ except ImportError:
 # Import visualization
 try:
     from scripts import visualizer
-    from scripts.visualizer.enhanced_comparison import create_enhanced_comparison_plot
+    from scripts.visualizer.comparison_plots import create_comparison_plot
 except ImportError:
     import visualizer
-    from visualizer.enhanced_comparison import create_enhanced_comparison_plot
+    from visualizer.comparison_plots import create_comparison_plot
 
 # Define project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -168,7 +168,7 @@ class MultiSourceComparison:
             
             # Step 2: Run existing USGS comparison
             self.logger.info("Running existing USGS comparison analysis")
-            usgs_results = enhanced_usgs_comparison(
+            usgs_results = usgs_comparison(
                 station_name, year, doy_range, max_lag_days, output_dir
             )
             

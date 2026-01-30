@@ -1,7 +1,6 @@
 """
-Dashboard Components Package
-
-Modular components for the enhanced GNSS-IR dashboard v3.
+ABOUTME: Dashboard Components Package
+ABOUTME: Modular components for the GNSS-IR dashboard.
 """
 
 from .data_loader import (
@@ -48,7 +47,7 @@ __all__ = [
     'get_preloader',
     'CACHE_DIR',
 
-    # Station metadata (v4)
+    # Station metadata
     'get_station_config',
     'get_antenna_height',
     'get_reference_source_info',

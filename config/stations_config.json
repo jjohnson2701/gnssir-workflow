@@ -132,6 +132,23 @@
         "update_interval_hours": 1,
         "max_days_back": 45
       },
+      "erddap": {
+        "enabled": true,
+        "primary_reference": true,
+        "server": "AOOS",
+        "base_url": "https://erddap.aoos.org/erddap",
+        "dataset_id": "edu_ua_glos_obs_station_bartlett_cove_ak",
+        "station_name": "Bartlett Cove, AK",
+        "distance_km": 0.004,
+        "latitude": 58.4551,
+        "longitude": -135.8885,
+        "variables": {
+          "water_level": "sea_surface_height_above_geopotential_datum",
+          "time": "time"
+        },
+        "datum": "NAVD88",
+        "notes": "Co-located ERDDAP water level station from AOOS (Alaska Ocean Observing System). Much closer than USGS (8.6km) or CO-OPS (39.4km)"
+      },
       "last_updated": "2025-06-02T10:48:01.914496"
     }
   },
