@@ -163,10 +163,58 @@ def real_subdaily_matched_data():
 
 @pytest.fixture
 def real_comparison_data():
-    """Load real comparison data sample from fixtures."""
+    """Load real comparison data sample from fixtures (ERDDAP/GLBX)."""
     csv_path = FIXTURES_DIR / 'sample_comparison.csv'
     if not csv_path.exists():
         pytest.skip("Sample comparison data not found")
+    df = pd.read_csv(csv_path, parse_dates=['merge_date', 'date'])
+    df.set_index('merge_date', inplace=True)
+    return df
+
+
+# USGS reference source fixtures (MDAI station)
+@pytest.fixture
+def usgs_subdaily_matched_data():
+    """Load real subdaily matched data with USGS reference (MDAI station)."""
+    csv_path = FIXTURES_DIR / 'sample_usgs_matched.csv'
+    if not csv_path.exists():
+        pytest.skip("Sample USGS matched data not found")
+    df = pd.read_csv(csv_path)
+    df['gnss_datetime'] = pd.to_datetime(df['gnss_datetime'], format='ISO8601')
+    df['usgs_datetime'] = pd.to_datetime(df['usgs_datetime'], format='ISO8601')
+    return df
+
+
+@pytest.fixture
+def usgs_comparison_data():
+    """Load real comparison data with USGS reference (MDAI station)."""
+    csv_path = FIXTURES_DIR / 'sample_usgs_comparison.csv'
+    if not csv_path.exists():
+        pytest.skip("Sample USGS comparison data not found")
+    df = pd.read_csv(csv_path, parse_dates=['merge_date', 'date'])
+    df.set_index('merge_date', inplace=True)
+    return df
+
+
+# CO-OPS reference source fixtures (VALR station)
+@pytest.fixture
+def coops_subdaily_matched_data():
+    """Load real subdaily matched data with CO-OPS reference (VALR station)."""
+    csv_path = FIXTURES_DIR / 'sample_coops_matched.csv'
+    if not csv_path.exists():
+        pytest.skip("Sample CO-OPS matched data not found")
+    df = pd.read_csv(csv_path)
+    df['gnss_datetime'] = pd.to_datetime(df['gnss_datetime'])
+    df['coops_datetime'] = pd.to_datetime(df['coops_datetime'])
+    return df
+
+
+@pytest.fixture
+def coops_comparison_data():
+    """Load real comparison data with CO-OPS reference (VALR station)."""
+    csv_path = FIXTURES_DIR / 'sample_coops_comparison.csv'
+    if not csv_path.exists():
+        pytest.skip("Sample CO-OPS comparison data not found")
     df = pd.read_csv(csv_path, parse_dates=['merge_date', 'date'])
     df.set_index('merge_date', inplace=True)
     return df
