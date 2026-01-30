@@ -53,7 +53,7 @@ def create_comparison_plot(df, station_name, year, output_path):
                  fontsize=16, fontweight='bold', y=0.95)
     
     # Prepare data
-    df_clean = df.dropna(subset=['WSE_ellips_m', 'usgs_value_m_median'])
+    df_clean = df.dropna(subset=['wse_ellips_m', 'usgs_value_m_median'])
     
     if len(df_clean) == 0:
         logging.error("No valid data for comparison")
@@ -67,7 +67,7 @@ def create_comparison_plot(df, station_name, year, output_path):
     ax1_twin = ax1.twinx()
     
     # GNSS-IR data (left axis)
-    line1 = ax1.plot(df_clean.index, df_clean['WSE_ellips_m'], 
+    line1 = ax1.plot(df_clean.index, df_clean['wse_ellips_m'], 
                      color=colors['gnss'], linewidth=2.5, 
                      marker='o', markersize=4, alpha=0.8,
                      label='GNSS-IR WSE')
@@ -100,14 +100,14 @@ def create_comparison_plot(df, station_name, year, output_path):
     ax1.legend(lines, labels, loc='upper left', framealpha=0.9)
     
     # Add correlation text
-    correlation = df_clean['WSE_ellips_m'].corr(df_clean['usgs_value_m_median'])
+    correlation = df_clean['wse_ellips_m'].corr(df_clean['usgs_value_m_median'])
     ax1.text(0.02, 0.98, f'Correlation: {correlation:.3f}', 
              transform=ax1.transAxes, fontsize=12, fontweight='bold',
              bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
              verticalalignment='top')
     
     # Plot 2: Demeaned comparison (single axis)
-    gnss_demeaned = df_clean['WSE_ellips_m'] - df_clean['WSE_ellips_m'].mean()
+    gnss_demeaned = df_clean['wse_ellips_m'] - df_clean['wse_ellips_m'].mean()
     usgs_demeaned = df_clean['usgs_value_m_median'] - df_clean['usgs_value_m_median'].mean()
     
     ax2.plot(df_clean.index, gnss_demeaned, 
@@ -169,7 +169,7 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
     
     # 1. Data availability heatmap by month
     availability = df_copy.groupby('month').agg({
-        'WSE_ellips_m': lambda x: x.notna().sum(),
+        'wse_ellips_m': lambda x: x.notna().sum(),
         'usgs_value_m_median': lambda x: x.notna().sum(),
     })
     
@@ -180,7 +180,7 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     
-    axes[0,0].bar(months, availability['WSE_ellips_m'], 
+    axes[0,0].bar(months, availability['wse_ellips_m'], 
                   alpha=0.7, label='GNSS-IR', color=ENHANCED_COLORS['gnss'])
     axes[0,0].bar(months, availability['usgs_value_m_median'], 
                   alpha=0.7, label='USGS', color=ENHANCED_COLORS['usgs'])
@@ -194,7 +194,7 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
     for month in range(1, 13):
         month_data = df_copy[df_copy['month'] == month]
         if len(month_data) > 5:
-            corr = month_data['WSE_ellips_m'].corr(month_data['usgs_value_m_median'])
+            corr = month_data['wse_ellips_m'].corr(month_data['usgs_value_m_median'])
             monthly_corr.append(corr if not np.isnan(corr) else 0)
         else:
             monthly_corr.append(0)
@@ -215,7 +215,7 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
             bar.set_color(ENHANCED_COLORS['quality_poor'])
     
     # 3. Scatter plot with seasonal coloring
-    valid_data = df.dropna(subset=['WSE_ellips_m', 'usgs_value_m_median'])
+    valid_data = df.dropna(subset=['wse_ellips_m', 'usgs_value_m_median'])
     if len(valid_data) > 0:
         # Ensure valid_data has datetime index
         if not isinstance(valid_data.index, pd.DatetimeIndex):
@@ -232,16 +232,16 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
         for season in ['Winter', 'Spring', 'Summer', 'Fall']:
             mask = seasons == season
             if mask.any():
-                axes[1,0].scatter(valid_data.loc[mask, 'WSE_ellips_m'], 
+                axes[1,0].scatter(valid_data.loc[mask, 'wse_ellips_m'], 
                                 valid_data.loc[mask, 'usgs_value_m_median'],
                                 c=season_colors[season], label=season, alpha=0.7, s=50)
         
         # Add regression line
         slope, intercept, r_value, p_value, std_err = stats.linregress(
-            valid_data['WSE_ellips_m'], valid_data['usgs_value_m_median'])
+            valid_data['wse_ellips_m'], valid_data['usgs_value_m_median'])
         
-        x_line = np.linspace(valid_data['WSE_ellips_m'].min(), 
-                           valid_data['WSE_ellips_m'].max(), 100)
+        x_line = np.linspace(valid_data['wse_ellips_m'].min(), 
+                           valid_data['wse_ellips_m'].max(), 100)
         y_line = slope * x_line + intercept
         axes[1,0].plot(x_line, y_line, 'k--', alpha=0.8, linewidth=2)
         
@@ -253,7 +253,7 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
     
     # 4. Quality metrics vs residuals
     if 'rh_std_m' in df.columns and len(valid_data) > 0:
-        residuals = valid_data['WSE_ellips_m'] - valid_data['usgs_value_m_median']
+        residuals = valid_data['wse_ellips_m'] - valid_data['usgs_value_m_median']
         quality_data = df.loc[valid_data.index, 'rh_std_m'].dropna()
         
         if len(quality_data) > 0:
@@ -319,14 +319,14 @@ def investigate_seasonal_correlation_issues(df, station_name, year):
     
     for season in seasons:
         season_data = df_analysis[df_analysis['season'] == season]
-        valid_data = season_data.dropna(subset=['WSE_ellips_m', 'usgs_value_m_median'])
+        valid_data = season_data.dropna(subset=['wse_ellips_m', 'usgs_value_m_median'])
         
         if len(valid_data) > 3:
-            correlation = valid_data['WSE_ellips_m'].corr(valid_data['usgs_value_m_median'])
+            correlation = valid_data['wse_ellips_m'].corr(valid_data['usgs_value_m_median'])
             
             # Calculate statistics
-            gnss_mean = valid_data['WSE_ellips_m'].mean()
-            gnss_std = valid_data['WSE_ellips_m'].std()
+            gnss_mean = valid_data['wse_ellips_m'].mean()
+            gnss_std = valid_data['wse_ellips_m'].std()
             usgs_mean = valid_data['usgs_value_m_median'].mean()
             usgs_std = valid_data['usgs_value_m_median'].std()
             
@@ -377,14 +377,14 @@ def detect_outliers_and_anomalies(df, station_name, year):
     print(f"OUTLIER DETECTION ANALYSIS")
     print(f"{'='*50}")
     
-    valid_data = df.dropna(subset=['WSE_ellips_m', 'usgs_value_m_median'])
+    valid_data = df.dropna(subset=['wse_ellips_m', 'usgs_value_m_median'])
     
     if len(valid_data) < 10:
         print("Insufficient data for outlier analysis")
         return pd.DataFrame(), None
     
     # Calculate residuals
-    residuals = valid_data['WSE_ellips_m'] - valid_data['usgs_value_m_median']
+    residuals = valid_data['wse_ellips_m'] - valid_data['usgs_value_m_median']
     
     # Outlier detection using IQR method
     Q1 = residuals.quantile(0.25)
@@ -406,12 +406,12 @@ def detect_outliers_and_anomalies(df, station_name, year):
         print(f"\nOutlier dates and residuals:")
         for date, row in outliers.iterrows():
             residual = residuals.loc[date]
-            print(f"  {date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else date}: {residual:.3f}m (GNSS: {row['WSE_ellips_m']:.3f}, USGS: {row['usgs_value_m_median']:.3f})")
+            print(f"  {date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else date}: {residual:.3f}m (GNSS: {row['wse_ellips_m']:.3f}, USGS: {row['usgs_value_m_median']:.3f})")
     
     # Correlation without outliers
     clean_data = valid_data[(residuals >= lower_bound) & (residuals <= upper_bound)]
-    clean_correlation = clean_data['WSE_ellips_m'].corr(clean_data['usgs_value_m_median'])
-    original_correlation = valid_data['WSE_ellips_m'].corr(valid_data['usgs_value_m_median'])
+    clean_correlation = clean_data['wse_ellips_m'].corr(clean_data['usgs_value_m_median'])
+    original_correlation = valid_data['wse_ellips_m'].corr(valid_data['usgs_value_m_median'])
     
     print(f"\nCorrelation analysis:")
     print(f"  Original correlation: {original_correlation:.4f}")
@@ -436,7 +436,7 @@ def create_spring_investigation_plot(df, station_name, year, output_path):
     
     # Filter to Spring months (March, April, May)
     spring_data = df[df.index.month.isin([3, 4, 5])]
-    valid_spring = spring_data.dropna(subset=['WSE_ellips_m', 'usgs_value_m_median'])
+    valid_spring = spring_data.dropna(subset=['wse_ellips_m', 'usgs_value_m_median'])
     
     if len(valid_spring) == 0:
         print("No valid Spring data for plotting")
@@ -447,7 +447,7 @@ def create_spring_investigation_plot(df, station_name, year, output_path):
                  fontsize=16, fontweight='bold')
     
     # 1. Time series comparison
-    axes[0,0].plot(valid_spring.index, valid_spring['WSE_ellips_m'], 
+    axes[0,0].plot(valid_spring.index, valid_spring['wse_ellips_m'], 
                    'b-o', label='GNSS-IR WSE', markersize=6, color=ENHANCED_COLORS['gnss'])
     ax_twin = axes[0,0].twinx()
     ax_twin.plot(valid_spring.index, valid_spring['usgs_value_m_median'], 
@@ -459,16 +459,16 @@ def create_spring_investigation_plot(df, station_name, year, output_path):
     axes[0,0].tick_params(axis='x', rotation=45)
     
     # 2. Scatter plot
-    axes[0,1].scatter(valid_spring['WSE_ellips_m'], valid_spring['usgs_value_m_median'], 
+    axes[0,1].scatter(valid_spring['wse_ellips_m'], valid_spring['usgs_value_m_median'], 
                       alpha=0.7, s=80, color=ENHANCED_COLORS['correlation'])
     
     # Add regression line
     if len(valid_spring) > 2:
         slope, intercept, r_value, p_value, std_err = stats.linregress(
-            valid_spring['WSE_ellips_m'], valid_spring['usgs_value_m_median'])
+            valid_spring['wse_ellips_m'], valid_spring['usgs_value_m_median'])
         
-        x_line = np.linspace(valid_spring['WSE_ellips_m'].min(), 
-                           valid_spring['WSE_ellips_m'].max(), 100)
+        x_line = np.linspace(valid_spring['wse_ellips_m'].min(), 
+                           valid_spring['wse_ellips_m'].max(), 100)
         y_line = slope * x_line + intercept
         axes[0,1].plot(x_line, y_line, 'r--', alpha=0.8)
         
@@ -481,7 +481,7 @@ def create_spring_investigation_plot(df, station_name, year, output_path):
     axes[0,1].grid(True, alpha=0.3)
     
     # 3. Residuals over time
-    residuals = valid_spring['WSE_ellips_m'] - valid_spring['usgs_value_m_median']
+    residuals = valid_spring['wse_ellips_m'] - valid_spring['usgs_value_m_median']
     axes[1,0].plot(valid_spring.index, residuals, 'go-', markersize=6, color=ENHANCED_COLORS['correlation'])
     axes[1,0].axhline(y=0, color='k', linestyle='--', alpha=0.5)
     axes[1,0].set_title('Spring Residuals (GNSS-IR - USGS)')

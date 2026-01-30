@@ -117,7 +117,7 @@ def temp_output_dir():
 
 @pytest.fixture
 def mock_comparison_df(sample_gnssir_data, sample_reference_data):
-    """Create a merged comparison DataFrame for testing."""
+    """Create a merged comparison DataFrame for testing with correct column names."""
     gnss = sample_gnssir_data.copy()
     ref = sample_reference_data.copy()
 
@@ -125,11 +125,51 @@ def mock_comparison_df(sample_gnssir_data, sample_reference_data):
     ref['merge_date'] = ref['datetime'].dt.floor('h')
 
     merged = gnss.merge(ref, on='merge_date', suffixes=('', '_ref'))
-    merged['wse_ellips'] = 10.5 - merged['rh']  # Antenna height - RH
-    merged['usgs_value'] = merged['reference_wl']
-    merged['residual'] = merged['wse_ellips'] - merged['usgs_value']
+    # Use column names that match the actual codebase conventions
+    merged['wse_ellips_m'] = 10.5 - merged['rh']  # Antenna height - RH
+    merged['usgs_value_m_median'] = merged['reference_wl']
+    merged['residual'] = merged['wse_ellips_m'] - merged['usgs_value_m_median']
+    # Also keep lowercase versions for backward compatibility with some tests
+    merged['wse_ellips'] = merged['wse_ellips_m']
+    merged['usgs_value'] = merged['usgs_value_m_median']
 
     return merged
+
+
+# Fixtures for loading real sample data
+FIXTURES_DIR = Path(__file__).parent / 'fixtures'
+
+
+@pytest.fixture
+def real_gnssir_raw_data():
+    """Load real GNSS-IR raw data sample from fixtures."""
+    csv_path = FIXTURES_DIR / 'sample_gnssir_raw.csv'
+    if not csv_path.exists():
+        pytest.skip("Sample GNSS-IR raw data not found")
+    return pd.read_csv(csv_path, parse_dates=['date'])
+
+
+@pytest.fixture
+def real_subdaily_matched_data():
+    """Load real subdaily matched data sample from fixtures."""
+    csv_path = FIXTURES_DIR / 'sample_subdaily_matched.csv'
+    if not csv_path.exists():
+        pytest.skip("Sample subdaily matched data not found")
+    df = pd.read_csv(csv_path)
+    df['gnss_datetime'] = pd.to_datetime(df['gnss_datetime'], format='ISO8601')
+    df['bartlett_cove_datetime'] = pd.to_datetime(df['bartlett_cove_datetime'], format='ISO8601')
+    return df
+
+
+@pytest.fixture
+def real_comparison_data():
+    """Load real comparison data sample from fixtures."""
+    csv_path = FIXTURES_DIR / 'sample_comparison.csv'
+    if not csv_path.exists():
+        pytest.skip("Sample comparison data not found")
+    df = pd.read_csv(csv_path, parse_dates=['merge_date', 'date'])
+    df.set_index('merge_date', inplace=True)
+    return df
 
 
 # Markers for test categorization

@@ -209,3 +209,74 @@ class TestSeasonalAnalysis:
 
         # All rows should have a season assigned
         assert not df['season'].isna().any()
+
+
+class TestRealDataIntegration:
+    """Integration tests using real sample data."""
+
+    @pytest.mark.integration
+    def test_real_gnssir_data_loads(self, real_gnssir_raw_data):
+        """Test that real GNSS-IR data loads correctly."""
+        df = real_gnssir_raw_data
+
+        # Check expected columns exist
+        assert 'RH' in df.columns
+        assert 'date' in df.columns
+        assert 'Azim' in df.columns
+
+        # Check data types
+        assert len(df) > 0
+        assert df['RH'].dtype in [np.float64, np.float32]
+
+    @pytest.mark.integration
+    def test_real_subdaily_data_loads(self, real_subdaily_matched_data):
+        """Test that real subdaily matched data loads correctly."""
+        df = real_subdaily_matched_data
+
+        # Check expected columns exist
+        assert 'gnss_wse' in df.columns
+        assert 'bartlett_cove_wl' in df.columns
+        assert 'residual' in df.columns
+
+        # Check datetime parsing worked
+        assert pd.api.types.is_datetime64_any_dtype(df['gnss_datetime'])
+
+    @pytest.mark.integration
+    def test_real_comparison_data_loads(self, real_comparison_data):
+        """Test that real comparison data loads correctly."""
+        df = real_comparison_data
+
+        # Check expected columns exist
+        assert 'wse_ellips_m' in df.columns
+        assert 'usgs_value_m_median' in df.columns
+
+        # Check index is datetime
+        assert isinstance(df.index, pd.DatetimeIndex)
+
+    @pytest.mark.integration
+    def test_real_data_correlation(self, real_comparison_data):
+        """Test correlation calculation on real data."""
+        df = real_comparison_data
+
+        # Calculate correlation
+        corr = df['wse_ellips_m'].corr(df['usgs_value_m_median'])
+
+        # Real data should have some correlation (positive or negative)
+        assert not np.isnan(corr)
+        assert -1 <= corr <= 1
+
+    @pytest.mark.integration
+    def test_plot_with_real_data(self, real_comparison_data, temp_output_dir):
+        """Test creating comparison plot with real data."""
+        df = real_comparison_data
+        output_path = temp_output_dir / 'test_real_comparison.png'
+
+        try:
+            corr, demeaned_corr = create_comparison_plot(
+                df, 'GLBX', 2024, output_path
+            )
+
+            assert output_path.exists()
+            assert isinstance(corr, float)
+        finally:
+            plt.close('all')
