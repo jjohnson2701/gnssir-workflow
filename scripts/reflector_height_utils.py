@@ -1,7 +1,5 @@
-"""
-Reflector height utility module for GNSS-IR project.
-This module handles reflector height calculations and conversions.
-"""
+# ABOUTME: Reflector height to water surface elevation conversion utilities
+# ABOUTME: Transforms GNSS-IR RH measurements to ellipsoidal and demeaned heights
 
 import logging
 import numpy as np

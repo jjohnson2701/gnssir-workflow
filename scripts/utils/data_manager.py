@@ -1,7 +1,5 @@
-"""
-Data Manager module for GNSS-IR processing.
-Provides functions for downloading data from AWS S3 and managing local files.
-"""
+# ABOUTME: Data manager for RINEX file acquisition from AWS S3 and HTTP sources
+# ABOUTME: Handles downloads, file validation, and local storage management
 
 import os
 import logging
@@ -157,6 +155,48 @@ def download_s3_file_via_http(s3_bucket, s3_key, local_target_path):
     except Exception as e:
         logging.error(f"Error during HTTP download: {e}")
         return False
+
+def download_from_url(url, local_target_path):
+    """
+    Download a file from a URL to a local path.
+
+    Args:
+        url (str): Full URL to download from
+        local_target_path (str or Path): Local path to save the file
+
+    Returns:
+        bool: True if the download was successful, False otherwise
+    """
+    try:
+        if isinstance(local_target_path, str):
+            local_target_path = Path(local_target_path)
+
+        local_target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        logging.info(f"Downloading from URL: {url}")
+
+        response = requests.get(url, stream=True, timeout=120)
+
+        if response.status_code == 200:
+            with open(local_target_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            if local_target_path.exists() and local_target_path.stat().st_size > 0:
+                logging.info(f"Successfully downloaded file ({local_target_path.stat().st_size} bytes)")
+                return True
+            else:
+                logging.error(f"File downloaded but appears to be empty: {local_target_path}")
+                return False
+        else:
+            logging.error(f"HTTP download failed with status code {response.status_code}: {url}")
+            return False
+
+    except Exception as e:
+        logging.error(f"Error during URL download: {e}")
+        return False
+
 
 def check_file_exists(file_path, min_size_bytes=0):
     """

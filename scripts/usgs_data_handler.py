@@ -1,8 +1,5 @@
-"""
-USGS Data Handler module for GNSS-IR processing.
-This module handles finding nearby USGS gauges and fetching water level data.
-Updated to use dataretrieval.nwis instead of pynwis.
-"""
+# ABOUTME: USGS gauge discovery and water level data retrieval
+# ABOUTME: Uses dataretrieval.nwis to fetch instantaneous gage height values
 
 import logging
 import pandas as pd
@@ -507,7 +504,7 @@ def process_usgs_data(usgs_df, usgs_metadata, convert_to_meters=True):
                 try:
                     if pd.to_numeric(df[col], errors='coerce').notna().any():
                         potential_cols.append(col)
-                except:
+                except (ValueError, TypeError):
                     pass
             
             if potential_cols:

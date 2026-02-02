@@ -1,9 +1,5 @@
-"""
-Data Loading Functions for Enhanced GNSS-IR Dashboard
-
-This module contains all data loading and fetching functions used
-throughout the dashboard application.
-"""
+# ABOUTME: Data loading functions for Streamlit GNSS-IR dashboard
+# ABOUTME: Handles CSV loading, API fetching, and data caching
 
 import streamlit as st
 import pandas as pd
@@ -26,17 +22,38 @@ from dashboard_components.cache_manager import (
 )
 
 # Import required modules
+from dashboard_components.station_metadata import get_station_config
+
 try:
     from scripts.external_apis.noaa_coops import NOAACOOPSClient
     from scripts.external_apis.ndbc_client import NDBCClient
-    from scripts.utils.config_factory import ConfigFactory
-    from scripts.utils.external_data_config import (
-        get_preferred_coops_stations,
-        get_nearest_coops_station,
-        get_preferred_ndbc_buoys
-    )
 except ImportError as e:
-    print(f"Warning: Some modules not available for data loading: {e}")
+    print(f"Warning: External API modules not available: {e}")
+    NOAACOOPSClient = None
+    NDBCClient = None
+
+
+def get_preferred_coops_stations(station_id):
+    """Get preferred CO-OPS stations from station config."""
+    config = get_station_config(station_id)
+    if config:
+        coops_config = config.get('external_data_sources', {}).get('noaa_coops', {})
+        return coops_config.get('preferred_stations', [])
+    return []
+
+
+def get_nearest_coops_station(lat, lon):
+    """Find nearest CO-OPS station (placeholder - returns None if no preferred stations)."""
+    return None
+
+
+def get_preferred_ndbc_buoys(station_id):
+    """Get preferred NDBC buoys from station config."""
+    config = get_station_config(station_id)
+    if config:
+        ndbc_config = config.get('external_data_sources', {}).get('ndbc_buoys', {})
+        return ndbc_config.get('preferred_buoys', [])
+    return []
 
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -140,7 +157,7 @@ def load_available_stations():
 
 def get_station_coordinates(station_id):
     """Get station coordinates from configuration."""
-    config = ConfigFactory.get_station_config(station_id)
+    config = get_station_config(station_id)
     if config:
         lat = config.get('latitude', config.get('latitude_deg'))
         lon = config.get('longitude', config.get('longitude_deg'))

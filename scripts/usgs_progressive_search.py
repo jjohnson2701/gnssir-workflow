@@ -1,7 +1,5 @@
-"""
-USGS Progressive Search module for GNSS-IR processing.
-This module provides utilities to find USGS gauges using progressive radius search.
-"""
+# ABOUTME: Progressive radius search for nearby USGS stream gauges
+# ABOUTME: Expands search radius until suitable reference gauge is found
 
 import logging
 import pandas as pd

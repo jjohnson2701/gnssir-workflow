@@ -1,7 +1,5 @@
-"""
-GNSSREFL Executor module for GNSS-IR processing.
-This module wraps gnssrefl command-line tools execution.
-"""
+# ABOUTME: Executor for gnssrefl command-line tools (rinex2snr, gnssir, quickLook)
+# ABOUTME: Manages subprocess execution with logging, timeouts, and error handling
 
 import os
 import logging

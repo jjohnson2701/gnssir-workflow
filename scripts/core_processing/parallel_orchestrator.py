@@ -1,7 +1,5 @@
-"""
-Parallel Orchestrator module for GNSS-IR processing.
-Provides functionality for parallel processing of multiple days of GNSS-IR data.
-"""
+# ABOUTME: Parallel orchestrator for GNSS-IR processing across multiple days
+# ABOUTME: Distributes daily processing tasks across CPU cores using multiprocessing
 
 import logging
 import multiprocessing
@@ -10,7 +8,7 @@ from pathlib import Path
 # Import project modules using relative imports
 from .daily_gnssir_worker import process_single_day_wrapper
 from .workspace_setup import setup_gnssrefl_workspace
-from ..utils.visualizer import plot_annual_rh_timeseries
+from ..visualizer.timeseries import plot_annual_rh_timeseries
 
 def process_station_parallel(station_config, year, doy_range, tool_paths, project_root, refl_code_base, orbits_base, 
                            num_cores, results_handler=None, skip_options=None):

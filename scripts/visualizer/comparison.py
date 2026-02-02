@@ -1,6 +1,5 @@
-"""
-Module for generating comparison visualizations between GNSS-IR and USGS gauge data.
-"""
+# ABOUTME: Comparison visualizations between GNSS-IR and reference gauge data
+# ABOUTME: Creates time series plots, ribbon comparisons, and subdaily overlays
 
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any

@@ -23,6 +23,126 @@ from shapely.geometry import box
 GPS_L1_WAVELENGTH = 0.1903  # meters
 
 
+def render_cached_basemaps(metadata, transformer, station_x, station_y, gauge_x, gauge_y,
+                           region_bounds, cache_dir: Path) -> dict:
+    """
+    Pre-render the three map basemaps once and cache them as images.
+    Returns paths to the cached images and their extents.
+    """
+    from math import sqrt
+
+    cache_paths = {}
+
+    # Calculate buffer sizes based on station-gauge distance
+    gauge_distance_m = sqrt((gauge_x - station_x)**2 + (gauge_y - station_y)**2)
+
+    if gauge_distance_m < 1000:
+        buffer_wide = 2500
+        zoom_level = 14
+    elif gauge_distance_m < 8000:
+        buffer_wide = 5000
+        zoom_level = 12
+    elif gauge_distance_m < 15000:
+        buffer_wide = 7500
+        zoom_level = 11
+    else:
+        buffer_wide = 30000
+        zoom_level = 9
+
+    outer_refl_dist = metadata.get('outer_reflection_dist', 230)
+    outer_fresnel_r = metadata.get('outer_fresnel_radius', 5)
+    buffer_close = int(outer_refl_dist + outer_fresnel_r + 20)
+
+    # Store geometry info
+    cache_paths['buffer_wide'] = buffer_wide
+    cache_paths['buffer_close'] = buffer_close
+    cache_paths['zoom_level'] = zoom_level
+
+    # === Render Regional Overview (CartoDB Positron) ===
+    print("  Caching regional overview basemap...")
+    fig_coast, ax_coast = plt.subplots(figsize=(8, 8))
+
+    reg_west, reg_east = region_bounds['west'], region_bounds['east']
+    reg_south, reg_north = region_bounds['south'], region_bounds['north']
+    ec_x_min, ec_y_min = transformer.transform(reg_west, reg_south)
+    ec_x_max, ec_y_max = transformer.transform(reg_east, reg_north)
+
+    ax_coast.set_xlim(ec_x_min, ec_x_max)
+    ax_coast.set_ylim(ec_y_min, ec_y_max)
+
+    try:
+        ctx.add_basemap(ax_coast, source=ctx.providers.CartoDB.Positron, zoom=7)
+    except Exception:
+        ax_coast.set_facecolor('#c6e2ff')
+
+    ax_coast.set_aspect('equal')
+    ax_coast.axis('off')
+
+    coast_path = cache_dir / 'basemap_coast.png'
+    fig_coast.savefig(coast_path, dpi=100, bbox_inches='tight', pad_inches=0, facecolor='white')
+    plt.close(fig_coast)
+
+    cache_paths['coast'] = coast_path
+    cache_paths['coast_extent'] = [ec_x_min, ec_x_max, ec_y_min, ec_y_max]
+
+    # === Render Regional Context (Esri WorldImagery) ===
+    print("  Caching regional context basemap...")
+    fig_map, ax_map = plt.subplots(figsize=(10, 10))
+
+    center_x = (station_x + gauge_x) / 2
+    center_y = (station_y + gauge_y) / 2
+
+    ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
+    ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
+
+    try:
+        ctx.add_basemap(ax_map, source=ctx.providers.Esri.WorldImagery, zoom=zoom_level)
+    except Exception:
+        ax_map.set_facecolor('lightblue')
+
+    ax_map.set_aspect('equal')
+    ax_map.axis('off')
+
+    map_path = cache_dir / 'basemap_regional.png'
+    fig_map.savefig(map_path, dpi=100, bbox_inches='tight', pad_inches=0)
+    plt.close(fig_map)
+
+    cache_paths['regional'] = map_path
+    cache_paths['regional_extent'] = [center_x - buffer_wide, center_x + buffer_wide,
+                                       center_y - buffer_wide, center_y + buffer_wide]
+    cache_paths['center_x'] = center_x
+    cache_paths['center_y'] = center_y
+
+    # === Render Fresnel Zone Close-up (Esri WorldImagery high zoom) ===
+    print("  Caching Fresnel zone basemap...")
+    fig_sat, ax_sat = plt.subplots(figsize=(12, 12))
+
+    ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
+    ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
+
+    try:
+        ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom='auto')
+    except Exception:
+        try:
+            ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
+        except Exception:
+            ax_sat.set_facecolor('lightblue')
+
+    ax_sat.set_aspect('equal')
+    ax_sat.axis('off')
+
+    sat_path = cache_dir / 'basemap_fresnel.png'
+    fig_sat.savefig(sat_path, dpi=100, bbox_inches='tight', pad_inches=0)
+    plt.close(fig_sat)
+
+    cache_paths['fresnel'] = sat_path
+    cache_paths['fresnel_extent'] = [station_x - buffer_close, station_x + buffer_close,
+                                      station_y - buffer_close, station_y + buffer_close]
+
+    print("  Basemap caching complete.")
+    return cache_paths
+
+
 def calculate_fresnel_radius(reflector_height: float, elevation_deg: float) -> float:
     """
     Calculate first Fresnel zone radius on reflecting surface.
@@ -234,11 +354,13 @@ def load_data(station: str, year: int, results_dir: Path):
 def create_frame(df_all, df_current, df_accumulated, df_filtered_out, ref_df, metadata,
                  frame_time, frame_num, total_frames, output_path,
                  start_time, end_time, vmin_wl, vmax_wl, transformer,
-                 station_x, station_y, gauge_x, gauge_y, region_bounds):
+                 station_x, station_y, gauge_x, gauge_y, region_bounds,
+                 cached_basemaps=None):
     """Create a single frame with regional context + satellite overlay."""
 
     # Three-panel bottom layout: Regional Overview | Regional | Fresnel Zone
-    fig = plt.figure(figsize=(22, 10))
+    # Reduced from 22x10 to 18x8 for smaller GIF size
+    fig = plt.figure(figsize=(18, 8))
     gs = fig.add_gridspec(2, 3, height_ratios=[0.8, 1.6], width_ratios=[0.8, 1, 1.2],
                           hspace=0.2, wspace=0.08,
                           top=0.92, bottom=0.05, left=0.03, right=0.97)
@@ -330,11 +452,16 @@ def create_frame(df_all, df_current, df_accumulated, df_filtered_out, ref_df, me
     ax_coast.set_xlim(ec_x_min, ec_x_max)
     ax_coast.set_ylim(ec_y_min, ec_y_max)
 
-    # Use CartoDB Positron for clean map with state boundaries
-    try:
-        ctx.add_basemap(ax_coast, source=ctx.providers.CartoDB.Positron, zoom=7)
-    except:
-        ax_coast.set_facecolor('#c6e2ff')
+    # Use cached basemap if available, otherwise fetch
+    if cached_basemaps and 'coast' in cached_basemaps:
+        coast_img = plt.imread(cached_basemaps['coast'])
+        ext = cached_basemaps['coast_extent']
+        ax_coast.imshow(coast_img, extent=ext, aspect='auto', zorder=0)
+    else:
+        try:
+            ctx.add_basemap(ax_coast, source=ctx.providers.CartoDB.Positron, zoom=7)
+        except Exception:
+            ax_coast.set_facecolor('#c6e2ff')
 
     # Add state labels
     state_labels = {
@@ -402,10 +529,16 @@ def create_frame(df_all, df_current, df_accumulated, df_filtered_out, ref_df, me
     ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
     ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
 
-    try:
-        ctx.add_basemap(ax_map, source=ctx.providers.Esri.WorldImagery, zoom=zoom_level)
-    except:
-        ax_map.set_facecolor('lightblue')
+    # Use cached basemap if available, otherwise fetch
+    if cached_basemaps and 'regional' in cached_basemaps:
+        regional_img = plt.imread(cached_basemaps['regional'])
+        ext = cached_basemaps['regional_extent']
+        ax_map.imshow(regional_img, extent=ext, aspect='auto', zorder=0)
+    else:
+        try:
+            ctx.add_basemap(ax_map, source=ctx.providers.Esri.WorldImagery, zoom=zoom_level)
+        except Exception:
+            ax_map.set_facecolor('lightblue')
 
     # Scaled Fresnel zone indicator (scale with buffer size)
     fresnel_indicator_radius = min(200, buffer_wide * 0.08)  # Scale with map size
@@ -453,19 +586,22 @@ def create_frame(df_all, df_current, df_accumulated, df_filtered_out, ref_df, me
     ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
     ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
 
-    try:
-        # Auto-calculate zoom for the actual Fresnel zone extent
-        # For GLBX: ~250m area (outer reflection distance)
-        ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom='auto')
-    except Exception as e:
-        print(f"Warning: Could not load Fresnel zone basemap at zoom 18: {e}")
+    # Use cached basemap if available, otherwise fetch
+    if cached_basemaps and 'fresnel' in cached_basemaps:
+        fresnel_img = plt.imread(cached_basemaps['fresnel'])
+        ext = cached_basemaps['fresnel_extent']
+        ax_sat.imshow(fresnel_img, extent=ext, aspect='auto', zorder=0)
+    else:
         try:
-            # Fallback to zoom=17 if 18 is not available
-            ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
-            print("  Loaded with zoom=17 instead")
-        except Exception as e2:
-            print(f"  Fallback to zoom 17 also failed: {e2}")
-            ax_sat.set_facecolor('lightblue')
+            ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom='auto')
+        except Exception as e:
+            print(f"Warning: Could not load Fresnel zone basemap at zoom 18: {e}")
+            try:
+                ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
+                print("  Loaded with zoom=17 instead")
+            except Exception as e2:
+                print(f"  Fallback to zoom 17 also failed: {e2}")
+                ax_sat.set_facecolor('lightblue')
 
     # Draw Fresnel zone boundaries as annular rings at reflection distances
     for az_start, az_end in az_ranges:
@@ -552,13 +688,13 @@ def create_frame(df_all, df_current, df_accumulated, df_filtered_out, ref_df, me
     ax_sat.set_title(f'Reflection Distances ({inner_refl_dist:.0f}-{outer_refl_dist:.0f}m) | Current: {len(df_current)} pts',
                      fontsize=10)
 
-    plt.savefig(output_path, dpi=100, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=80, bbox_inches='tight', facecolor='white')
     plt.close()
 
 
 def create_animation(station: str, year: int, doy_start: int, doy_end: int,
                      results_dir: Path, output_path: Path,
-                     quality_filter: bool = True, fps: int = 4):
+                     quality_filter: bool = True, fps: int = 4, bin_hours: int = 12):
     """Create the full animation."""
 
     df, ref_df, metadata = load_data(station, year, results_dir)
@@ -621,18 +757,27 @@ def create_animation(station: str, year: int, doy_start: int, doy_end: int,
         ref_df = ref_df[(ref_df['datetime'] >= start_time - timedelta(days=1)) &
                         (ref_df['datetime'] <= end_time + timedelta(days=1))].copy()
 
-    bin_times = pd.date_range(start=start_time.floor('3h') + timedelta(hours=3),
-                              end=end_time.ceil('3h'), freq='3h')
+    bin_times = pd.date_range(start=start_time.floor(f'{bin_hours}h') + timedelta(hours=bin_hours),
+                              end=end_time.ceil(f'{bin_hours}h'), freq=f'{bin_hours}h')
 
     total_frames = len(bin_times)
     print(f"Creating {total_frames} frames...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+
+        # Pre-render and cache basemaps (huge speedup - only fetch tiles once)
+        print("Pre-rendering basemaps (this happens once)...")
+        cached_basemaps = render_cached_basemaps(
+            metadata, transformer, station_x, station_y, gauge_x, gauge_y,
+            region_bounds, tmpdir_path
+        )
+
         frame_paths = []
         df_accumulated = pd.DataFrame()
 
         for i, bin_end in enumerate(bin_times):
-            bin_start = bin_end - timedelta(hours=3)
+            bin_start = bin_end - timedelta(hours=bin_hours)
 
             # Get quality-passed points for current bin (these accumulate)
             df_current = df[(df['datetime'] >= bin_start) & (df['datetime'] < bin_end)].copy()
@@ -644,11 +789,12 @@ def create_animation(station: str, year: int, doy_start: int, doy_end: int,
 
             df_accumulated = pd.concat([df_accumulated, df_current], ignore_index=True)
 
-            frame_path = Path(tmpdir) / f"frame_{i:04d}.png"
+            frame_path = tmpdir_path / f"frame_{i:04d}.png"
             create_frame(df, df_current, df_accumulated, df_filtered_out, ref_df, metadata,
                         bin_end, i+1, total_frames, frame_path,
                         start_time, end_time, vmin_wl, vmax_wl,
-                        transformer, station_x, station_y, gauge_x, gauge_y, region_bounds)
+                        transformer, station_x, station_y, gauge_x, gauge_y, region_bounds,
+                        cached_basemaps=cached_basemaps)
             frame_paths.append(frame_path)
 
             if (i + 1) % 10 == 0:
@@ -656,9 +802,13 @@ def create_animation(station: str, year: int, doy_start: int, doy_end: int,
 
         print(f"Compiling GIF at {fps} fps...")
         images = [imageio.imread(str(fp)) for fp in frame_paths]
+        # Add pause frames at the end
         for _ in range(fps * 2):
             images.append(images[-1])
-        imageio.mimsave(str(output_path), images, fps=fps, loop=0)
+
+        # Use pillow plugin with optimization for smaller file size
+        imageio.mimsave(str(output_path), images, fps=fps, loop=0,
+                        plugin='pillow', optimize=True, quantizer='nq')
 
     print(f"Saved animation to {output_path}")
     return total_frames
@@ -673,6 +823,8 @@ def main():
     parser.add_argument('--results_dir', type=str,
                         default=str(Path(__file__).parent.parent / 'results_annual'))
     parser.add_argument('--fps', type=int, default=4)
+    parser.add_argument('--bin_hours', type=int, default=12,
+                        help='Time bin size in hours (default: 12)')
     parser.add_argument('--no_quality_filter', action='store_true')
     args = parser.parse_args()
 
@@ -681,7 +833,8 @@ def main():
 
     create_animation(args.station, args.year, args.doy_start, args.doy_end,
                     results_dir, output_path,
-                    quality_filter=not args.no_quality_filter, fps=args.fps)
+                    quality_filter=not args.no_quality_filter, fps=args.fps,
+                    bin_hours=args.bin_hours)
 
 
 if __name__ == '__main__':

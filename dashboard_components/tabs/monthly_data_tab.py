@@ -1,9 +1,5 @@
-"""
-Monthly Data Tab Implementation
-
-This module implements the consolidated monthly data tab that contains
-all visualization types with toggleable selection.
-"""
+# ABOUTME: Monthly data visualization tab with toggleable plot types
+# ABOUTME: Shows time series, correlations, and comparison plots by month
 
 import streamlit as st
 import pandas as pd

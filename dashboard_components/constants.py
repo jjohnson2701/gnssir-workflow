@@ -1,9 +1,5 @@
-"""
-Constants and Configuration for Enhanced GNSS-IR Dashboard
-
-This module contains all constants, color schemes, and configuration
-settings used throughout the dashboard.
-"""
+# ABOUTME: Constants and configuration for GNSS-IR dashboard styling
+# ABOUTME: Defines color schemes, plot settings, and theme configurations
 
 # Try to import publication theme colors
 try:

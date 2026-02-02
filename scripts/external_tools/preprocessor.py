@@ -1,7 +1,5 @@
-"""
-Preprocessor module for GNSS-IR processing.
-Provides functions for preprocessing RINEX files.
-"""
+# ABOUTME: RINEX format preprocessor using gfzrnx tool
+# ABOUTME: Converts RINEX 3 observation files to RINEX 2.11 format
 
 import os
 import logging

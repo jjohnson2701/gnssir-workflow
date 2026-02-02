@@ -1,7 +1,5 @@
-"""
-Time lag analyzer module for GNSS-IR project.
-This module handles time lag analysis between GNSS-IR and USGS gauge data.
-"""
+# ABOUTME: Time lag correlation analysis for GNSS-IR vs reference data
+# ABOUTME: Computes optimal lag using cross-correlation for tidal propagation delays
 
 import logging
 import numpy as np

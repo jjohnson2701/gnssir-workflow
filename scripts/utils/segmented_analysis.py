@@ -1,9 +1,5 @@
-"""
-Segmented correlation analysis utilities for GNSS-IR processing.
-
-This module provides functions to perform time-segmented correlation analysis
-between GNSS-IR reflector height data and USGS gauge data.
-"""
+# ABOUTME: Time-segmented correlation analysis for GNSS-IR vs reference data
+# ABOUTME: Computes monthly and seasonal statistics with filtering utilities
 
 import pandas as pd
 import numpy as np
@@ -36,7 +32,7 @@ def filter_by_segment(df: pd.DataFrame, date_criteria: Any) -> pd.DataFrame:
             # Try to convert the existing index to datetime
             try:
                 df.index = pd.to_datetime(df.index)
-            except:
+            except (ValueError, TypeError):
                 logging.error("Could not convert DataFrame index to datetime")
                 return df.iloc[0:0]  # Return empty DataFrame
     

@@ -1,20 +1,5 @@
-#!/usr/bin/env python3
-"""
-NOAA CO-OPS API Client for Tide Predictions and Water Level Data
-===============================================================
-
-Client for integrating NOAA Center for Operational Oceanographic Products 
-and Services (CO-OPS) data into GNSS-IR analysis workflows.
-
-Features:
-- Tide predictions from harmonic constituents
-- Water level observations from tide gauges
-- High/low tide times and heights
-- Station discovery and metadata retrieval
-- Multi-format data export (JSON, CSV, DataFrame)
-
-API Documentation: https://api.tidesandcurrents.noaa.gov/api/prod/
-"""
+# ABOUTME: NOAA CO-OPS API client for tide predictions and water level observations
+# ABOUTME: Retrieves verified/preliminary water levels, predictions, and station metadata
 
 import requests
 import pandas as pd

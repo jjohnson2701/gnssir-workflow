@@ -1,7 +1,5 @@
-"""
-USGS gauge finder module for GNSS-IR project.
-This module handles finding USGS gauges based on station configuration.
-"""
+# ABOUTME: USGS gauge finder based on station configuration
+# ABOUTME: Loads configured gauge IDs and validates against dataretrieval API
 
 import logging
 import json

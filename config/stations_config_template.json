@@ -1,0 +1,110 @@
+{
+  "_documentation": {
+    "description": "Template for configuring GNSS-IR stations. Copy this file to stations_config.json and customize.",
+    "reference_source_priority": "ERDDAP (primary_reference=true) > USGS > CO-OPS",
+    "required_fields": ["station_id_4char_lower", "ellipsoidal_height_m", "latitude_deg", "longitude_deg"],
+    "notes": "Remove this _documentation section from your actual config file"
+  },
+  "XXXX": {
+    "station_id_4char_lower": "xxxx",
+    "ellipsoidal_height_m": 0.0,
+    "latitude_deg": 0.0,
+    "longitude_deg": 0.0,
+    "gnssir_json_params_path": "config/xxxx.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "your-bucket",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/XXXX/XXXX{DOY_PADDED}0.{YY}o",
+
+    "usgs_comparison": {
+      "search_radius_km": 50,
+      "priority_param_codes": ["00065", "62610", "62611", "62620"],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "NAVD88",
+      "notes": "Set target_usgs_site to a specific USGS gauge ID, or leave null for auto-discovery"
+    },
+
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": false,
+        "search_radius_km": 100,
+        "preferred_stations": [],
+        "data_products": ["predictions", "water_level"],
+        "datum": "NAVD88",
+        "time_zone": "gmt",
+        "interval": "h",
+        "notes": "Leave preferred_stations empty for auto-discovery within search_radius_km"
+      },
+
+      "ndbc_buoys": {
+        "enabled": false,
+        "search_radius_km": 200,
+        "preferred_buoys": [],
+        "data_types": ["meteorological", "wave_spec"],
+        "update_interval_hours": 1,
+        "max_days_back": 45,
+        "notes": "NDBC provides meteorological data only, not water levels"
+      },
+
+      "erddap": {
+        "enabled": false,
+        "primary_reference": false,
+        "server": "AOOS",
+        "base_url": "https://erddap.aoos.org/erddap",
+        "dataset_id": "your_dataset_id",
+        "station_name": "Station Name",
+        "distance_km": 0.0,
+        "latitude": 0.0,
+        "longitude": 0.0,
+        "variables": {
+          "water_level": "sea_surface_height_above_geopotential_datum",
+          "time": "time"
+        },
+        "datum": "NAVD88",
+        "notes": "Set primary_reference=true to use ERDDAP as the main reference source"
+      }
+    }
+  },
+
+  "EXAMPLE_USGS_ONLY": {
+    "station_id_4char_lower": "exus",
+    "ellipsoidal_height_m": -15.0,
+    "latitude_deg": 38.0,
+    "longitude_deg": -122.0,
+    "gnssir_json_params_path": "config/exus.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "your-bucket",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/EXUS/EXUS{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "search_radius_km": 50,
+      "priority_param_codes": ["00065"],
+      "target_usgs_site": "11377100",
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "NAVD88"
+    }
+  },
+
+  "EXAMPLE_COOPS_ONLY": {
+    "station_id_4char_lower": "exco",
+    "ellipsoidal_height_m": 5.0,
+    "latitude_deg": 21.3,
+    "longitude_deg": -157.9,
+    "gnssir_json_params_path": "config/exco.json",
+    "reference_gauge_id": null,
+    "s3_bucket_name": "your-bucket",
+    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/EXCO/EXCO{DOY_PADDED}0.{YY}o",
+    "usgs_comparison": {
+      "target_usgs_site": null
+    },
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": true,
+        "search_radius_km": 50,
+        "preferred_stations": ["1612340"],
+        "datum": "MSL",
+        "time_zone": "gmt",
+        "interval": "6"
+      }
+    }
+  }
+}

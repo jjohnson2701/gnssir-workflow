@@ -1,11 +1,5 @@
-#!/usr/bin/env python3
-"""
-Run GNSS-IR Processing
-
-This script is a simplified entry point to run the GNSS-IR processing pipeline.
-It provides a clean interface for running the processing workflow with default
-or custom command-line arguments.
-"""
+# ABOUTME: Main entry point for GNSS-IR processing pipeline
+# ABOUTME: Orchestrates RINEX download, conversion, SNR extraction, and RH retrieval
 
 import sys
 import os

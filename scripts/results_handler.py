@@ -1,7 +1,5 @@
-"""
-Results Handler module for GNSS-IR processing.
-This module combines daily reflector height files into annual datasets.
-"""
+# ABOUTME: Results aggregator for daily GNSS-IR reflector height files
+# ABOUTME: Combines daily outputs into annual CSV datasets with quality metrics
 
 import os
 import glob

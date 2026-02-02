@@ -1,7 +1,5 @@
-"""
-Workspace setup module for GNSS-IR processing.
-Provides functions to setup the gnssrefl workspace directories.
-"""
+# ABOUTME: Workspace setup module for gnssrefl directory structure
+# ABOUTME: Creates REFL_CODE and ORBITS directories required by gnssrefl tools
 
 import logging
 import shutil

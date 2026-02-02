@@ -1,9 +1,5 @@
-"""
-Segmented correlation visualization utilities for GNSS-IR processing.
-
-This module provides visualization functions for segmented correlation
-analysis between GNSS-IR reflector height data and USGS gauge data.
-"""
+# ABOUTME: Segmented correlation visualization for monthly/seasonal analysis
+# ABOUTME: Creates correlation heatmaps, comparison grids, and time series by segment
 
 import matplotlib.pyplot as plt
 import numpy as np

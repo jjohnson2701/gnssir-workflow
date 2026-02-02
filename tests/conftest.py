@@ -64,6 +64,21 @@ def sample_station_config():
                 "usgs_gauge_stated_datum": "NAVD88",
                 "distance_km": 5.2
             }
+        },
+        "VALR": {
+            "name": "Volcano Hawaii",
+            "latitude": 21.3069,
+            "latitude_deg": 21.3069,
+            "longitude": -157.8583,
+            "longitude_deg": -157.8583,
+            "ellipsoidal_height_m": 2.456,
+            "external_data_sources": {
+                "noaa_coops": {
+                    "enabled": True,
+                    "preferred_stations": ["1612340"],
+                    "datum": "NAVD88"
+                }
+            }
         }
     }
 

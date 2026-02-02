@@ -1,9 +1,5 @@
-"""
-Yearly Residual Analysis Tab Implementation
-
-This module implements a comprehensive yearly view with residual/difference analysis
-between GNSS-IR and USGS water level measurements.
-"""
+# ABOUTME: Yearly residual analysis tab for GNSS-IR vs reference comparison
+# ABOUTME: Displays annual trends, bias patterns, and residual statistics
 
 import streamlit as st
 import pandas as pd

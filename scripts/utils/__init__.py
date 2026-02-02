@@ -1,1 +1,2 @@
-"""Utilities module for GNSS-IR processing."""
+# ABOUTME: Utility package for GNSS-IR processing support functions
+# ABOUTME: Contains data management, logging, visualization, and analysis helpers

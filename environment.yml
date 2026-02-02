@@ -1,0 +1,47 @@
+# ABOUTME: Conda environment specification for gnssir-workflow.
+# ABOUTME: Creates a complete environment with all dependencies.
+#
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate gnssir-workflow
+#
+# After creating the environment, install the package:
+#   pip install -e .              # Core only
+#   pip install -e .[dashboard]   # With Streamlit dashboard
+#   pip install -e .[all]         # Everything
+
+name: gnssir-workflow
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python version
+  - python>=3.9,<3.13
+
+  # Core scientific packages (conda versions often better optimized)
+  - numpy>=1.24.0
+  - pandas>=2.0.0
+  - scipy>=1.10.0
+  - matplotlib>=3.7.0
+
+  # Geospatial
+  - geopy>=2.4.0
+
+  # Network/API
+  - requests>=2.28.0
+  - boto3>=1.28.0
+
+  # Utilities
+  - tqdm>=4.65.0
+
+  # Development tools (optional, but helpful)
+  - pip
+  - pytest>=7.0.0
+
+  # Install remaining packages via pip
+  - pip:
+      - gnssrefl>=3.12.0
+      - dataretrieval>=1.0.0
+      # Install the workflow package itself in editable mode
+      # Run after environment creation: pip install -e .

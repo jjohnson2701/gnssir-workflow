@@ -1,16 +1,7 @@
-#!/usr/bin/env python3
+# ABOUTME: Multi-source GNSS-IR validation with USGS, CO-OPS, and NDBC data
+# ABOUTME: Integrates water level and environmental data for comprehensive analysis
 """
-Multi-Source GNSS-IR Comparison with External Data Integration
-============================================================
-
-Enhanced comparison module that integrates GNSS-IR data with multiple external sources:
-- USGS stream/tide gauge data (existing)
-- NOAA CO-OPS tide predictions and observations (new)
-- NDBC buoy meteorological and wave data (new)
-- Environmental correlation analysis (new)
-
-This module extends the existing usgs_comparison.py with multi-source
-validation and environmental context analysis.
+Multi-source comparison script for GNSS-IR validation.
 
 Usage:
     python scripts/multi_source_comparison.py --station FORA --year 2024 --doy_start 260 --doy_end 266
@@ -47,12 +38,20 @@ except ImportError:
     import usgs_data_handler
     import usgs_gauge_finder
 
+# Import station config (use dashboard_components.station_metadata)
 try:
-    from scripts.utils.config_factory import ConfigFactory
+    from dashboard_components.station_metadata import get_station_config
 except ImportError:
-    from utils.config_factory import ConfigFactory
+    # Fallback: load directly from JSON
+    import json
+    def get_station_config(station_id):
+        config_path = Path(__file__).parent.parent / "config" / "stations_config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                return json.load(f).get(station_id.upper())
+        return None
 
-# Import our new external APIs
+# Import our external APIs
 try:
     from scripts.external_apis.noaa_coops import NOAACOOPSClient
     from scripts.external_apis.ndbc_client import NDBCClient
@@ -60,10 +59,8 @@ except ImportError:
     from external_apis.noaa_coops import NOAACOOPSClient
     from external_apis.ndbc_client import NDBCClient
 
-try:
-    from scripts.environmental_analysis import EnvironmentalAnalyzer
-except ImportError:
-    from environmental_analysis import EnvironmentalAnalyzer
+# Environmental analyzer is optional (not yet implemented)
+EnvironmentalAnalyzer = None
 
 # Import visualization
 try:
@@ -100,7 +97,7 @@ class MultiSourceComparison:
         # Initialize API clients
         self.coops_client = NOAACOOPSClient()
         self.ndbc_client = NDBCClient()
-        self.env_analyzer = EnvironmentalAnalyzer(log_level)
+        self.env_analyzer = EnvironmentalAnalyzer(log_level) if EnvironmentalAnalyzer else None
         
         self.logger.info("Multi-source comparison system initialized")
     
@@ -185,7 +182,7 @@ class MultiSourceComparison:
             # Step 3: Load external data sources (if enabled)
             external_data = {}
             if include_external_sources:
-                station_config = ConfigFactory.get_station_config(station_name)
+                station_config = get_station_config(station_name)
                 if station_config:
                     external_data = self._load_external_data_sources(
                         station_config, year, doy_range
@@ -550,8 +547,13 @@ class MultiSourceComparison:
             Dictionary with environmental analysis results
         """
         self.logger.info("Performing environmental analysis")
-        
+
         try:
+            # Check if environmental analyzer is available
+            if self.env_analyzer is None:
+                self.logger.warning("Environmental analyzer not available (module not installed)")
+                return {'status': 'skipped', 'reason': 'EnvironmentalAnalyzer not available'}
+
             # Prepare environmental data for analyzer
             env_data_for_analysis = {}
             

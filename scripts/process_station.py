@@ -134,6 +134,24 @@ Examples:
     # Determine reference source
     ref_source = get_reference_source(station_config)
     logger.info(f"Primary reference source: {ref_source.upper()}")
+
+    if ref_source == 'none':
+        print()
+        print("="*70)
+        print("WARNING: No reference station configured for this station!")
+        print("="*70)
+        print()
+        print("To find and configure a reference station, run:")
+        print(f"  python scripts/find_reference_stations.py --station {args.station}")
+        print()
+        print("Then add the reference to config/stations_config.json under:")
+        print("  - 'usgs_comparison.target_usgs_site' for USGS gauges")
+        print("  - 'external_data_sources.noaa_coops' for CO-OPS tide gauges")
+        print("  - 'erddap' for ERDDAP data sources")
+        print()
+        print("Processing will continue, but Phase 2 (Reference Matching) will be skipped.")
+        print("="*70)
+
     print()
 
     # Track results
@@ -186,6 +204,13 @@ Examples:
                 '--year', str(args.year)
             ]
             results['comparison'] = run_command(cmd, "USGS Comparison")
+        elif ref_source == 'coops':
+            cmd = [
+                python_exe, str(script_dir / 'coops_comparison.py'),
+                '--station', args.station,
+                '--year', str(args.year)
+            ]
+            results['comparison'] = run_command(cmd, "CO-OPS Comparison")
         else:
             logger.warning(f"No reference source configured for {args.station}")
             results['comparison'] = False

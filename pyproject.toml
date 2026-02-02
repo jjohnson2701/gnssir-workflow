@@ -1,0 +1,146 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gnssir-workflow"
+version = "0.1.0"
+description = "Automated GNSS-IR water level processing and validation workflow"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Joel Johnson"}
+]
+keywords = [
+    "GNSS-IR",
+    "GNSS",
+    "interferometric reflectometry",
+    "water level",
+    "tide gauge",
+    "geodesy",
+    "remote sensing"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Hydrology",
+]
+
+dependencies = [
+    "gnssrefl>=3.12.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.7.0",
+    "boto3>=1.28.0",
+    "dataretrieval>=1.0.0",
+    "requests>=2.28.0",
+    "geopy>=2.4.0",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+dashboard = [
+    "streamlit>=1.30.0",
+    "contextily>=1.4.0",
+    "rasterio>=1.3.0",
+    "pyproj>=3.6.0",
+    "plotly>=5.18.0",
+]
+animation = [
+    "imageio>=2.31.0",
+    "pillow>=10.0.0",
+    "contextily>=1.4.0",
+    "pyproj>=3.6.0",
+    "geopandas>=0.14.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+all = [
+    "gnssir-workflow[dashboard,animation,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/jjohnson/gnssir-workflow"
+Documentation = "https://github.com/jjohnson/gnssir-workflow#readme"
+Repository = "https://github.com/jjohnson/gnssir-workflow"
+Issues = "https://github.com/jjohnson/gnssir-workflow/issues"
+
+[project.scripts]
+gnssir-process = "scripts.run_gnssir_processing:main"
+gnssir-animate = "scripts.create_polar_animation:main"
+gnssir-compare = "scripts.usgs_comparison:main"
+gnssir-coops = "scripts.coops_comparison:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scripts*", "dashboard_components*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+exclude = '''
+/(
+    \.git
+    | \.venv
+    | data
+    | results_annual
+    | gnssrefl_data_workspace
+    | logs
+)/
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests",
+    "api: Tests requiring API access",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = [
+    "data/",
+    "results_annual/",
+    "gnssrefl_data_workspace/",
+    "logs/",
+]
+
+[tool.flake8]
+max-line-length = 100
+exclude = [
+    ".git",
+    "__pycache__",
+    "data",
+    "results_annual",
+    "gnssrefl_data_workspace",
+    "logs",
+]
+ignore = ["E203", "W503"]

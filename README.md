@@ -16,7 +16,6 @@ Python-based workflow for GNSS Interferometric Reflectometry (GNSS-IR) data proc
 - **USGS**: Stream/tide gauges with water level data (NAVD88/NGVD29/MSL)
 - **NOAA CO-OPS**: Tide predictions and water level observations
 - **NOAA ERDDAP**: Regional servers (AOOS, PacIOOS, SECOORA) with water level sensors
-- **NDBC**: Meteorological and wave measurements from buoys
 
 ## Project Structure
 
@@ -26,9 +25,11 @@ Python-based workflow for GNSS Interferometric Reflectometry (GNSS-IR) data proc
 │   ├── stations_config.json     # Station definitions and reference sources
 │   └── tool_paths.json          # External tool paths
 ├── scripts/
-│   ├── run_gnssir_processing.py # Main orchestrator for full-year processing
-│   ├── usgs_comparison.py       # USGS comparison with time lag analysis
 │   ├── process_station.py       # Unified station processing workflow
+│   ├── run_gnssir_processing.py # Core GNSS-IR processing orchestrator
+│   ├── usgs_comparison.py       # USGS gauge comparison with time lag analysis
+│   ├── coops_comparison.py      # CO-OPS tide gauge comparison (coastal)
+│   ├── generate_erddap_matched.py # ERDDAP data source matching
 │   ├── find_reference_stations.py # Reference station discovery
 │   ├── core_processing/         # Core processing modules
 │   ├── external_apis/           # NOAA CO-OPS and NDBC clients
@@ -56,10 +57,19 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Each station requires configuration in `config/stations_config.json`:
+Each station requires configuration in `config/stations_config.json`. Reference sources are auto-detected based on which sections are configured:
 
 ```json
 {
+  "FORA": {
+    "station_id_4char_lower": "fora",
+    "ellipsoidal_height_m": 5.123,
+    "latitude_deg": 36.1833,
+    "longitude_deg": -75.7467,
+    "usgs_comparison": {
+      "target_usgs_site": "02084472"
+    }
+  },
   "GLBX": {
     "station_id_4char_lower": "glbx",
     "ellipsoidal_height_m": -12.535,
@@ -72,23 +82,40 @@ Each station requires configuration in `config/stations_config.json`:
         "station_name": "Bartlett Cove, AK"
       }
     }
+  },
+  "VALR": {
+    "station_id_4char_lower": "valr",
+    "ellipsoidal_height_m": 2.456,
+    "latitude_deg": 21.3069,
+    "longitude_deg": -157.8583,
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": ["1612340"],
+        "datum": "NAVD88"
+      }
+    }
   }
 }
 ```
+
+**Reference Source Priority**: ERDDAP → USGS → CO-OPS. If no reference is configured, CO-OPS auto-discovers the nearest tide gauge within 50km.
 
 **Configured Stations**: FORA (North Carolina), GLBX (Alaska), MDAI (Maryland), VALR (Hawaii)
 
 ## Usage
 
 ```bash
-# Process GNSS data for a date range
-python scripts/run_gnssir_processing.py --station GLBX --year 2024 --doy_start 1 --doy_end 31 --num_cores 8
-
-# Run unified processing workflow
+# Run unified processing workflow (recommended)
 python scripts/process_station.py --station GLBX --year 2024 --doy_start 1 --doy_end 31
 
-# USGS comparison with time lag analysis
+# Process GNSS data only (Phase 1)
+python scripts/run_gnssir_processing.py --station GLBX --year 2024 --doy_start 1 --doy_end 31 --num_cores 8
+
+# Reference comparison scripts (Phase 2) - called automatically by process_station.py
 python scripts/usgs_comparison.py --station FORA --year 2024 --max_lag_days 5
+python scripts/coops_comparison.py --station VALR --year 2024
+python scripts/generate_erddap_matched.py --station GLBX --year 2024
 
 # Launch dashboard
 streamlit run dashboard.py
@@ -119,9 +146,14 @@ Tests use real sample data from GLBX (ERDDAP), MDAI (USGS), and VALR (CO-OPS) st
 ## Adding a New Station
 
 1. Add station info to `config/stations_config.json` (coordinates, antenna height)
-2. Run `find_reference_stations.py` to identify nearby reference sources
-3. Add recommended reference configuration to the station's config
+2. Run `find_reference_stations.py` to identify nearby USGS, CO-OPS, and ERDDAP sources
+3. Add recommended reference configuration to the station's config:
+   - For USGS gauges: add `usgs_comparison.target_usgs_site`
+   - For CO-OPS tide gauges: add `external_data_sources.noaa_coops.preferred_stations`
+   - For ERDDAP: add `external_data_sources.erddap` with server and dataset info
 4. Run processing pipeline
+
+**Note**: For coastal stations without configured references, CO-OPS comparison will auto-discover the nearest tide gauge within 50km.
 
 ## Environment Variables
 

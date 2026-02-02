@@ -1,6 +1,5 @@
-"""
-Module for analyzing time lag between GNSS-IR and USGS gauge data.
-"""
+# ABOUTME: Time lag analysis between GNSS-IR and reference gauge data
+# ABOUTME: Computes cross-correlation and optimal lag for tidal propagation delays
 
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any

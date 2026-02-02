@@ -1,9 +1,5 @@
-"""
-Overview Tab Implementation
-
-This module implements the overview tab showing data source availability
-and basic statistics.
-"""
+# ABOUTME: Overview tab showing data availability and summary statistics
+# ABOUTME: Displays station info, data counts, and reference source details
 
 import streamlit as st
 import pandas as pd

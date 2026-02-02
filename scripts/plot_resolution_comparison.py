@@ -65,14 +65,21 @@ def plot_resolution_comparison(
     else:
         raise ValueError(f"No GNSS demeaned column found")
 
-    if 'usgs_wl_dm' in df.columns:
-        ref_dm_col = 'usgs_wl_dm'
-    elif 'coops_dm' in df.columns:
-        ref_dm_col = 'coops_dm'
-    elif 'bartlett_dm' in df.columns:
-        ref_dm_col = 'bartlett_dm'
-    else:
-        raise ValueError(f"No reference demeaned column found")
+    # Find reference demeaned column (various naming conventions)
+    ref_dm_candidates = ['usgs_wl_dm', 'coops_dm', 'bartlett_dm', 'bartlett_cove_dm']
+    ref_dm_col = None
+    for col in ref_dm_candidates:
+        if col in df.columns:
+            ref_dm_col = col
+            break
+    # Also check for any column ending with '_dm' that's not gnss
+    if ref_dm_col is None:
+        for col in df.columns:
+            if col.endswith('_dm') and 'gnss' not in col.lower():
+                ref_dm_col = col
+                break
+    if ref_dm_col is None:
+        raise ValueError(f"No reference demeaned column found. Available: {list(df.columns)}")
 
     print(f"Loaded {len(df)} points, using {gnss_dm_col} vs {ref_dm_col}")
 
@@ -123,17 +130,20 @@ def plot_resolution_comparison(
     colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(stats)))
 
     bars = ax_corr.bar(names, corrs, color=colors, edgecolor='black', linewidth=0.5)
-    for i, (bar, s) in enumerate(zip(bars, stats)):
-        height = bar.get_height()
-        ax_corr.text(bar.get_x() + bar.get_width()/2, height + 0.01,
-                    f'{s["corr"]:.3f}', ha='center', va='bottom', fontsize=9)
 
     # Dynamic y-axis based on actual correlation range - with padding for labels
     min_corr = min(corrs)
     max_corr = max(corrs)
-    y_range = max_corr - min_corr
-    y_min = max(0, min_corr - 0.15 * y_range)  # 15% padding below
-    y_max = min(1.0, max_corr + 0.15 * y_range)  # 15% padding above for labels
+    y_range = max(max_corr - min_corr, 0.05)  # Ensure minimum range of 0.05
+    y_min = max(0, min_corr - 0.2 * y_range)  # 20% padding below
+    y_max = min(1.0, max_corr + 0.3 * y_range)  # 30% padding above for labels
+
+    # Add text labels with offset relative to y-range
+    text_offset = 0.05 * (y_max - y_min)
+    for i, (bar, s) in enumerate(zip(bars, stats)):
+        height = bar.get_height()
+        ax_corr.text(bar.get_x() + bar.get_width()/2, height + text_offset,
+                    f'{s["corr"]:.3f}', ha='center', va='bottom', fontsize=9)
 
     ax_corr.axhline(0.9, color='gray', linestyle='--', alpha=0.5, label='r=0.9')
     ax_corr.set_ylabel('Correlation (r)', fontsize=12)

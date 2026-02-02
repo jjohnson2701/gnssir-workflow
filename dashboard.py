@@ -50,7 +50,6 @@ from dashboard_components.tabs import (
     render_subdaily_tab,
     render_yearly_residual_tab,
     render_diagnostics_tab,
-    ADVANCED_TABS_AVAILABLE
 )
 
 # Import station metadata helper

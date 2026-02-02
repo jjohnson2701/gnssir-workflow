@@ -1,20 +1,5 @@
-#!/usr/bin/env python3
-"""
-NDBC Buoy Data Client for Wave Height and Wind Data
-==================================================
-
-Client for integrating NOAA National Data Buoy Center (NDBC) data 
-into GNSS-IR analysis workflows.
-
-Features:
-- Wave height measurements from buoys and coastal stations
-- Wind speed and direction data
-- Atmospheric pressure and temperature
-- Spectral wave analysis data
-- Station discovery and metadata retrieval
-
-Data Access: https://www.ndbc.noaa.gov/data/realtime2/
-"""
+# ABOUTME: NOAA NDBC buoy data client for wave height and meteorological data
+# ABOUTME: Retrieves real-time and historical buoy measurements for GNSS-IR correlation
 
 import requests
 import pandas as pd

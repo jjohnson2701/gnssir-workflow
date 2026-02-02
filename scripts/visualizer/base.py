@@ -1,7 +1,5 @@
-"""
-Base module for GNSS-IR visualization.
-Contains common imports and utility functions used by other visualization modules.
-"""
+# ABOUTME: Base visualization module with shared utilities and constants
+# ABOUTME: Provides column finding, output directory management, and plot styling
 
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any
@@ -138,15 +136,26 @@ def add_summary_textbox(
     except Exception as e:
         logging.warning(f"Could not add summary text: {e}")
 
-# Color scheme definitions
+# Color scheme definitions - professional and accessible hex colors
 PLOT_COLORS = {
-    'gnssir': 'blue',
-    'usgs': 'red',
-    'trend': 'red',
-    'reference': 'red',
-    'secondary': 'green',
-    'highlight': 'orange',
-    'grid': 'gray'
+    'gnssir': '#2E86AB',      # Professional blue
+    'gnss': '#2E86AB',        # Alias for gnssir
+    'usgs': '#A23B72',        # Deep magenta (more readable than red)
+    'coops': '#1B998B',       # Teal for NOAA CO-OPS
+    'ndbc': '#F18F01',        # Orange for NDBC buoys
+    'trend': '#A23B72',       # Same as usgs
+    'reference': '#A23B72',   # Same as usgs
+    'secondary': '#1B998B',   # Teal
+    'highlight': '#F18F01',   # Orange for highlights
+    'correlation': '#F18F01', # Orange for correlation highlights
+    'scatter': '#7B2CBF',     # Purple for scatter plots
+    'grid': '#E5E5E5',        # Light gray for grid
+    'text': '#333333',        # Dark gray for text
+    'background': '#FFFFFF',  # White background
+    'quality_good': '#2D9A6B',   # Green for good quality
+    'quality_poor': '#E63946',   # Red for poor quality
+    'quality_medium': '#F77F00', # Orange for medium quality
+    'tide': '#4ECDC4',        # Aqua for tide data
 }
 
 # Plot style configurations

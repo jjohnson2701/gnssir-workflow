@@ -14,10 +14,10 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 
 from visualizer.comparison_plots import (
-    ENHANCED_COLORS,
     create_comparison_plot,
     detect_outliers_and_anomalies,
 )
+from visualizer.base import PLOT_COLORS
 
 
 class TestColorScheme:
@@ -26,11 +26,12 @@ class TestColorScheme:
     @pytest.mark.unit
     def test_colors_defined(self):
         """Test that required colors are defined."""
-        required_colors = ['gnss', 'usgs', 'correlation', 'grid', 'text']
+        # PLOT_COLORS uses 'gnssir' not 'gnss'
+        required_colors = ['gnssir', 'reference', 'grid']
 
         for color_name in required_colors:
-            assert color_name in ENHANCED_COLORS
-            assert ENHANCED_COLORS[color_name].startswith('#')
+            assert color_name in PLOT_COLORS
+            assert PLOT_COLORS[color_name].startswith('#')
 
     @pytest.mark.unit
     def test_colors_valid_hex(self):
@@ -38,7 +39,7 @@ class TestColorScheme:
         import re
         hex_pattern = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
-        for color_name, color_value in ENHANCED_COLORS.items():
+        for color_name, color_value in PLOT_COLORS.items():
             assert hex_pattern.match(color_value), f"Invalid hex color: {color_name}={color_value}"
 
 

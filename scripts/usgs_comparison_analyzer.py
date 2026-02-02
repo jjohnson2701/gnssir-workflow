@@ -1,7 +1,5 @@
-"""
-USGS Comparison Analyzer module for GNSS-IR processing.
-This module provides tools to compare GNSS-IR reflector height data with USGS gauge data.
-"""
+# ABOUTME: Statistical comparison analyzer for GNSS-IR vs USGS gauge data
+# ABOUTME: Computes correlations, RMSE, bias, and temporal matching statistics
 
 import os
 import sys

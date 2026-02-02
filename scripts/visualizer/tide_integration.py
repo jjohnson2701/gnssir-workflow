@@ -1,12 +1,5 @@
-"""
-Module for tide prediction and integration with GNSS-IR analysis.
-
-This module provides functionality to:
-1. Fetch tide prediction data from NOAA CO-OPS or generate synthetic predictions
-2. Process and align tide data with GNSS-IR and USGS time series
-3. Provide utilities for tide analysis and visualization
-4. Generate comparison plots between tide predictions and GNSS-IR/USGS data
-"""
+# ABOUTME: Tide prediction integration for GNSS-IR validation
+# ABOUTME: Fetches NOAA CO-OPS predictions and calculates tide residuals
 
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any
@@ -421,7 +414,7 @@ def calculate_tide_residuals(
                 
                 # Get interpolated tide prediction
                 tide_predictions[i] = resampled_tide.loc[closest_time, tide_wl_col]
-            except:
+            except (KeyError, IndexError, ValueError):
                 # If interpolation fails, leave as NaN
                 pass
         

@@ -1,10 +1,5 @@
-"""
-GNSS-IR Visualizer Package
-
-This package provides visualization functionality for GNSS-IR processing,
-including reflector height time series, comparison with USGS gauge data,
-and advanced visualizations with auxiliary data.
-"""
+# ABOUTME: Visualization package for GNSS-IR analysis and validation
+# ABOUTME: Provides time series, comparison, tide, and dashboard plot functions
 
 from .timeseries import plot_annual_rh_timeseries
 from .comparison import plot_comparison_timeseries, plot_ribbon_comparison, plot_subdaily_ribbon_comparison
@@ -17,16 +12,6 @@ from .comparison_plots import (
     run_comprehensive_correlation_investigation
 )
 from .lag_analyzer import calculate_optimal_time_lag, plot_lag_correlation, plot_lag_adjusted_comparison
-from .meteo_integration import (
-    find_nearest_ndbc_stations, find_nearest_metar_stations,
-    get_ndbc_wind_data, get_metar_wind_data,
-    process_wind_data, calculate_wind_forcing
-)
-from .advanced_viz import (
-    plot_wse_wind_comparison,
-    plot_quality_metrics_vs_residuals,
-    plot_daily_wl_change_correlation
-)
 from .tide_integration import (
     find_nearest_tide_stations,
     get_noaa_tide_predictions,
@@ -58,7 +43,7 @@ __all__ = [
     'plot_comparison_timeseries',
     'plot_ribbon_comparison',
     'plot_subdaily_ribbon_comparison',
-    
+
     # Enhanced comparison and diagnostics
     'create_comparison_plot',
     'create_quality_diagnostic_plot',
@@ -66,25 +51,12 @@ __all__ = [
     'detect_outliers_and_anomalies',
     'create_spring_investigation_plot',
     'run_comprehensive_correlation_investigation',
-    
+
     # Time lag analysis
     'calculate_optimal_time_lag',
     'plot_lag_correlation',
     'plot_lag_adjusted_comparison',
-    
-    # Meteorological data integration
-    'find_nearest_ndbc_stations',
-    'find_nearest_metar_stations',
-    'get_ndbc_wind_data',
-    'get_metar_wind_data',
-    'process_wind_data',
-    'calculate_wind_forcing',
-    
-    # Advanced visualizations
-    'plot_wse_wind_comparison',
-    'plot_quality_metrics_vs_residuals',
-    'plot_daily_wl_change_correlation',
-    
+
     # Tide integration
     'find_nearest_tide_stations',
     'get_noaa_tide_predictions',
@@ -92,13 +64,13 @@ __all__ = [
     'get_high_low_tide_times',
     'calculate_tide_residuals',
     'plot_subdaily_rh_vs_tide',
-    
+
     # Segmented correlation analysis
     'plot_segment_correlations',
     'plot_segment_comparison_grid',
     'plot_time_series_by_segment',
     'plot_heatmap_correlation_matrix',
-    
+
     # Dashboard plots
     'create_calendar_heatmap',
     'create_monthly_box_plots',

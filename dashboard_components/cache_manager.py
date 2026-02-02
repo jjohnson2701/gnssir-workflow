@@ -1,9 +1,5 @@
-"""
-Cache Management for Enhanced GNSS-IR Dashboard
-
-This module implements intelligent caching strategies to improve dashboard
-performance by avoiding redundant API calls and expensive computations.
-"""
+# ABOUTME: Cache management for dashboard performance optimization
+# ABOUTME: Provides file-based and Streamlit session caching utilities
 
 import streamlit as st
 import pandas as pd

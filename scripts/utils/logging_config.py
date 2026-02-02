@@ -1,7 +1,5 @@
-"""
-Logging configuration module for GNSS-IR processing.
-Provides functions to setup logging for main application and day-specific processing.
-"""
+# ABOUTME: Logging configuration for GNSS-IR processing pipeline
+# ABOUTME: Sets up main and day-specific loggers with console and file handlers
 
 import logging
 from pathlib import Path

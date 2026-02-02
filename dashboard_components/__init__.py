@@ -1,7 +1,5 @@
-"""
-ABOUTME: Dashboard Components Package
-ABOUTME: Modular components for the GNSS-IR dashboard.
-"""
+# ABOUTME: Dashboard components package for Streamlit GNSS-IR interface
+# ABOUTME: Exports data loaders, analyzers, and station metadata utilities
 
 from .data_loader import (
     load_station_data,

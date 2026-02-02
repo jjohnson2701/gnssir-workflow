@@ -1,9 +1,5 @@
-"""
-Analysis Runner for Enhanced GNSS-IR Dashboard
-
-This module contains functions for running various analyses including
-multi-source comparison and environmental analysis.
-"""
+# ABOUTME: Analysis runner for dashboard background computations
+# ABOUTME: Executes multi-source comparisons and environmental analysis tasks
 
 import streamlit as st
 import sys
@@ -16,11 +12,14 @@ sys.path.append(str(project_root))
 # Try to import analysis modules
 try:
     from scripts.multi_source_comparison import MultiSourceComparison
-    from scripts.environmental_analysis import EnvironmentalAnalyzer
     MULTI_SOURCE_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Multi-source analysis not available: {e}")
     MULTI_SOURCE_AVAILABLE = False
+
+# Environmental analyzer is not yet implemented
+EnvironmentalAnalyzer = None
+ENVIRONMENTAL_ANALYSIS_AVAILABLE = False
 
 
 @st.cache_data
@@ -45,9 +44,9 @@ def run_multi_source_analysis(station_id, year, doy_range=None):
 
 def run_environmental_analysis(gnssir_data, environmental_data, station_id):
     """Run environmental impact analysis on GNSS-IR data."""
-    if not MULTI_SOURCE_AVAILABLE:
+    if not ENVIRONMENTAL_ANALYSIS_AVAILABLE or EnvironmentalAnalyzer is None:
         return None
-    
+
     try:
         analyzer = EnvironmentalAnalyzer()
         results = analyzer.analyze_environmental_effects(

@@ -178,24 +178,34 @@ class TestExternalTools:
     @pytest.mark.integration
     def test_gfzrnx_available(self, config_dir):
         """Test that gfzrnx tool is available."""
-        tool_paths_file = config_dir / 'tool_paths.json'
-        if not tool_paths_file.exists():
-            pytest.skip("tool_paths.json not found")
+        import shutil
 
-        with open(tool_paths_file) as f:
-            tool_paths = json.load(f)
-
-        gfzrnx_path = tool_paths.get('gfzrnx')
-        if not gfzrnx_path:
-            pytest.skip("gfzrnx path not configured")
-
-        if Path(gfzrnx_path).exists():
-            result = subprocess.run([gfzrnx_path, '-h'],
-                                    capture_output=True, text=True, timeout=10)
-            # gfzrnx returns 0 for help
-            assert result.returncode in [0, 1]
+        # First check if gfzrnx is in PATH
+        gfzrnx_in_path = shutil.which('gfzrnx')
+        if gfzrnx_in_path:
+            gfzrnx_path = gfzrnx_in_path
         else:
-            pytest.skip(f"gfzrnx not found at {gfzrnx_path}")
+            # Fall back to tool_paths.json config
+            tool_paths_file = config_dir / 'tool_paths.json'
+            if not tool_paths_file.exists():
+                pytest.skip("gfzrnx not in PATH and tool_paths.json not found")
+
+            with open(tool_paths_file) as f:
+                tool_paths = json.load(f)
+
+            # Config uses 'gfzrnx_path' key
+            gfzrnx_path = tool_paths.get('gfzrnx_path') or tool_paths.get('gfzrnx')
+            if not gfzrnx_path:
+                pytest.skip("gfzrnx path not configured in tool_paths.json")
+
+            if not Path(gfzrnx_path).exists():
+                pytest.skip(f"gfzrnx not found at configured path: {gfzrnx_path}")
+
+        # Test that gfzrnx runs
+        result = subprocess.run([gfzrnx_path, '-h'],
+                                capture_output=True, text=True, timeout=10)
+        # gfzrnx returns 0 for help
+        assert result.returncode in [0, 1], f"gfzrnx failed with return code {result.returncode}"
 
 
 class TestImports:

@@ -1,18 +1,5 @@
-#!/usr/bin/env python3
-"""
-Publication-Quality Dark Theme for GNSS-IR Visualizations
-=========================================================
-
-Consistent color scheme and styling for publication-quality plots
-extracted from create_publication_dark_plot.py for reuse across
-the dashboard and visualization modules.
-
-Features:
-- Professional dark background theme
-- Consistent color palette for GNSS-IR, USGS, CO-OPS, NDBC data
-- Matplotlib and Plotly styling configurations
-- Inverted axis support for intuitive GNSS-IR displays
-"""
+# ABOUTME: Publication-quality dark theme styling for GNSS-IR plots
+# ABOUTME: Defines consistent color palette and matplotlib/plotly configurations
 
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go

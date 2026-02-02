@@ -1,6 +1,5 @@
-"""
-Module for plotting GNSS-IR reflector height time series.
-"""
+# ABOUTME: Time series plotting for GNSS-IR reflector height data
+# ABOUTME: Creates annual RH plots with optional reference gauge overlay
 
 import logging
 from typing import Optional, Union, Dict, List, Any, Tuple
@@ -92,7 +91,7 @@ def plot_annual_rh_timeseries(
                 time_column = 'date'
                 date_present = True
                 logging.info("Using 'date' column for x-axis")
-            except:
+            except (ValueError, TypeError):
                 logging.warning("'date' column exists but couldn't be parsed as datetime")
         
         # If no date column, try other common names or positions

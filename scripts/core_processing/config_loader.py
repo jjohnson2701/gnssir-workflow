@@ -1,7 +1,5 @@
-"""
-Configuration loading module for GNSS-IR processing.
-Provides functions to load configuration from JSON files.
-"""
+# ABOUTME: Configuration loading module for GNSS-IR processing
+# ABOUTME: Provides functions to load station configs and tool paths from JSON files
 
 import json
 import logging

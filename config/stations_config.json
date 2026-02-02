@@ -85,6 +85,8 @@
     "longitude_deg": -135.8884838318,
     "gnssir_json_params_path": "config/glbx.json",
     "reference_gauge_id": null,
+    "data_source_base_url": "https://gnss.nps.gov/doi-gnss",
+    "rinex_path_template": "Rinex/{YEAR}/{DOY_PADDED}/GLBX/GLBX{DOY_PADDED}0.{YY}o",
     "s3_bucket_name": "doi-gnss",
     "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/GLBX/GLBX{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {

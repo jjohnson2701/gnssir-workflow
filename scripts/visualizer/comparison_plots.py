@@ -1,7 +1,5 @@
-"""
-ABOUTME: Comparison visualizations for GNSS-IR vs USGS/reference data with diagnostic plots.
-ABOUTME: Provides color schemes, quality diagnostics, and seasonal analysis tools.
-"""
+# ABOUTME: Diagnostic comparison plots for GNSS-IR vs reference data analysis
+# ABOUTME: Provides quality diagnostics, seasonal investigation, and outlier detection
 
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any
@@ -13,23 +11,7 @@ import matplotlib.colors as mcolors
 from pathlib import Path
 from scipy import stats
 
-from .base import ensure_output_dir
-
-# Enhanced color scheme - professional and accessible
-ENHANCED_COLORS = {
-    'gnss': '#2E86AB',      # Professional blue
-    'usgs': '#A23B72',      # Deep magenta (more readable than red)
-    'coops': '#1B998B',     # Teal for NOAA CO-OPS
-    'ndbc': '#F18F01',      # Orange for NDBC buoys
-    'correlation': '#F18F01', # Orange for highlights
-    'grid': '#E5E5E5',      # Light gray for grid
-    'text': '#333333',      # Dark gray for text
-    'background': '#FFFFFF', # White background
-    'highlight': '#E63946',  # Red for highlights
-    'quality_good': '#2D9A6B', # Green for good quality
-    'quality_poor': '#E63946', # Red for poor quality
-    'quality_medium': '#F77F00' # Orange for medium quality
-}
+from .base import ensure_output_dir, PLOT_COLORS
 
 def create_comparison_plot(df, station_name, year, output_path):
     """
@@ -45,7 +27,7 @@ def create_comparison_plot(df, station_name, year, output_path):
         Tuple of (overall_correlation, demeaned_correlation)
     """
     # Define better color scheme
-    colors = ENHANCED_COLORS
+    colors = PLOT_COLORS
     
     # Create figure with higher DPI for better quality
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), dpi=150)
@@ -181,9 +163,9 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     
     axes[0,0].bar(months, availability['wse_ellips_m'], 
-                  alpha=0.7, label='GNSS-IR', color=ENHANCED_COLORS['gnss'])
+                  alpha=0.7, label='GNSS-IR', color=PLOT_COLORS['gnss'])
     axes[0,0].bar(months, availability['usgs_value_m_median'], 
-                  alpha=0.7, label='USGS', color=ENHANCED_COLORS['usgs'])
+                  alpha=0.7, label='USGS', color=PLOT_COLORS['usgs'])
     axes[0,0].set_title('Data Availability by Month')
     axes[0,0].set_ylabel('Days with Data')
     axes[0,0].legend()
@@ -199,7 +181,7 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
         else:
             monthly_corr.append(0)
     
-    bars = axes[0,1].bar(months, monthly_corr, color=ENHANCED_COLORS['correlation'])
+    bars = axes[0,1].bar(months, monthly_corr, color=PLOT_COLORS['correlation'])
     axes[0,1].set_title('Monthly Correlation')
     axes[0,1].set_ylabel('Correlation Coefficient')
     axes[0,1].tick_params(axis='x', rotation=45)
@@ -208,11 +190,11 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
     # Color bars based on correlation quality
     for i, (bar, corr) in enumerate(zip(bars, monthly_corr)):
         if corr > 0.7:
-            bar.set_color(ENHANCED_COLORS['quality_good'])
+            bar.set_color(PLOT_COLORS['quality_good'])
         elif corr > 0.3:
-            bar.set_color(ENHANCED_COLORS['quality_medium'])
+            bar.set_color(PLOT_COLORS['quality_medium'])
         else:
-            bar.set_color(ENHANCED_COLORS['quality_poor'])
+            bar.set_color(PLOT_COLORS['quality_poor'])
     
     # 3. Scatter plot with seasonal coloring
     valid_data = df.dropna(subset=['wse_ellips_m', 'usgs_value_m_median'])
@@ -258,7 +240,7 @@ def create_quality_diagnostic_plot(df, station_name, year, output_path):
         
         if len(quality_data) > 0:
             axes[1,1].scatter(quality_data, residuals.loc[quality_data.index], 
-                            alpha=0.6, s=50, color=ENHANCED_COLORS['correlation'])
+                            alpha=0.6, s=50, color=PLOT_COLORS['correlation'])
             axes[1,1].set_xlabel('RH Standard Deviation (m)')
             axes[1,1].set_ylabel('WSE - USGS Residual (m)')
             axes[1,1].set_title('Data Quality vs Residuals')
@@ -448,19 +430,19 @@ def create_spring_investigation_plot(df, station_name, year, output_path):
     
     # 1. Time series comparison
     axes[0,0].plot(valid_spring.index, valid_spring['wse_ellips_m'], 
-                   'b-o', label='GNSS-IR WSE', markersize=6, color=ENHANCED_COLORS['gnss'])
+                   'b-o', label='GNSS-IR WSE', markersize=6, color=PLOT_COLORS['gnss'])
     ax_twin = axes[0,0].twinx()
     ax_twin.plot(valid_spring.index, valid_spring['usgs_value_m_median'], 
-                 'r-s', label='USGS WL', markersize=4, color=ENHANCED_COLORS['usgs'])
+                 'r-s', label='USGS WL', markersize=4, color=PLOT_COLORS['usgs'])
     
     axes[0,0].set_title('Spring Time Series Comparison')
-    axes[0,0].set_ylabel('GNSS-IR WSE (m)', color=ENHANCED_COLORS['gnss'])
-    ax_twin.set_ylabel('USGS WL (m)', color=ENHANCED_COLORS['usgs'])
+    axes[0,0].set_ylabel('GNSS-IR WSE (m)', color=PLOT_COLORS['gnss'])
+    ax_twin.set_ylabel('USGS WL (m)', color=PLOT_COLORS['usgs'])
     axes[0,0].tick_params(axis='x', rotation=45)
     
     # 2. Scatter plot
     axes[0,1].scatter(valid_spring['wse_ellips_m'], valid_spring['usgs_value_m_median'], 
-                      alpha=0.7, s=80, color=ENHANCED_COLORS['correlation'])
+                      alpha=0.7, s=80, color=PLOT_COLORS['correlation'])
     
     # Add regression line
     if len(valid_spring) > 2:
@@ -482,7 +464,7 @@ def create_spring_investigation_plot(df, station_name, year, output_path):
     
     # 3. Residuals over time
     residuals = valid_spring['wse_ellips_m'] - valid_spring['usgs_value_m_median']
-    axes[1,0].plot(valid_spring.index, residuals, 'go-', markersize=6, color=ENHANCED_COLORS['correlation'])
+    axes[1,0].plot(valid_spring.index, residuals, 'go-', markersize=6, color=PLOT_COLORS['correlation'])
     axes[1,0].axhline(y=0, color='k', linestyle='--', alpha=0.5)
     axes[1,0].set_title('Spring Residuals (GNSS-IR - USGS)')
     axes[1,0].set_ylabel('Residual (m)')
@@ -492,7 +474,7 @@ def create_spring_investigation_plot(df, station_name, year, output_path):
     # 4. Data quality metrics
     if 'rh_count' in valid_spring.columns:
         axes[1,1].scatter(valid_spring['rh_count'], residuals, 
-                         alpha=0.7, s=80, color=ENHANCED_COLORS['correlation'])
+                         alpha=0.7, s=80, color=PLOT_COLORS['correlation'])
         axes[1,1].set_xlabel('RH Retrievals per Day')
         axes[1,1].set_ylabel('Residual (m)')
         axes[1,1].set_title('Residuals vs Data Quality')
