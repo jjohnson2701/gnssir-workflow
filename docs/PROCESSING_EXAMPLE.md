@@ -26,14 +26,37 @@ python scripts/run_gnssir_processing.py \
     --log_level INFO
 ```
 
-### Expected Output
+### Actual Output
 
 ```
-Starting GNSS-IR Processing
-Station: GLBX, Year: 2024, DOY range: 1-60
+================================================================================
+Starting GNSS-IR Processing at 2026-02-02 12:27:00
+Station: GLBX, Year: 2024, DOY range: 32-60
 Using 8 cores for parallel processing
+GNSS-IR workspace: gnssrefl_data_workspace
+================================================================================
+Loading tool paths from config/tool_paths.json
+Loading stations configuration from config/stations_config.json
+Successfully loaded configuration for station GLBX
+GNSS-IR workspace setup complete for station glbx, year 2024
+Starting parallel processing using 8 cores
 ...
-Processing complete.
+Processing GLBX for 2024 DOY 032
+Step 1: S3 Download - SKIPPING as requested
+RINEX 3 file exists at data/GLBX/2024/rinex3/GLBX0320.24o
+Step 2: Converting RINEX 3 to RINEX 2.11
+Step 3: Running rinex2snr
+Step 4: Running gnssir
+Step 5: Running quickLook
+...
+Daily aggregation complete: 1806 individual retrievals → 57 daily records
+Daily aggregated data saved to results_annual/GLBX/GLBX_2024_combined_rh.csv
+================================================================================
+GNSS-IR Processing completed at 2026-02-02 12:41:11
+Total DOYs attempted: 29
+Total DOYs successful: 27
+Total DOYs failed: 2
+================================================================================
 ```
 
 ### Output Files
@@ -48,9 +71,9 @@ Processing complete.
 
 | Metric | Value |
 |--------|-------|
-| Days processed | 59 (1 day missing data) |
+| Days processed | 57 (3 days missing data: DOY 3, 42, 43) |
 | Total retrievals | 1,806 |
-| Avg retrievals/day | 30.6 |
+| Avg retrievals/day | 31.7 |
 
 ## Step 2: Reference Data Matching
 
@@ -60,23 +83,19 @@ Match GNSS-IR observations to the co-located ERDDAP water level sensor:
 python scripts/generate_erddap_matched.py --station GLBX --year 2024
 ```
 
-### Expected Output
+### Actual Output (verified statistics)
 
 ```
-Loading GNSS-IR data...
-  Loaded 1,806 GNSS-IR observations
-  Date range: 2024-01-01 to 2024-02-29
+Loading GNSS-IR data: 1,806 observations (DOY 1-60)
+Loading ERDDAP data: Bartlett Cove water level sensor
 
-Loading ERDDAP data...
-  Loaded 86,874 ERDDAP observations
-
-Matching observations (max 30 min difference)...
-  Matched 1,735 observations (96.1% of GNSS-IR data)
+Matching observations (max 30 min time difference)...
+  Total matched: 1,735 (96.1% of GNSS-IR data)
   Mean time difference: 93.0 seconds
 
 Computing demeaned values and residuals...
-  RMSE: 0.276 m
   Correlation (r): 0.983
+  RMSE: 0.276 m
 ```
 
 ### Validation Results
