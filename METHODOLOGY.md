@@ -607,9 +607,10 @@ pip install -r requirements.txt
 # 4. Install gnssrefl package
 pip install gnssrefl
 
-# 5. Download and install gfzrnx
-# From: https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=escidoc:1577894
-# Place in tools/ directory and make executable:
+# 5. Install gfzrnx (Option A: conda, or Option B: manual download)
+# Conda: conda install -c eumetsat gfzrnx
+# Manual: https://gnss.gfz.de/services/gfzrnx
+# If manual, place in tools/ directory and make executable:
 chmod +x tools/gfzrnx
 
 # 6. Update tool_paths.json with correct paths

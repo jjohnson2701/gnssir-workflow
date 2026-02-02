@@ -57,28 +57,37 @@ mkdir -p $REFL_CODE $ORBITS
 ### 5. Install gfzrnx (Required)
 
 gfzrnx is a RINEX file manipulation tool from GFZ Potsdam, required for RINEX
-format conversion.
+format conversion. Current version: 2.2.0
 
-#### Download
+#### Option A: Install via Conda (Recommended)
 
-1. Visit: https://gnss.gfz-potsdam.de/services/gfzrnx
+```bash
+conda install -c eumetsat gfzrnx
+```
+
+#### Option B: Manual Download
+
+1. Visit: https://gnss.gfz.de/services/gfzrnx
 2. Register and download the appropriate binary for your system
-3. The binary is named like `gfzrnx_2.1.0_lx64` (Linux) or `gfzrnx_2.1.0_mac` (macOS)
-
-#### Install
+3. The binary is named like `gfzrnx_2.2.0_lx64` (Linux) or `gfzrnx_2.2.0_mac` (macOS)
 
 ```bash
 # Linux example
-sudo cp gfzrnx_2.1.0_lx64 /usr/local/bin/gfzrnx
+sudo cp gfzrnx_2.2.0_lx64 /usr/local/bin/gfzrnx
 sudo chmod +x /usr/local/bin/gfzrnx
 
 # Verify installation
 gfzrnx -h
 ```
 
-#### Alternative: Configure Path
+#### Documentation
 
-If you cannot install to `/usr/local/bin`, update `config/tool_paths.json`:
+- [User Guide](https://gnss.git-pages.gfz-potsdam.de/gfzrnx/)
+- [PDF Manual](https://gnss.git-pages.gfz-potsdam.de/gfzrnx/pdf/GFZRNX_Users_Guide.pdf)
+
+#### Alternative: Configure Custom Path
+
+If gfzrnx is not in your PATH, update `config/tool_paths.json`:
 
 ```json
 {

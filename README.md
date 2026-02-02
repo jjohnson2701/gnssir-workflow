@@ -164,7 +164,7 @@ The system configures gnssrefl-required environment variables:
 ## Acknowledgments
 
 - [gnssrefl](https://github.com/kristinemlarson/gnssrefl) - GNSS-IR processing package
-- [gfzrnx](https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=escidoc:1577895) - RINEX format conversion
+- [gfzrnx](https://gnss.gfz.de/services/gfzrnx) - RINEX format conversion (GFZ Potsdam)
 - [USGS Water Data](https://waterdata.usgs.gov/)
 - [NOAA CO-OPS](https://tidesandcurrents.noaa.gov/)
 - [NOAA NDBC](https://www.ndbc.noaa.gov/)
