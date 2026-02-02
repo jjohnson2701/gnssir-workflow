@@ -14,7 +14,7 @@ GNSS Interferometric Reflectometry water level data.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/jjohnson/gnssir-workflow.git
+git clone https://github.com/jjohnson2701/gnssir-workflow.git
 cd gnssir-workflow
 ```
 
@@ -212,5 +212,5 @@ Configure your preferred reference sources in `stations_config.json`.
 
 ## Support
 
-- Issues: https://github.com/jjohnson/gnssir-workflow/issues
+- Issues: https://github.com/jjohnson2701/gnssir-workflow/issues
 - gnssrefl documentation: https://github.com/kristinemlarson/gnssrefl

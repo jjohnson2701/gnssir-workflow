@@ -132,7 +132,7 @@ GNSSIRWorkflow/
 │   ├── visualizer/                  # Visualization modules
 │   │   ├── comparison.py            # Comparison plots
 │   │   ├── timeseries.py            # Time series plots
-│   │   └── advanced_viz.py          # Enhanced visualizations
+│   │   └── dashboard_plots.py       # Dashboard-specific plots
 │   └── results_handler.py           # Combine daily results
 │
 ├── dashboard_components/            # Streamlit dashboard modules

@@ -106,7 +106,6 @@ These are pure library code - they define functions/classes but have no `if __na
 |--------|---------|
 | `data_loader.py` | Load CSV data with caching |
 | `station_metadata.py` | Station config utilities |
-| `analysis_runner.py` | Background analysis tasks |
 | `cache_manager.py` | File/session caching |
 | `constants.py` | Colors, theme settings |
 | `tabs/*.py` | Individual tab implementations |
