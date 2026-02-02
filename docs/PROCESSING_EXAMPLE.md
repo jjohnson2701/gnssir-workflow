@@ -1,6 +1,6 @@
 # Processing Example: GLBX Station
 
-This example demonstrates the complete GNSS-IR processing workflow using the GLBX station (Bartlett Cove, Alaska) for January-February 2024.
+This example demonstrates the complete GNSS-IR processing workflow using the GLBX station (Bartlett Cove, Alaska) for February 2024 (DOY 32-60).
 
 ## Station Details
 
@@ -67,11 +67,21 @@ Total DOYs failed: 2
 | `results_annual/GLBX/GLBX_2024_combined_raw.csv` | Individual subdaily retrievals |
 | `data/GLBX/2024/quicklook_plots_daily/` | QA diagnostic plots |
 
-### Processing Results
+### Processing Results (this run)
 
 | Metric | Value |
 |--------|-------|
-| Days processed | 57 (3 days missing data: DOY 3, 42, 43) |
+| DOYs attempted | 29 |
+| DOYs successful | 27 |
+| DOYs failed | 2 (DOY 42, 43 - missing RINEX data) |
+
+### Combined Results (DOY 1-60)
+
+The workflow automatically combines results with any previously processed days:
+
+| Metric | Value |
+|--------|-------|
+| Days in combined dataset | 57 (3 missing: DOY 3, 42, 43) |
 | Total retrievals | 1,806 |
 | Avg retrievals/day | 31.7 |
 
@@ -139,7 +149,7 @@ For convenience, use `process_station.py` to run all steps automatically:
 python scripts/process_station.py \
     --station GLBX \
     --year 2024 \
-    --doy_start 1 \
+    --doy_start 32 \
     --doy_end 60
 ```
 
@@ -148,8 +158,10 @@ This runs:
 2. Reference comparison (ERDDAP for GLBX)
 3. Visualization generation (or use `--skip_viz` to skip)
 
+**Note**: The workflow automatically detects and combines results with previously processed days. In this example, DOY 1-31 had been processed earlier, so the combined output includes all 57 available days (DOY 1-60 minus 3 missing days).
+
 ## Notes
 
 - The high correlation (r=0.983) is due to the co-located ERDDAP water level sensor
 - GLBX is a tidal station in Alaska with ~4m tidal range
-- Processing time: ~10 minutes for 60 days with 8 cores
+- Processing time: ~14 minutes for 29 days with 8 cores (~30 seconds/day)
