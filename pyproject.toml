@@ -75,10 +75,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jjohnson/gnssir-workflow"
-Documentation = "https://github.com/jjohnson/gnssir-workflow#readme"
-Repository = "https://github.com/jjohnson/gnssir-workflow"
-Issues = "https://github.com/jjohnson/gnssir-workflow/issues"
+Homepage = "https://github.com/jjohnson2701/gnssir-workflow"
+Documentation = "https://github.com/jjohnson2701/gnssir-workflow#readme"
+Repository = "https://github.com/jjohnson2701/gnssir-workflow"
+Issues = "https://github.com/jjohnson2701/gnssir-workflow/issues"
 
 [project.scripts]
 gnssir-process = "scripts.run_gnssir_processing:main"

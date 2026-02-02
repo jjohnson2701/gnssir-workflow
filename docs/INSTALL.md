@@ -139,21 +139,24 @@ pytest tests/test_environment.py -v
 ### Processing a Station
 
 ```bash
-# Process a station for a date range
-python scripts/process_station.py GLBX --start-date 2024-01-01 --end-date 2024-01-31
+# Process a station for a date range (DOY = day of year)
+python scripts/process_station.py --station GLBX --year 2024 --doy_start 1 --doy_end 31
 
-# With USGS comparison
-python scripts/usgs_comparison.py GLBX 2024
+# Run USGS comparison (for stations with USGS gauge configured)
+python scripts/usgs_comparison.py --station FORA --year 2024
 
-# With CO-OPS comparison
-python scripts/coops_comparison.py GLBX 2024
+# Run CO-OPS comparison (for coastal stations)
+python scripts/coops_comparison.py --station VALR --year 2024
+
+# Run ERDDAP comparison (for stations with ERDDAP configured)
+python scripts/generate_erddap_matched.py --station GLBX --year 2024
 ```
 
 ### Running the Dashboard
 
 ```bash
 # Requires: pip install -e .[dashboard]
-streamlit run dashboard_main.py
+streamlit run dashboard.py
 ```
 
 ## Troubleshooting
