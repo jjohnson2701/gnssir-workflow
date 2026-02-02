@@ -14,6 +14,16 @@ Was created in hopes of creating more user friendly visualizations, and allowing
 5. **Reference Matching**: Find nearby gauges and retrieve water level data
 6. **Analysis**: Time lag analysis, correlation statistics, visualization
 
+## Example Output
+
+### Water Level Correlation Analysis
+![Resolution Comparison](docs/images/GLBX_2024_resolution_comparison.png)
+*GLBX station (Bartlett Cove, AK) - Correlation and RMSE analysis at different temporal resolutions comparing GNSS-IR derived water levels to ERDDAP reference gauge.*
+
+### Polar Visualization Animation
+![Polar Animation](docs/images/GLBX_2024_polar_animation_DOY1-31.gif)
+*Weekly polar animation showing GNSS-IR retrievals with Fresnel zone reflections overlaid on water level time series.*
+
 ## Reference Data Sources
 
 - **USGS**: Stream/tide gauges with water level data (NAVD88/NGVD29/MSL)

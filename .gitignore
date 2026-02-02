@@ -33,6 +33,11 @@ run_log.txt
 *.24o
 *txt.gen
 *.png
+*.gif
+
+# Allow example images in docs
+!docs/images/*.png
+!docs/images/*.gif
 
 # IDE and editor files
 .vscode/
@@ -89,7 +94,6 @@ processing_session_log.md
 *_session_log.md
 
 # Large data files (keep test fixtures)
-*.gif
 bartlett_cove_*.csv
 *_coops_*.csv
 !tests/fixtures/*.csv
