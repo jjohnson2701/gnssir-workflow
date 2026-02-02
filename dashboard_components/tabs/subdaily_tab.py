@@ -5,7 +5,7 @@
 Subdaily Comparison Tab Implementation
 
 Displays annual subdaily comparison between GNSS-IR retrievals and
-reference gauge data (USGS or CO-OPS) at full temporal resolution.
+reference gauge data (ERDDAP, USGS, or CO-OPS) at full temporal resolution.
 """
 
 import streamlit as st
@@ -56,6 +56,11 @@ def detect_column_names(df: pd.DataFrame) -> tuple:
     """
     Detect GNSS and reference column names from dataframe.
 
+    Handles multiple reference source types:
+    - USGS: usgs_wl_dm column
+    - CO-OPS: coops_dm column
+    - ERDDAP: station-specific naming (e.g., bartlett_cove_dm for GLBX)
+
     Returns:
         Tuple of (gnss_col, ref_col, ref_source)
     """
@@ -67,7 +72,7 @@ def detect_column_names(df: pd.DataFrame) -> tuple:
     else:
         gnss_dm_col = None
 
-    # Reference demeaned column (USGS or CO-OPS)
+    # Reference demeaned column - check known sources first, then generic
     if 'usgs_wl_dm' in df.columns:
         ref_dm_col = 'usgs_wl_dm'
         ref_source = 'USGS'
@@ -75,8 +80,18 @@ def detect_column_names(df: pd.DataFrame) -> tuple:
         ref_dm_col = 'coops_dm'
         ref_source = 'CO-OPS'
     else:
-        ref_dm_col = None
-        ref_source = 'Unknown'
+        # Generic detection for ERDDAP and other sources
+        # Look for any *_dm column that isn't the GNSS column
+        ref_dm_cols = [col for col in df.columns
+                       if col.endswith('_dm') and not col.startswith('gnss')]
+        if ref_dm_cols:
+            ref_dm_col = ref_dm_cols[0]
+            # Extract source name from column prefix (e.g., 'bartlett_cove' from 'bartlett_cove_dm')
+            source_prefix = ref_dm_col.rsplit('_dm', 1)[0]
+            ref_source = 'ERDDAP'
+        else:
+            ref_dm_col = None
+            ref_source = 'Unknown'
 
     return gnss_dm_col, ref_dm_col, ref_source
 
@@ -413,7 +428,7 @@ def render_subdaily_tab(
         **Top Panel - Time Series:**
         - **Blue scatter points**: Individual GNSS-IR water surface elevation retrievals
         - **Blue ribbon** (if enabled): Rolling ±1σ band showing GNSS-IR scatter
-        - **Red line**: Reference gauge (USGS or CO-OPS) hourly averages
+        - **Red line**: Reference gauge (ERDDAP, USGS, or CO-OPS) hourly averages
 
         **Bottom Panel - Residuals:**
         - Shows difference: GNSS-IR - Reference

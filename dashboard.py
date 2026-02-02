@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: Main entry point for GNSS-IR Dashboard with subdaily comparison.
-# ABOUTME: Provides station-aware reference sources and data loading.
+# ABOUTME: Provides station-aware reference sources (ERDDAP, USGS, CO-OPS).
 
 """
 GNSS-IR Dashboard
@@ -8,7 +8,7 @@ GNSS-IR Dashboard
 
 Features:
 - Subdaily comparison tab showing individual retrievals vs reference
-- Station-aware reference source detection (USGS vs CO-OPS)
+- Station-aware reference source detection (ERDDAP > USGS > CO-OPS)
 - Antenna heights loaded from config
 - Diagnostics tab for quality analysis
 
@@ -30,14 +30,12 @@ from dashboard_components import (
     load_station_data,
     load_available_stations,
     fetch_coops_data,
-    fetch_ndbc_data,
-    run_multi_source_analysis
 )
 
 from dashboard_components.constants import (
     ENHANCED_COLORS,
-    PAGE_CONFIG_V4,
-    TABS_V4,
+    PAGE_CONFIG,
+    TABS,
     DEFAULT_STATION,
     DEFAULT_YEAR,
     DEFAULT_DOY_RANGE,
@@ -59,15 +57,8 @@ from dashboard_components.station_metadata import (
     get_antenna_height
 )
 
-# Check for multi-source availability
-try:
-    from scripts.multi_source_comparison import MultiSourceComparison
-    MULTI_SOURCE_AVAILABLE = True
-except ImportError:
-    MULTI_SOURCE_AVAILABLE = False
-
 # Configure Streamlit page
-st.set_page_config(**PAGE_CONFIG_V4)
+st.set_page_config(**PAGE_CONFIG)
 
 # Apply custom CSS
 publication_header_color = ENHANCED_COLORS['gnss'] if PUBLICATION_THEME_AVAILABLE else '#2E86AB'
@@ -112,7 +103,7 @@ st.markdown(f"""
     .source-gnss {{ background-color: {ENHANCED_COLORS['gnss']}; }}
     .source-usgs {{ background-color: {ENHANCED_COLORS['usgs']}; }}
     .source-coops {{ background-color: {ENHANCED_COLORS['coops']}; }}
-    .source-ndbc {{ background-color: {ENHANCED_COLORS['ndbc']}; }}
+    .source-erddap {{ background-color: {ENHANCED_COLORS.get('erddap', '#48A9A6')}; }}
     .reference-info {{
         background-color: #e8f4f8 !important;
         border-left: 4px solid {ENHANCED_COLORS['coops']};
@@ -132,7 +123,7 @@ st.markdown(f"""
 def main():
     """Main application logic."""
     # Header
-    st.markdown('<h1 class="main-header">🛰️ GNSS-IR Dashboard v4</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🛰️ GNSS-IR Dashboard</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Water Level Validation with Subdaily Comparison</p>',
                 unsafe_allow_html=True)
 
@@ -180,29 +171,18 @@ def main():
 
     doy_range = (doy_start, doy_end) if doy_start <= doy_end else DEFAULT_DOY_RANGE
 
-    # Data source selection
+    # Data source display
     st.sidebar.markdown("### 📊 Data Sources")
-
-    # Core sources (always enabled)
-    st.sidebar.markdown("**Core Sources** (always enabled)")
     st.sidebar.markdown("🛰️ **GNSS-IR** - Satellite reflectometry")
-    if ref_info['primary_source'] == 'USGS':
-        st.sidebar.markdown("🌊 **USGS** - Water level gauge")
-    else:
-        st.sidebar.markdown("🌀 **CO-OPS** - Tide gauge")
 
-    # Optional external sources
-    st.sidebar.markdown("**Optional External Sources**")
-    if ref_info['primary_source'] == 'CO-OPS':
-        include_coops = True  # Auto-enable for CO-OPS primary stations
-        st.sidebar.checkbox("🌀 NOAA CO-OPS Tide Data", value=True, disabled=True,
-                           help="Primary reference for this station")
+    # Show primary reference source based on station config
+    primary_source = ref_info['primary_source']
+    if primary_source == 'ERDDAP':
+        st.sidebar.markdown(f"🌐 **ERDDAP** - {ref_info['station_name']} (primary)")
+    elif primary_source == 'CO-OPS':
+        st.sidebar.markdown(f"🌀 **CO-OPS** - {ref_info['station_name']} (primary)")
     else:
-        include_coops = st.sidebar.checkbox("🌀 NOAA CO-OPS Tide Data", value=False,
-                                           help="Tidal predictions and observations")
-
-    include_ndbc = st.sidebar.checkbox("☁️ NDBC Buoy Data", value=False,
-                                       help="Meteorological and wave data")
+        st.sidebar.markdown(f"🌊 **USGS** - {ref_info['station_name']} (primary)")
 
     # Load data button
     if st.sidebar.button("Load/Refresh Data", type="primary"):
@@ -216,11 +196,17 @@ def main():
         with st.spinner("Loading GNSS-IR and comparison data..."):
             # Load station data
             try:
-                rh_data, comparison_data, usgs_data, coops_file_data = load_station_data(selected_station, selected_year)
+                rh_data, comparison_data, usgs_data, coops_file_data, erddap_data = load_station_data(selected_station, selected_year)
             except ValueError:
-                # Fallback for older version (3 return values)
-                rh_data, comparison_data, usgs_data = load_station_data(selected_station, selected_year)
-                coops_file_data = None
+                # Fallback for older version (4 return values)
+                try:
+                    rh_data, comparison_data, usgs_data, coops_file_data = load_station_data(selected_station, selected_year)
+                    erddap_data = None
+                except ValueError:
+                    # Fallback for even older version (3 return values)
+                    rh_data, comparison_data, usgs_data = load_station_data(selected_station, selected_year)
+                    coops_file_data = None
+                    erddap_data = None
 
         # Check for missing data and provide helpful messages
         if rh_data is None or rh_data.empty:
@@ -232,7 +218,7 @@ def main():
 
             To generate this data, run:
             ```bash
-            python scripts/run_gnssir_processing.py --station {selected_station} --year {selected_year}
+            python scripts/process_station.py --station {selected_station} --year {selected_year}
             ```
             """)
             return
@@ -249,8 +235,10 @@ def main():
         # Initialize external data variables
         coops_data = None
         coops_station_id = None
-        ndbc_data = None
-        ndbc_buoy_id = None
+
+        # Check if ERDDAP data was loaded (highest priority for ERDDAP-enabled stations)
+        if erddap_data is not None and not erddap_data.empty and ref_info['primary_source'] == 'ERDDAP':
+            st.info(f"🌐 Using ERDDAP data from {ref_info['station_name']} (co-located sensor)")
 
         # Check if CO-OPS data was loaded from file
         if coops_file_data is not None and not coops_file_data.empty:
@@ -263,41 +251,31 @@ def main():
                 coops_station_id = str(coops_data['station_id'].iloc[0])
             else:
                 coops_station_id = ref_info.get('station_id', 'Unknown')
-            st.info(f"Using pre-loaded CO-OPS data from station {coops_station_id}")
-            include_coops = True
+            if ref_info['primary_source'] == 'CO-OPS':
+                st.info(f"🌀 Using CO-OPS data from station {coops_station_id} (primary reference)")
 
-        # Fetch external data if requested and not already loaded
-        elif include_coops:
-            with st.spinner("Fetching NOAA CO-OPS tide data..."):
-                coops_data, coops_station_id = fetch_coops_data(
-                    selected_station, selected_year, doy_range, rh_data
-                )
+        # Determine if CO-OPS data is available for tabs
+        include_coops = coops_data is not None and not coops_data.empty
 
-        if include_ndbc:
-            with st.spinner("Fetching NDBC buoy data..."):
-                ndbc_data, ndbc_buoy_id = fetch_ndbc_data(
-                    selected_station, selected_year, doy_range, rh_data
-                )
-
-        # Create five-tab structure (v4 adds subdaily tab)
-        tabs = st.tabs(TABS_V4)
+        # Create five-tab structure
+        tabs = st.tabs(TABS)
 
         # Tab 1: Overview
         with tabs[0]:
             render_overview_tab(
-                rh_data, usgs_data, coops_data, ndbc_data,
+                rh_data, usgs_data, coops_data, erddap_data,
                 selected_station, selected_year,
-                coops_station_id, ndbc_buoy_id
+                coops_station_id
             )
 
         # Tab 2: Monthly Data (all visualizations)
         with tabs[1]:
             render_monthly_data_tab(
-                rh_data, usgs_data, coops_data, ndbc_data,
-                selected_station, selected_year, include_coops, include_ndbc
+                rh_data, usgs_data, coops_data,
+                selected_station, selected_year, include_coops
             )
 
-        # Tab 3: Subdaily Comparison (NEW in v4)
+        # Tab 3: Subdaily Comparison
         with tabs[2]:
             render_subdaily_tab(
                 station_id=selected_station,
@@ -309,8 +287,9 @@ def main():
         # Tab 4: Yearly Analysis (residual analysis)
         with tabs[3]:
             render_yearly_residual_tab(
-                rh_data, usgs_data, coops_data, ndbc_data,
-                selected_station, selected_year
+                rh_data, usgs_data, coops_data,
+                selected_station, selected_year,
+                erddap_data=erddap_data
             )
 
         # Tab 5: Daily Diagnostics (QuickLook plots)
@@ -320,8 +299,7 @@ def main():
                 'rh_data': rh_data,
                 'comparison_data': comparison_data,
                 'usgs_data': usgs_data,
-                'coops_data': coops_data,
-                'ndbc_data': ndbc_data
+                'coops_data': coops_data
             }
             render_diagnostics_tab(
                 selected_station, selected_year, data_dict
@@ -338,15 +316,15 @@ def main():
         with col1:
             st.markdown("""
             **Available Stations:**
+            - **GLBX** - Alaska (ERDDAP co-located sensor)
             - **FORA** - North Carolina coast (USGS reference)
             - **MDAI** - Maryland coast (USGS reference)
             - **VALR** - Hawaii (CO-OPS tide gauge reference)
-            - **GLBX** - Alaska (CO-OPS tide gauge reference)
             """)
 
         with col2:
             st.markdown("""
-            **New in v4:**
+            **Features:**
             - 🌊 **Subdaily Comparison** tab with full-resolution data
             - 📍 Station-aware reference source detection
             - 📊 Improved statistics and export options

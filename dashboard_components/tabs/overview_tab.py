@@ -17,12 +17,12 @@ from dashboard_components.constants import ENHANCED_COLORS, DATA_SOURCE_EMOJI
 from dashboard_components.station_metadata import get_reference_source_info
 
 
-def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data, 
-                       selected_station, selected_year, 
-                       coops_station_id=None, ndbc_buoy_id=None):
+def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
+                       selected_station, selected_year,
+                       coops_station_id=None):
     """
     Render the redesigned overview tab with data availability indicator and yearly summary.
-    
+
     Parameters:
     -----------
     rh_data : pd.DataFrame
@@ -31,28 +31,33 @@ def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data,
         USGS water level data
     coops_data : pd.DataFrame
         NOAA CO-OPS tide data
-    ndbc_data : pd.DataFrame
-        NDBC buoy data
+    erddap_data : pd.DataFrame
+        ERDDAP water level data (co-located sensors)
     selected_station : str
         Station ID
     selected_year : int
         Year for analysis
     coops_station_id : str
         CO-OPS station ID used
-    ndbc_buoy_id : str
-        NDBC buoy ID used
     """
     st.header("📊 Station Overview")
 
     # Get reference source info for this station
     ref_info = get_reference_source_info(selected_station)
-    primary_source = ref_info['primary_source']  # 'USGS' or 'CO-OPS'
+    primary_source = ref_info['primary_source']  # 'ERDDAP', 'USGS', or 'CO-OPS'
 
     # Data availability status bar (horizontal red/green indicator)
     st.markdown("### 🚦 Data Source Availability")
 
     # Determine primary reference data based on station config
-    if primary_source == 'CO-OPS':
+    if primary_source == 'ERDDAP':
+        primary_ref_data = erddap_data
+        primary_ref_name = 'ERDDAP'
+        primary_ref_emoji = '🌐'
+        primary_ref_details = ref_info['station_name'] if erddap_data is not None and not erddap_data.empty else "No data"
+        if erddap_data is not None and not erddap_data.empty:
+            primary_ref_details = f"{ref_info['station_name']} ({len(erddap_data)} records)"
+    elif primary_source == 'CO-OPS':
         primary_ref_data = coops_data
         primary_ref_name = 'CO-OPS'
         primary_ref_emoji = '🌀'
@@ -80,19 +85,31 @@ def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data,
             'count': len(primary_ref_data) if primary_ref_data is not None and not primary_ref_data.empty else 0,
             'details': primary_ref_details if primary_ref_data is not None and not primary_ref_data.empty else "No data",
             'is_primary': True
-        },
-        {
-            'name': 'NDBC',
-            'emoji': '☁️',
-            'available': ndbc_data is not None and not ndbc_data.empty,
-            'count': len(ndbc_data) if ndbc_data is not None and not ndbc_data.empty else 0,
-            'details': f"Buoy {ndbc_buoy_id}" if ndbc_buoy_id and ndbc_data is not None and not ndbc_data.empty else "No data",
-            'is_primary': False
         }
     ]
 
-    # Add secondary reference source if data is available
-    if primary_source == 'CO-OPS' and usgs_data is not None and not usgs_data.empty:
+    # Add secondary reference sources if data is available
+    if primary_source == 'ERDDAP':
+        # For ERDDAP primary, show USGS and CO-OPS as secondary if available
+        if usgs_data is not None and not usgs_data.empty:
+            data_sources.append({
+                'name': 'USGS',
+                'emoji': '🌊',
+                'available': True,
+                'count': len(usgs_data),
+                'details': f"{len(usgs_data)} records",
+                'is_primary': False
+            })
+        if coops_data is not None and not coops_data.empty:
+            data_sources.append({
+                'name': 'CO-OPS',
+                'emoji': '🌀',
+                'available': True,
+                'count': len(coops_data),
+                'details': f"Station {coops_station_id}" if coops_station_id else "Available",
+                'is_primary': False
+            })
+    elif primary_source == 'CO-OPS' and usgs_data is not None and not usgs_data.empty:
         data_sources.insert(2, {
             'name': 'USGS',
             'emoji': '🌊',
@@ -140,21 +157,50 @@ def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data,
                 """)
             else:
                 st.error("❌ **No GNSS-IR data available**")
-        
-        with st.expander("☁️ NDBC Environmental Data"):
-            if ndbc_data is not None and not ndbc_data.empty:
-                st.success(f"✅ **Active** (Buoy {ndbc_buoy_id})")
-                st.markdown(f"- **Records:** {len(ndbc_data)}")
-                if 'wind_speed_m_s' in ndbc_data.columns:
-                    st.markdown(f"- **Wind Speed:** {ndbc_data['wind_speed_m_s'].mean():.1f} ± {ndbc_data['wind_speed_m_s'].std():.1f} m/s")
-                if 'wave_height_m' in ndbc_data.columns:
-                    st.markdown(f"- **Wave Height:** {ndbc_data['wave_height_m'].mean():.1f} ± {ndbc_data['wave_height_m'].std():.1f} m")
-            else:
-                st.warning("⚠️ **No NDBC data available**")
-    
+
     with col2:
         # Show primary reference source expander
-        if primary_source == 'CO-OPS':
+        if primary_source == 'ERDDAP':
+            with st.expander(f"🌐 {ref_info['station_name']} (Primary Reference)", expanded=True):
+                if erddap_data is not None and not erddap_data.empty:
+                    st.success(f"✅ **Active** ({len(erddap_data)} records)")
+
+                    # Find water level column (auto-detect from various naming conventions)
+                    # ERDDAP column naming varies by station (e.g., bartlett_cove_wl for GLBX)
+                    water_col = None
+                    if 'water_level_m' in erddap_data.columns:
+                        water_col = 'water_level_m'
+                    else:
+                        # Look for any column ending in _wl that isn't gnss
+                        wl_cols = [col for col in erddap_data.columns
+                                   if col.endswith('_wl') and not col.startswith('gnss')]
+                        if wl_cols:
+                            water_col = wl_cols[0]
+
+                    if water_col:
+                        mean_level = erddap_data[water_col].mean()
+                        std_level = erddap_data[water_col].std()
+                        st.markdown(f"""
+                        - **Water Level:** {mean_level:.2f} ± {std_level:.2f} m
+                        - **Range:** {erddap_data[water_col].min():.2f} to {erddap_data[water_col].max():.2f} m
+                        - **Dataset:** {ref_info['station_id']}
+                        """)
+                        if ref_info['distance_km']:
+                            st.markdown(f"- **Distance:** {ref_info['distance_km']*1000:.0f} m (co-located)")
+                else:
+                    st.warning(f"⚠️ ERDDAP data not loaded. Station: {ref_info['station_name']}")
+
+            # Show USGS as secondary if available
+            if usgs_data is not None and not usgs_data.empty:
+                with st.expander("🌊 USGS Water Levels (Secondary)"):
+                    st.info(f"✅ **Available** ({len(usgs_data)} records)")
+
+            # Show CO-OPS as secondary if available
+            if coops_data is not None and not coops_data.empty:
+                with st.expander("🌀 NOAA CO-OPS Tides (Secondary)"):
+                    st.info(f"✅ **Available** (Station {coops_station_id})")
+
+        elif primary_source == 'CO-OPS':
             with st.expander(f"🌀 {ref_info['station_name']} (Primary Reference)", expanded=True):
                 if coops_data is not None and not coops_data.empty:
                     st.success(f"✅ **Active** ({len(coops_data)} records)")
@@ -338,7 +384,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data,
     with viz_col1:
         st.markdown("#### 📊 Correlation vs Temporal Resolution")
         if resolution_plot.exists():
-            st.image(str(resolution_plot), use_container_width=True)
+            st.image(str(resolution_plot), width='stretch')
             st.caption(f"Full-year correlation analysis showing how aggregation affects RMSE and correlation")
         else:
             st.info(f"Resolution comparison plot not found. Generate with:\n```bash\npython scripts/plot_resolution_comparison.py --station {selected_station} --year {selected_year}\n```")
@@ -348,7 +394,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data,
         if gif_files:
             # Use the first GIF found (sorted to be consistent)
             gif_path = sorted(gif_files)[0]
-            st.image(str(gif_path), use_container_width=True)
+            st.image(str(gif_path), width='stretch')
             # Extract DOY range from filename
             import re
             doy_match = re.search(r'DOY(\d+)-(\d+)', gif_path.name)
@@ -436,7 +482,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data,
             st.markdown("#### 🔄 Processing Pipeline")
             st.markdown("""
             **Data Flow:** RINEX 3 → RINEX 2.11 → SNR Extraction → GNSS-IR Analysis → Water Level Estimation
-            **External APIs:** USGS Water Services, NOAA CO-OPS, NDBC Buoys
+            **External APIs:** USGS Water Services, NOAA CO-OPS, ERDDAP
             **Analysis Tools:** Time series comparison, correlation analysis, subdaily validation
             """)
             
@@ -447,7 +493,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, ndbc_data,
             **Station:** {selected_station}
             **Year:** {selected_year}
             **Processing Pipeline:** RINEX 3 → RINEX 2.11 → SNR → GNSS-IR
-            **External APIs:** USGS, NOAA CO-OPS, NDBC
+            **External APIs:** USGS, NOAA CO-OPS, ERDDAP
             **Analysis Tools:** Time series comparison, correlation analysis
             """)
         except Exception as e:

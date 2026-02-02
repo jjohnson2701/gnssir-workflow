@@ -1,5 +1,5 @@
 # ABOUTME: Yearly residual analysis tab for GNSS-IR vs reference comparison
-# ABOUTME: Displays annual trends, bias patterns, and residual statistics
+# ABOUTME: Supports USGS, CO-OPS, and ERDDAP reference sources
 
 import streamlit as st
 import pandas as pd
@@ -55,7 +55,7 @@ def preprocess_for_residual_analysis(
     --------
     aligned_data : pd.DataFrame
         Temporally aligned data with columns: timestamp, gnss_water_level, 
-        usgs_water_level, difference, uncertainty
+        ref_water_level, difference, uncertainty
     metadata : dict
         Processing metadata and statistics
     """
@@ -81,13 +81,20 @@ def preprocess_for_residual_analysis(
             gnss_wl_col = col
             break
     
-    usgs_wl_col = None
-    for col in ['water_level_m', 'usgs_value', 'value']:
+    # Reference water level column - check known names first, then generic
+    ref_wl_col = None
+    for col in ['water_level_m', 'usgs_value', 'value', 'coops_value']:
         if col in usgs_df.columns:
-            usgs_wl_col = col
+            ref_wl_col = col
             break
+    # If not found, look for ERDDAP-style columns (*_wl that isn't gnss_*)
+    if ref_wl_col is None:
+        wl_cols = [col for col in usgs_df.columns
+                   if col.endswith('_wl') and not col.startswith('gnss')]
+        if wl_cols:
+            ref_wl_col = wl_cols[0]
     
-    if gnss_wl_col is None or usgs_wl_col is None:
+    if gnss_wl_col is None or ref_wl_col is None:
         st.error("Could not identify water level columns in data")
         return pd.DataFrame(), {}
     
@@ -105,7 +112,7 @@ def preprocess_for_residual_analysis(
         gnss_df['gnss_water_level'] = gnss_df[gnss_wl_col]
         conversion_note = "Using pre-computed water surface elevation"
     
-    usgs_df['usgs_water_level'] = usgs_df[usgs_wl_col]
+    usgs_df['ref_water_level'] = usgs_df[ref_wl_col]
     
     # Create common time grid
     start_date = max(gnss_df['timestamp'].min(), usgs_df['timestamp'].min())
@@ -134,21 +141,21 @@ def preprocess_for_residual_analysis(
         aligned_data['gnss_water_level'] = np.nan
     
     # USGS interpolation
-    usgs_clean = usgs_df.dropna(subset=['usgs_water_level']).sort_values('timestamp')
+    usgs_clean = usgs_df.dropna(subset=['ref_water_level']).sort_values('timestamp')
     if len(usgs_clean) > 1:
         usgs_interp = interpolate.interp1d(
             usgs_clean['timestamp'].astype(np.int64),
-            usgs_clean['usgs_water_level'],
+            usgs_clean['ref_water_level'],
             kind='linear',
             bounds_error=False,
             fill_value=np.nan
         )
-        aligned_data['usgs_water_level'] = usgs_interp(time_grid.astype(np.int64))
+        aligned_data['ref_water_level'] = usgs_interp(time_grid.astype(np.int64))
     else:
-        aligned_data['usgs_water_level'] = np.nan
+        aligned_data['ref_water_level'] = np.nan
     
     # Calculate differences and statistics
-    aligned_data['difference'] = aligned_data['gnss_water_level'] - aligned_data['usgs_water_level']
+    aligned_data['difference'] = aligned_data['gnss_water_level'] - aligned_data['ref_water_level']
     
     # Estimate uncertainty (simple approach using local variability)
     if 'rh_std_m' in gnss_df.columns:
@@ -187,7 +194,7 @@ def preprocess_for_residual_analysis(
         'time_range': (start_date, end_date),
         'gnss_source_col': gnss_wl_col,
         'conversion_note': conversion_note,
-        'usgs_source_col': usgs_wl_col,
+        'ref_source_col': ref_wl_col,
     }
     
     if len(valid_data) > 0:
@@ -196,7 +203,7 @@ def preprocess_for_residual_analysis(
             'rmse': np.sqrt((valid_data['difference']**2).mean()),
             'std_difference': valid_data['difference'].std(),
             'bias': valid_data['difference'].mean(),
-            'correlation': valid_data['gnss_water_level'].corr(valid_data['usgs_water_level']),
+            'correlation': valid_data['gnss_water_level'].corr(valid_data['ref_water_level']),
             'mad': valid_data['difference'].abs().median(),  # Median Absolute Deviation
         })
     
@@ -208,22 +215,25 @@ def create_residual_analysis_plot(
     metadata: dict,
     station_name: str = "GNSS Station",
     figsize: Tuple[float, float] = (16, 12),
-    plot_mode: str = "dual_axis"
+    plot_mode: str = "dual_axis",
+    reference_source: str = "Reference"
 ) -> plt.Figure:
     """
     Create comprehensive residual analysis plot.
-    
+
     Parameters:
     -----------
     aligned_data : pd.DataFrame
-        Aligned data with timestamp, gnss_water_level, usgs_water_level, difference, uncertainty
+        Aligned data with timestamp, gnss_water_level, ref_water_level, difference, uncertainty
     metadata : dict
         Processing metadata and statistics
     station_name : str
         Station identifier
     figsize : tuple
         Figure size
-        
+    reference_source : str
+        Reference data source name (USGS, CO-OPS, ERDDAP)
+
     Returns:
     --------
     plt.Figure : The created figure
@@ -258,9 +268,9 @@ def create_residual_analysis_plot(
         
         # Create second y-axis
         ax1_twin = ax1.twinx()
-        ax1_twin.plot(aligned_data['timestamp'], aligned_data['usgs_water_level'], 
-                     color=colors.get('usgs', '#A23B72'), linewidth=1.5, label='USGS Water Level', alpha=0.8)
-        ax1_twin.set_ylabel('USGS Water Level (m)', fontsize=12, fontweight='bold',
+        ax1_twin.plot(aligned_data['timestamp'], aligned_data['ref_water_level'],
+                     color=colors.get('usgs', '#A23B72'), linewidth=1.5, label=f'{reference_source} Water Level', alpha=0.8)
+        ax1_twin.set_ylabel(f'{reference_source} Water Level (m)', fontsize=12, fontweight='bold',
                            color=colors.get('usgs', '#A23B72'))
         ax1_twin.tick_params(axis='y', labelcolor=colors.get('usgs', '#A23B72'))
         
@@ -274,14 +284,14 @@ def create_residual_analysis_plot(
     elif plot_mode == "detrended":
         # Remove mean from each series
         gnss_mean = aligned_data['gnss_water_level'].mean()
-        usgs_mean = aligned_data['usgs_water_level'].mean()
+        usgs_mean = aligned_data['ref_water_level'].mean()
         
         ax1.plot(aligned_data['timestamp'], aligned_data['gnss_water_level'] - gnss_mean, 
                  color=colors.get('gnss', '#2E86AB'), linewidth=1.5, 
                  label=f'GNSS-IR WSE (mean removed: {gnss_mean:.2f} m)', alpha=0.8)
-        ax1.plot(aligned_data['timestamp'], aligned_data['usgs_water_level'] - usgs_mean, 
-                 color=colors.get('usgs', '#A23B72'), linewidth=1.5, 
-                 label=f'USGS Water Level (mean removed: {usgs_mean:.2f} m)', alpha=0.8)
+        ax1.plot(aligned_data['timestamp'], aligned_data['ref_water_level'] - usgs_mean,
+                 color=colors.get('usgs', '#A23B72'), linewidth=1.5,
+                 label=f'{reference_source} Water Level (mean removed: {usgs_mean:.2f} m)', alpha=0.8)
         
         ax1.set_ylabel('Detrended Water Level (m)', fontsize=12, fontweight='bold')
         ax1.legend(loc='upper right')
@@ -292,17 +302,17 @@ def create_residual_analysis_plot(
         # Normalize to standard deviations
         gnss_mean = aligned_data['gnss_water_level'].mean()
         gnss_std = aligned_data['gnss_water_level'].std()
-        usgs_mean = aligned_data['usgs_water_level'].mean()
-        usgs_std = aligned_data['usgs_water_level'].std()
+        usgs_mean = aligned_data['ref_water_level'].mean()
+        usgs_std = aligned_data['ref_water_level'].std()
         
         ax1.plot(aligned_data['timestamp'], 
                  (aligned_data['gnss_water_level'] - gnss_mean) / gnss_std, 
                  color=colors.get('gnss', '#2E86AB'), linewidth=1.5, 
                  label='GNSS-IR WSE (normalized)', alpha=0.8)
-        ax1.plot(aligned_data['timestamp'], 
-                 (aligned_data['usgs_water_level'] - usgs_mean) / usgs_std, 
-                 color=colors.get('usgs', '#A23B72'), linewidth=1.5, 
-                 label='USGS Water Level (normalized)', alpha=0.8)
+        ax1.plot(aligned_data['timestamp'],
+                 (aligned_data['ref_water_level'] - usgs_mean) / usgs_std,
+                 color=colors.get('usgs', '#A23B72'), linewidth=1.5,
+                 label=f'{reference_source} Water Level (normalized)', alpha=0.8)
         
         ax1.set_ylabel('Normalized Water Level (σ)', fontsize=12, fontweight='bold')
         ax1.legend(loc='upper right')
@@ -312,8 +322,8 @@ def create_residual_analysis_plot(
     else:  # original mode
         ax1.plot(aligned_data['timestamp'], aligned_data['gnss_water_level'], 
                  color=colors.get('gnss', '#2E86AB'), linewidth=1.5, label='GNSS-IR WSE', alpha=0.8)
-        ax1.plot(aligned_data['timestamp'], aligned_data['usgs_water_level'], 
-                 color=colors.get('usgs', '#A23B72'), linewidth=1.5, label='USGS Water Level', alpha=0.8)
+        ax1.plot(aligned_data['timestamp'], aligned_data['ref_water_level'],
+                 color=colors.get('usgs', '#A23B72'), linewidth=1.5, label=f'{reference_source} Water Level', alpha=0.8)
         ax1.set_ylabel('Water Level (m)', fontsize=12, fontweight='bold')
         ax1.legend(loc='upper right')
         title_suffix = ""
@@ -333,8 +343,8 @@ def create_residual_analysis_plot(
     ax2 = fig.add_subplot(gs[1, :])
     
     # Plot differences with uncertainty bands if available
-    ax2.plot(aligned_data['timestamp'], aligned_data['difference'], 
-             color=colors.get('difference', '#F18F01'), linewidth=1, label='GNSS - USGS Difference', alpha=0.8)
+    ax2.plot(aligned_data['timestamp'], aligned_data['difference'],
+             color=colors.get('difference', '#F18F01'), linewidth=1, label=f'GNSS - {reference_source} Difference', alpha=0.8)
     
     # Add uncertainty bands if available
     if 'uncertainty' in aligned_data.columns and not aligned_data['uncertainty'].isna().all():
@@ -462,40 +472,56 @@ def create_residual_analysis_plot(
     return fig
 
 
-def render_yearly_residual_tab(rh_data, usgs_data, coops_data, ndbc_data, 
-                              selected_station, selected_year):
+def render_yearly_residual_tab(rh_data, usgs_data, coops_data,
+                              selected_station, selected_year, erddap_data=None):
     """
     Render the yearly residual analysis tab.
-    
+
     Parameters:
     -----------
     rh_data : pd.DataFrame
         GNSS-IR reflector height data
-    usgs_data : pd.DataFrame  
+    usgs_data : pd.DataFrame
         USGS water level data
     coops_data : pd.DataFrame
         NOAA CO-OPS tide data
-    ndbc_data : pd.DataFrame
-        NDBC buoy data
     selected_station : str
         Station ID
     selected_year : int
         Year for analysis
+    erddap_data : pd.DataFrame, optional
+        ERDDAP water level data (for co-located sensor stations)
     """
     st.header("📈 Yearly Time Series & Residual Analysis")
-    
+
     st.markdown("""
-    **Comprehensive yearly view showing the complete time series comparison between GNSS-IR and USGS measurements,
+    **Comprehensive yearly view showing the complete time series comparison between GNSS-IR and reference measurements,
     with detailed residual analysis to quantify measurement differences and uncertainty.**
     """)
-    
+
     if rh_data is None or rh_data.empty:
         st.warning("⚠️ No GNSS-IR data available for residual analysis")
         return
-        
-    if usgs_data is None or usgs_data.empty:
-        st.warning("⚠️ No USGS data available for residual analysis")
+
+    # Determine reference source: ERDDAP > USGS > CO-OPS
+    reference_data = None
+    reference_source = None
+
+    if erddap_data is not None and not erddap_data.empty:
+        reference_data = erddap_data
+        reference_source = 'ERDDAP'
+    elif usgs_data is not None and not usgs_data.empty:
+        reference_data = usgs_data
+        reference_source = 'USGS'
+    elif coops_data is not None and not coops_data.empty:
+        reference_data = coops_data
+        reference_source = 'CO-OPS'
+
+    if reference_data is None:
+        st.warning("⚠️ No reference data (ERDDAP, USGS, or CO-OPS) available for residual analysis")
         return
+
+    st.info(f"📊 Using **{reference_source}** as reference source for comparison")
     
     # Analysis settings
     st.markdown("### ⚙️ Analysis Settings")
@@ -604,13 +630,6 @@ def render_yearly_residual_tab(rh_data, usgs_data, coops_data, ndbc_data,
                     if use_coops:
                         water_level_data = coops_data
 
-                # Prepare environmental data if available
-                env_data = None
-                if ndbc_data is not None and not ndbc_data.empty:
-                    # Use NDBC data for environmental context
-                    env_data = ndbc_data[['date', 'wind_speed_m_s', 'wave_height_m']].copy()
-                    env_data.columns = ['date', 'wind_speed', 'wave_height']
-
                 # Calculate performance metrics for timeline
                 perf_data = rh_data.copy()
                 if water_level_data is not None and not water_level_data.empty:
@@ -656,7 +675,7 @@ def render_yearly_residual_tab(rh_data, usgs_data, coops_data, ndbc_data,
                 fig = create_multi_parameter_timeline(
                     perf_data,
                     usgs_df=water_level_data,
-                    environmental_df=env_data,
+                    environmental_df=None,
                     station_name=selected_station,
                     year=selected_year,
                     rolling_window=rolling_window,
@@ -668,14 +687,13 @@ def render_yearly_residual_tab(rh_data, usgs_data, coops_data, ndbc_data,
                 
                 st.markdown("""
                 ### 📊 Multi-Parameter Timeline Analysis
-                
+
                 This comprehensive timeline shows:
                 - **Data Availability**: Daily retrieval counts with rolling averages
                 - **Performance Metrics**: Measurement precision over time
                 - **Correlation Analysis**: Rolling correlation with water level data (if available)
-                - **Environmental Context**: Wind and wave conditions (if NDBC data available)
-                
-                The timeline helps identify seasonal patterns, environmental impacts, and optimal measurement periods.
+
+                The timeline helps identify seasonal patterns and optimal measurement periods.
                 """)
         
         else:
@@ -683,8 +701,10 @@ def render_yearly_residual_tab(rh_data, usgs_data, coops_data, ndbc_data,
             with st.spinner("Processing temporal alignment and residual analysis..."):
                 # Preprocess and align data
                 aligned_data, metadata = preprocess_for_residual_analysis(
-                    rh_data, usgs_data, target_resolution=resolution, station_id=selected_station
+                    rh_data, reference_data, target_resolution=resolution, station_id=selected_station
                 )
+                # Store reference source in metadata for display
+                metadata['reference_source'] = reference_source
                 
                 if aligned_data.empty:
                     st.error("❌ Failed to align data - no overlapping time periods found")
@@ -707,7 +727,8 @@ def render_yearly_residual_tab(rh_data, usgs_data, coops_data, ndbc_data,
                 
                 # Create comprehensive plot
                 fig = create_residual_analysis_plot(
-                    aligned_data, metadata, selected_station, figsize=(16, 14), plot_mode=plot_mode
+                    aligned_data, metadata, selected_station, figsize=(16, 14),
+                    plot_mode=plot_mode, reference_source=reference_source
                 )
             
             # Display plot
@@ -742,14 +763,14 @@ def render_yearly_residual_tab(rh_data, usgs_data, coops_data, ndbc_data,
             # RMSE Explanation
             st.markdown("### 🧮 RMSE Calculation Details")
             st.markdown(f"""
-            **Root Mean Square Error (RMSE)** quantifies the magnitude of differences between GNSS-IR water surface elevation (WSE) and USGS measurements:
-            
+            **Root Mean Square Error (RMSE)** quantifies the magnitude of differences between GNSS-IR water surface elevation (WSE) and {reference_source} measurements:
+
             ```
-            RMSE = √(Σ(GNSS_water_level - USGS_water_level)² / N)
+            RMSE = √(Σ(GNSS_water_level - {reference_source}_water_level)² / N)
             ```
             
             **Current calculation method:**
-            - **Data Source**: {metadata.get('gnss_source_col', 'Unknown')} vs {metadata.get('usgs_source_col', 'Unknown')}
+            - **Data Source**: {metadata.get('gnss_source_col', 'Unknown')} vs {metadata.get('ref_source_col', 'Unknown')}
             - **Temporal Alignment**: {resolution} resolution with interpolation
             - **Valid Pairs**: {metadata.get('valid_points', 0):,} synchronized measurements
             - **RMSE Value**: {metadata.get('rmse', 0):.4f} meters

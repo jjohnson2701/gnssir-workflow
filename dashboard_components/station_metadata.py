@@ -54,15 +54,15 @@ def get_reference_source_info(station_id: str) -> Dict[str, Any]:
     """
     Determine the primary reference source for a station.
 
-    Returns info about whether to use USGS or CO-OPS as primary reference,
-    based on configuration and data availability context.
+    Returns info about whether to use ERDDAP, USGS, or CO-OPS as primary reference,
+    based on configuration. Priority order: ERDDAP > USGS > CO-OPS.
 
     Args:
         station_id: Station identifier
 
     Returns:
         Dict with keys:
-            - primary_source: 'USGS' or 'CO-OPS'
+            - primary_source: 'ERDDAP', 'USGS', or 'CO-OPS'
             - station_id: Reference station ID
             - station_name: Human-readable name
             - distance_km: Distance to reference (if known)
@@ -78,48 +78,40 @@ def get_reference_source_info(station_id: str) -> Dict[str, Any]:
             'notes': 'Station not found in config'
         }
 
-    # Check for CO-OPS preference indicators
-    usgs_config = config.get('usgs_comparison', {})
-    coops_config = config.get('external_data_sources', {}).get('noaa_coops', {})
-
-    usgs_site = usgs_config.get('target_usgs_site')
-    usgs_notes = usgs_config.get('notes', '')
-
-    coops_stations = coops_config.get('preferred_stations', [])
-    coops_nearest = coops_config.get('nearest_station', {})
-
-    # Heuristics for determining primary source:
-    # 1. Check for ERDDAP sources (GLBX uses Bartlett Cove ERDDAP)
-    # 2. If USGS notes mention "stream" and CO-OPS is configured, prefer CO-OPS
-    # 3. If station is coastal (Hawaii, Alaska coast) with CO-OPS, prefer CO-OPS
-    # 4. Otherwise use USGS if configured
-
-    # Special case: GLBX uses Bartlett Cove ERDDAP (co-located)
-    if station_id.upper() == 'GLBX':
+    # Check for ERDDAP configuration first (highest priority)
+    erddap_config = config.get('external_data_sources', {}).get('erddap', {})
+    if erddap_config.get('enabled') and erddap_config.get('primary_reference'):
         return {
             'primary_source': 'ERDDAP',
-            'station_id': 'bartlett_cove',
-            'station_name': 'Bartlett Cove, AK',
-            'distance_km': 0.004,
-            'notes': 'Co-located ERDDAP water level station'
+            'station_id': erddap_config.get('dataset_id', 'unknown'),
+            'station_name': erddap_config.get('station_name', 'ERDDAP Station'),
+            'distance_km': erddap_config.get('distance_km'),
+            'notes': erddap_config.get('notes', 'ERDDAP water level station')
         }
 
-    # Coastal stations that prefer CO-OPS
-    coastal_stations_prefer_coops = ['VALR']  # Hawaii
-
-    if station_id.upper() in coastal_stations_prefer_coops and coops_stations:
+    # Check for CO-OPS configuration (second priority after ERDDAP)
+    coops_config = config.get('external_data_sources', {}).get('noaa_coops', {})
+    if coops_config.get('enabled') and coops_config.get('primary_reference'):
+        coops_stations = coops_config.get('preferred_stations', [])
+        coops_nearest = coops_config.get('nearest_station', {})
         coops_id = coops_stations[0] if coops_stations else coops_nearest.get('id')
-        # Try to get distance from CO-OPS config, or calculate it
+        # Try to get distance and name from config
         distance = coops_config.get('distance_km') or coops_nearest.get('distance_km')
+        station_name = coops_config.get('station_name') or _get_coops_station_name(coops_id)
         if not distance:
             distance = _calculate_coops_distance(station_id, coops_id)
         return {
             'primary_source': 'CO-OPS',
             'station_id': coops_id,
-            'station_name': _get_coops_station_name(coops_id),
+            'station_name': station_name,
             'distance_km': distance,
-            'notes': 'Coastal station - using tide gauge for reference'
+            'notes': coops_config.get('notes', 'CO-OPS tide gauge reference')
         }
+
+    # Check for USGS configuration
+    usgs_config = config.get('usgs_comparison', {})
+    usgs_site = usgs_config.get('target_usgs_site')
+    usgs_notes = usgs_config.get('notes', '')
 
     # Default to USGS
     if usgs_site:
@@ -146,6 +138,7 @@ def _get_coops_station_name(station_id: str) -> str:
     # Common CO-OPS stations used in this project
     coops_names = {
         '1612340': 'Honolulu Harbor, HI',
+        '1612401': 'Pearl Harbor, HI',
         '1611400': 'Nawiliwili, HI',
         '9452634': 'Elfin Cove, AK',
         '9452210': 'Juneau, AK',
@@ -200,6 +193,7 @@ def _calculate_coops_distance(gnss_station_id: str, coops_station_id: str) -> Op
     # CO-OPS station coordinates (approximate)
     coops_coords = {
         '1612340': (21.3067, -157.867),   # Honolulu Harbor, HI
+        '1612401': (21.3642, -157.9589),  # Pearl Harbor, HI
         '1611400': (21.9544, -159.356),   # Nawiliwili, HI
         '9452634': (58.195, -136.347),    # Elfin Cove, AK
         '9452210': (58.298, -134.412),    # Juneau, AK
@@ -268,7 +262,6 @@ def get_station_display_info(station_id: str) -> Dict[str, Any]:
         'reference_distance_km': ref_info['distance_km'],
         'gnssir_params_path': config.get('gnssir_json_params_path'),
         'has_coops': config.get('external_data_sources', {}).get('noaa_coops', {}).get('enabled', False),
-        'has_ndbc': config.get('external_data_sources', {}).get('ndbc_buoys', {}).get('enabled', False),
     }
 
 

@@ -13,9 +13,9 @@ except ImportError:
 if PUBLICATION_THEME_AVAILABLE and PUBLICATION_COLORS:
     ENHANCED_COLORS = {
         'gnss': PUBLICATION_COLORS['gnss_smooth'],
-        'usgs': PUBLICATION_COLORS['usgs'], 
+        'usgs': PUBLICATION_COLORS['usgs'],
         'coops': PUBLICATION_COLORS['coops'],
-        'ndbc': PUBLICATION_COLORS['ndbc'],
+        'erddap': PUBLICATION_COLORS.get('erddap', '#48A9A6'),
         'correlation': PUBLICATION_COLORS['correlation'],
         'grid': PUBLICATION_COLORS['grid'],
         'text': PUBLICATION_COLORS['text'],
@@ -30,9 +30,9 @@ else:
     # Fallback color scheme
     ENHANCED_COLORS = {
         'gnss': '#2E86AB',
-        'usgs': '#A23B72', 
+        'usgs': '#A23B72',
         'coops': '#1B998B',
-        'ndbc': '#F18F01',
+        'erddap': '#48A9A6',
         'correlation': '#F18F01',
         'grid': '#E5E5E5',
         'text': '#333333',
@@ -44,39 +44,16 @@ else:
         'quality_medium': '#F77F00'
     }
 
-# Page configuration (v3 - kept for backwards compatibility)
+# Page configuration
 PAGE_CONFIG = {
-    "page_title": "Enhanced GNSS-IR Dashboard v3",
+    "page_title": "GNSS-IR Dashboard",
     "page_icon": "🛰️",
     "layout": "wide",
     "initial_sidebar_state": "expanded"
 }
 
-# Page configuration for v4
-PAGE_CONFIG_V4 = {
-    "page_title": "GNSS-IR Dashboard v4",
-    "page_icon": "🛰️",
-    "layout": "wide",
-    "initial_sidebar_state": "expanded"
-}
-
-# Tab configurations for new dashboard structure
-TABS_WITH_MULTI_SOURCE = [
-    "🏠 Overview", 
-    "📊 Monthly Data",
-    "📈 Yearly Analysis",
-    "🔍 Daily Diagnostics"
-]
-
-TABS_WITHOUT_MULTI_SOURCE = [
-    "🏠 Overview",
-    "📊 Monthly Data",
-    "📈 Yearly Analysis",
-    "🔍 Daily Diagnostics"
-]
-
-# v4 Tab configuration with subdaily comparison
-TABS_V4 = [
+# Tab configuration with subdaily comparison
+TABS = [
     "🏠 Overview",
     "📊 Monthly Data",
     "🌊 Subdaily Comparison",
@@ -85,7 +62,7 @@ TABS_V4 = [
 ]
 
 # Default values
-DEFAULT_STATION = "FORA"
+DEFAULT_STATION = "GLBX"
 DEFAULT_YEAR = 2024
 DEFAULT_DOY_RANGE = (1, 365)
 
@@ -117,21 +94,12 @@ TIME_LAG_PARAMS = {
     'correlation_window': 30
 }
 
-# Environmental thresholds
-ENVIRONMENTAL_THRESHOLDS = {
-    'high_wind_speed': 15.0,  # m/s
-    'moderate_wind_speed': 8.0,  # m/s
-    'high_wave_height': 2.0,  # m
-    'moderate_wave_height': 1.0,  # m
-    'storm_pressure_drop': 5.0  # mb
-}
-
 # Data source indicators
 DATA_SOURCE_EMOJI = {
     'gnss': '🛰️',
     'usgs': '📊',
     'coops': '🌊',
-    'ndbc': '🌪️'
+    'erddap': '🌐'
 }
 
 # Export all constants
@@ -139,16 +107,12 @@ __all__ = [
     'ENHANCED_COLORS',
     'PUBLICATION_THEME_AVAILABLE',
     'PAGE_CONFIG',
-    'PAGE_CONFIG_V4',
-    'TABS_WITH_MULTI_SOURCE',
-    'TABS_WITHOUT_MULTI_SOURCE',
-    'TABS_V4',
+    'TABS',
     'DEFAULT_STATION',
     'DEFAULT_YEAR',
     'DEFAULT_DOY_RANGE',
     'PLOT_PARAMS',
     'QUALITY_THRESHOLDS',
     'TIME_LAG_PARAMS',
-    'ENVIRONMENTAL_THRESHOLDS',
     'DATA_SOURCE_EMOJI'
 ]

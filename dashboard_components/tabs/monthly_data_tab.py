@@ -20,10 +20,7 @@ try:
     from scripts.visualizer.dashboard_plots import (
         create_calendar_heatmap,
         create_monthly_box_plots,
-        create_multi_parameter_timeline,
-        create_tidal_stage_performance,
         create_multi_scale_performance,
-        create_water_level_change_response
     )
     DASHBOARD_PLOTS_AVAILABLE = True
     PHASE2_PLOTS_AVAILABLE = True
@@ -33,11 +30,11 @@ except ImportError as e:
     PHASE2_PLOTS_AVAILABLE = False
 
 
-def render_monthly_data_tab(rh_data, usgs_data, coops_data, ndbc_data, 
-                           selected_station, selected_year, include_coops=True, include_ndbc=True):
+def render_monthly_data_tab(rh_data, usgs_data, coops_data,
+                           selected_station, selected_year, include_coops=True):
     """
     Render the monthly data tab with all visualizations.
-    
+
     Parameters:
     -----------
     rh_data : pd.DataFrame
@@ -46,16 +43,12 @@ def render_monthly_data_tab(rh_data, usgs_data, coops_data, ndbc_data,
         USGS water level data
     coops_data : pd.DataFrame
         NOAA CO-OPS tide data
-    ndbc_data : pd.DataFrame
-        NDBC buoy data
     selected_station : str
         Station ID
     selected_year : int
         Year for analysis
     include_coops : bool
         Whether CO-OPS data is included
-    include_ndbc : bool
-        Whether NDBC data is included
     """
     st.header("📊 Monthly Data Analysis")
     
@@ -136,35 +129,16 @@ def render_monthly_data_tab(rh_data, usgs_data, coops_data, ndbc_data,
         else:
             st.info("💡 USGS data not available - showing GNSS-IR data availability metrics only")
 
-    # Visualization Selection
-    st.markdown("### 🎯 Select Visualization Type")
-    
-    # Create visualization categories
-    basic_viz = ["Calendar Heat Map", "Monthly Box Plots"]
-    advanced_viz = []
+    # Visualization Selection - single flat dropdown
+    plot_options = ["Calendar Heat Map", "Monthly Box Plots"]
     if PHASE2_PLOTS_AVAILABLE:
-        advanced_viz = ["Tidal Stage Performance", "Multi-Scale Performance Matrix", "Water Level Change Rate Response"]
-    
-    # Create selection interface
-    viz_category = st.radio(
-        "Visualization Category:",
-        ["📊 Basic Analysis", "🔬 Advanced Analysis"] if advanced_viz else ["📊 Basic Analysis"],
-        key="viz_category"
-    )
-    
-    if viz_category == "📊 Basic Analysis":
-        plot_options = basic_viz
-    else:
-        plot_options = advanced_viz
-    
+        plot_options.append("Multi-Scale Performance Matrix")
+
     selected_plot = st.selectbox(
-        "Choose Visualization:",
+        "📊 Select Visualization",
         plot_options,
         key="monthly_plot_selection"
     )
-    
-    # Add plot-specific controls
-    st.markdown("### ⚙️ Plot Settings")
     
     # Render the selected visualization
     if selected_plot == "Calendar Heat Map":
@@ -284,84 +258,7 @@ def render_monthly_data_tab(rh_data, usgs_data, coops_data, ndbc_data,
         
         st.pyplot(fig)
         plt.close()
-        
-    elif selected_plot == "Multi-Parameter Timeline":
-        st.markdown("### 📈 Multi-Parameter Annual Timeline")
-        
-        # Prepare environmental data if available
-        env_data = None
-        if include_ndbc and ndbc_data is not None and not ndbc_data.empty:
-            # Use NDBC data for environmental context
-            env_data = ndbc_data[['date', 'wind_speed_m_s', 'wave_height_m']].copy()
-            env_data.columns = ['date', 'wind_speed', 'wave_height']
-        
-        # Use CO-OPS data if available and no USGS data
-        water_level_data = usgs_for_plot
-        if (usgs_for_plot is None or usgs_for_plot.empty) and coops_data is not None and not coops_data.empty:
-            water_level_data = coops_data
-            st.info("Using CO-OPS tide data for water level comparison")
-        elif coops_data is not None and not coops_data.empty:
-            # Show option to use CO-OPS instead of USGS
-            use_coops = st.checkbox("Use CO-OPS data instead of USGS", value=False, key="timeline_coops")
-            if use_coops:
-                water_level_data = coops_data
-        
-        # Rolling window control
-        rolling_window = st.slider("Rolling window (days):", 7, 60, 30, key="timeline_window")
-        
-        # Create multi-parameter timeline
-        fig = create_multi_parameter_timeline(
-            perf_data,
-            usgs_df=water_level_data,
-            environmental_df=env_data,
-            station_name=selected_station,
-            year=selected_year,
-            rolling_window=rolling_window,
-            figsize=(16, 12)
-        )
-        
-        st.pyplot(fig)
-        plt.close()
-        
-    elif selected_plot == "Tidal Stage Performance" and PHASE2_PLOTS_AVAILABLE:
-        st.markdown("### 🌊 Tidal Stage Performance Analysis")
-        
-        # Use CO-OPS data if available, otherwise USGS
-        tide_data = coops_data if coops_data is not None and not coops_data.empty else usgs_for_plot
-        
-        if tide_data is not None and not tide_data.empty:
-            # Create tidal stage performance plot
-            fig = create_tidal_stage_performance(
-                perf_data,
-                tide_data,
-                station_name=selected_station,
-                figsize=(14, 10)
-            )
-            
-            st.pyplot(fig)
-            plt.close()
-            
-            st.markdown("""
-            **Analysis**: This plot shows how GNSS-IR measurement precision varies across different tidal stages:
-            
-            **🌊 Tidal Stage Definitions:**
-            - **High/Low**: Local water level extrema (peaks and troughs in the time series)
-            - **Rising/Falling**: Based on **water level change rate thresholds** measured in **meters per hour (m/hr)**
-            - **Slack**: Transition periods with minimal water level change (rate ≈ 0 m/hr)
-            
-            **📊 Key Insights:**
-            - **Bottom Timeline**: Shows a sample week of water level data with color-coded tidal stages
-            - **Precision Analysis**: How measurement uncertainty varies with tidal conditions
-            - **Data Availability**: Whether tidal stage affects successful data retrieval
-            - **Temporal Patterns**: When different tidal stages occur throughout the day
-            
-            **⚙️ Method**: Tidal stages are determined from water level time series using adaptive rate thresholds 
-            (typically ±0.05 m/hr minimum) based on local data characteristics, not external tide predictions.
-            The **legend is positioned outside the plot area** for better readability.
-            """)
-        else:
-            st.warning("⚠️ Tide/water level data required for tidal stage analysis")
-    
+
     elif selected_plot == "Multi-Scale Performance Matrix" and PHASE2_PLOTS_AVAILABLE:
         st.markdown("### 📊 Multi-Scale Performance Matrix")
         
@@ -375,7 +272,7 @@ def render_monthly_data_tab(rh_data, usgs_data, coops_data, ndbc_data,
         fig = create_multi_scale_performance(
             sub_hourly_data,
             perf_data,
-            environmental_df=env_data if include_ndbc and ndbc_data is not None else None,
+            environmental_df=None,
             station_name=selected_station,
             figsize=(16, 12),
             try_load_real_data=True  # Try to load actual sub-hourly data
@@ -404,32 +301,7 @@ def render_monthly_data_tab(rh_data, usgs_data, coops_data, ndbc_data,
         the `rh_daily/` directory. If unavailable, it uses daily data as a comparison baseline.
         Check the plot title for data source information.
         """)
-    
-    elif selected_plot == "Water Level Change Rate Response" and PHASE2_PLOTS_AVAILABLE:
-        st.markdown("### 🌊 Water Level Change Rate Response")
-        
-        if usgs_for_plot is not None and not usgs_for_plot.empty:
-            # Create water level change rate response plot
-            fig = create_water_level_change_response(
-                perf_data,
-                usgs_for_plot,
-                station_name=selected_station,
-                figsize=(14, 10)
-            )
-            
-            st.pyplot(fig)
-            plt.close()
-            
-            st.markdown("""
-            **Analysis**: This analysis shows how GNSS-IR responds to rapid water level changes:
-            - **Precision vs Change Rate**: How measurement quality varies with water level dynamics
-            - **Data Availability**: Whether rapid changes affect data collection success
-            - **Temporal Patterns**: When rapid changes occur and their impact
-            - **Operational Guidance**: Optimal conditions for reliable measurements
-            """)
-        else:
-            st.warning("⚠️ USGS water level data required for change rate analysis")
-    
+
     # Summary statistics for selected visualization
     st.markdown("---")
     st.markdown("### 📈 Quick Statistics")

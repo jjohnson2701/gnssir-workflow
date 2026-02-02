@@ -40,19 +40,7 @@
         "interval": "h"
       },
       "ndbc_buoys": {
-        "enabled": true,
-        "search_radius_km": 200,
-        "preferred_buoys": [
-          "44025",
-          "44014",
-          "41025"
-        ],
-        "data_types": [
-          "meteorological",
-          "wave_spec"
-        ],
-        "update_interval_hours": 1,
-        "max_days_back": 45
+        "enabled": false
       }
     }
   },
@@ -201,6 +189,7 @@
     "external_data_sources": {
       "noaa_coops": {
         "enabled": true,
+        "primary_reference": true,
         "search_radius_km": 100,
         "preferred_stations": [
           "1612401",
@@ -213,27 +202,19 @@
           "latitude": 21.3642,
           "longitude": -157.9589
         },
+        "station_name": "Pearl Harbor, HI",
+        "distance_km": 2.04,
         "data_products": [
           "predictions",
           "water_level"
         ],
         "datum": "MSL",
         "time_zone": "gmt",
-        "interval": "6"
+        "interval": "6",
+        "notes": "CO-OPS tide gauge at Pearl Harbor - primary reference for VALR. Closest reliable tide gauge to Pearl Harbor area GNSS station."
       },
       "ndbc_buoys": {
-        "enabled": true,
-        "search_radius_km": 200,
-        "preferred_buoys": [
-          "51003",
-          "51002"
-        ],
-        "data_types": [
-          "meteorological",
-          "wave_spec"
-        ],
-        "update_interval_hours": 1,
-        "max_days_back": 45
+        "enabled": false
       }
     }
   },
@@ -273,15 +254,7 @@
         "interval": "h"
       },
       "ndbc_buoys": {
-        "enabled": true,
-        "search_radius_km": 200,
-        "preferred_buoys": [],
-        "data_types": [
-          "meteorological",
-          "wave_spec"
-        ],
-        "update_interval_hours": 1,
-        "max_days_back": 45
+        "enabled": false
       }
     }
   }

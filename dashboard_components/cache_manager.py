@@ -61,8 +61,9 @@ def disk_cache(cache_type='processed_data'):
                 try:
                     with open(cache_file, 'rb') as f:
                         return pickle.load(f)
-                except Exception:
-                    pass  # If cache load fails, regenerate
+                except Exception as e:
+                    # Cache file may be corrupted; regenerate silently
+                    print(f"Cache load failed for {func.__name__}, regenerating: {e}")
             
             # Execute function and cache result
             result = func(*args, **kwargs)
@@ -132,16 +133,14 @@ def load_and_aggregate_subhourly_data(file_path, aggregation='1H'):
 def fetch_external_data_cached(data_source, station_id, year, date_range=None):
     """
     Cached wrapper for external API calls.
-    
+
     This function caches external API responses to disk to avoid
     repeated API calls for the same data.
     """
-    from dashboard_components.data_loader import fetch_coops_data, fetch_ndbc_data
-    
+    from dashboard_components.data_loader import fetch_coops_data
+
     if data_source == 'coops':
         return fetch_coops_data(station_id, year, doy_range=date_range)
-    elif data_source == 'ndbc':
-        return fetch_ndbc_data(station_id, year, doy_range=date_range)
     else:
         raise ValueError(f"Unknown data source: {data_source}")
 
@@ -186,18 +185,17 @@ class DataPreloader:
         Preload commonly used data for a station in the background.
         """
         import threading
-        
+
         def _preload():
             # Load main data files
             from dashboard_components.data_loader import load_station_data
             load_station_data(station_id, year)
-            
+
             # Cache external data if not already cached
             fetch_external_data_cached('coops', station_id, year)
-            fetch_external_data_cached('ndbc', station_id, year)
-            
+
             self.preload_status[f"{station_id}_{year}"] = True
-        
+
         # Start preloading in background thread
         thread = threading.Thread(target=_preload)
         thread.daemon = True
