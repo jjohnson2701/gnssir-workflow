@@ -20,7 +20,7 @@ Process RINEX data to calculate reflector heights:
 python scripts/run_gnssir_processing.py \
     --station GLBX \
     --year 2024 \
-    --doy_start 1 \
+    --doy_start 32 \
     --doy_end 60 \
     --num_cores 8 \
     --log_level INFO
