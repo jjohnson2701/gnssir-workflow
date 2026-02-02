@@ -2,6 +2,9 @@
 
 Python-based workflow for GNSS Interferometric Reflectometry (GNSS-IR) data processing. Downloads RINEX 3 data from AWS S3, processes it to calculate reflector heights for water level estimation, and validates results against external reference sources.
 
+This effectively is built on top of, and works as a wrapper of https://github.com/kristinemlarson/gnssrefl 
+Was created in hopes of creating more user friendly visualizations, and allowing for one time config files per station to allow visualization and comparison of GNSSIR to nearby reference data. 
+
 ## Processing Flow
 
 1. **Download**: RINEX 3 files from AWS S3 `doi-gnss` bucket
