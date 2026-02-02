@@ -174,6 +174,13 @@ The system configures gnssrefl-required environment variables:
 - `REFL_CODE`: Points to `gnssrefl_data_workspace/refl_code/`
 - `ORBITS`: Points to `gnssrefl_data_workspace/orbits/`
 
+## Documentation
+
+- [Installation Guide](docs/INSTALL.md) - Detailed setup instructions
+- [Methodology](docs/METHODOLOGY.md) - Scientific background and processing details
+- [Architecture](docs/ARCHITECTURE.md) - Code structure and module dependencies
+- [Changelog](docs/CHANGELOG.md) - Version history
+
 ## Acknowledgments
 
 - [gnssrefl](https://github.com/kristinemlarson/gnssrefl) - GNSS-IR processing package
