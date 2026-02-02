@@ -16,8 +16,8 @@ channels:
   - defaults
 
 dependencies:
-  # Python version
-  - python>=3.9,<3.13
+  # Python version (3.9 recommended and tested)
+  - python=3.9
 
   # Core scientific packages (conda versions often better optimized)
   - numpy>=1.24.0

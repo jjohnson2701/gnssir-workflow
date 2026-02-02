@@ -6,7 +6,7 @@ GNSS Interferometric Reflectometry water level data.
 ## Prerequisites
 
 - **Operating System**: Linux or macOS (Windows may work but is untested)
-- **Python**: 3.9 or later (tested through 3.12)
+- **Python**: 3.9 (recommended and tested; later versions may work but are untested)
 - **Conda**: Recommended for environment management (Miniconda or Anaconda)
 
 ## Quick Start
