@@ -67,7 +67,7 @@ class TestGetReferenceSource:
         """Test that ERDDAP with primary_reference=true is detected."""
         config = {"external_data_sources": {"erddap": {"enabled": True, "primary_reference": True}}}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "erddap"
 
     @pytest.mark.unit
@@ -75,7 +75,7 @@ class TestGetReferenceSource:
         """Test that ERDDAP with enabled=true is detected."""
         config = {"external_data_sources": {"erddap": {"enabled": True}}}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "erddap"
 
     @pytest.mark.unit
@@ -83,7 +83,7 @@ class TestGetReferenceSource:
         """Test that top-level ERDDAP config is detected."""
         config = {"erddap": {"enabled": True}}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "erddap"
 
     @pytest.mark.unit
@@ -91,7 +91,7 @@ class TestGetReferenceSource:
         """Test that USGS config is detected."""
         config = {"usgs_comparison": {"target_usgs_site": "12345678"}}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "usgs"
 
     @pytest.mark.unit
@@ -99,7 +99,7 @@ class TestGetReferenceSource:
         """Test that CO-OPS config is detected."""
         config = {"external_data_sources": {"noaa_coops": {"enabled": True}}}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "coops"
 
     @pytest.mark.unit
@@ -107,7 +107,7 @@ class TestGetReferenceSource:
         """Test that missing reference returns 'none'."""
         config = {"station_id": "TEST", "latitude_deg": 45.0, "longitude_deg": -122.0}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "none"
 
     @pytest.mark.unit
@@ -118,7 +118,7 @@ class TestGetReferenceSource:
             "usgs_comparison": {"target_usgs_site": "12345678"},
         }
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "erddap"
 
     @pytest.mark.unit
@@ -129,7 +129,7 @@ class TestGetReferenceSource:
             "external_data_sources": {"noaa_coops": {"enabled": True}},
         }
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "usgs"
 
     @pytest.mark.unit
@@ -140,7 +140,7 @@ class TestGetReferenceSource:
             "usgs_comparison": {"target_usgs_site": "12345678"},
         }
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "usgs"
 
     @pytest.mark.unit
@@ -151,7 +151,7 @@ class TestGetReferenceSource:
             "external_data_sources": {"noaa_coops": {"enabled": True}},
         }
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         # Empty string is falsy, so should fall through to coops
         assert source == "coops"
 
@@ -168,7 +168,7 @@ class TestReferenceSourcePriority:
             "external_data_sources": {"noaa_coops": {"enabled": True}},
         }
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "erddap"
 
     @pytest.mark.unit
@@ -179,7 +179,7 @@ class TestReferenceSourcePriority:
             "external_data_sources": {"noaa_coops": {"enabled": True}},
         }
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "usgs"
 
     @pytest.mark.unit
@@ -187,7 +187,7 @@ class TestReferenceSourcePriority:
         """Test CO-OPS is used when it's the only option."""
         config = {"external_data_sources": {"noaa_coops": {"enabled": True}}}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "coops"
 
 
@@ -201,7 +201,7 @@ class TestRealStationConfigs:
             pytest.skip("GLBX not in config")
 
         config = stations_config["GLBX"]
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
 
         assert source == "erddap"
 
@@ -223,7 +223,7 @@ class TestNDBCExclusion:
         """Test that NDBC config doesn't trigger reference detection."""
         config = {"external_data_sources": {"ndbc": {"enabled": True, "station_id": "46029"}}}
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         # NDBC is for meteorological data, not water level
         assert source == "none"
 
@@ -237,5 +237,5 @@ class TestNDBCExclusion:
             }
         }
 
-        source = get_reference_source(config)
+        source, _ = get_reference_source(config)
         assert source == "coops"
