@@ -8,7 +8,7 @@ from pathlib import Path
 # Add scripts to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from process_station import (
+from process_station import (  # noqa: E402
     load_config,
     get_reference_source,
 )

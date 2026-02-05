@@ -2,11 +2,9 @@
 # ABOUTME: Computes monthly and seasonal statistics with filtering utilities
 
 import pandas as pd
-import numpy as np
 import logging
 import calendar
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Union, Any
+from typing import Dict, Tuple, Optional, Any
 
 
 def filter_by_segment(df: pd.DataFrame, date_criteria: Any) -> pd.DataFrame:
@@ -143,7 +141,7 @@ def generate_custom_segments(year: int, segment_definitions: Dict[str, Tuple[int
     Parameters:
     -----------
     year : Year for date ranges
-    segment_definitions : Dictionary with segment names as keys and (start_month, end_month) tuples as values
+    segment_definitions : Dict with segment names and (start_month, end_month) tuples
 
     Returns: Dictionary with segment names as keys and date ranges as values
     """
@@ -226,7 +224,8 @@ def perform_segmented_correlation(
             logger.info(f"Correlation for {segment_name}: {corr:.4f} ({valid_count} valid points)")
         else:
             logger.warning(
-                f"Not enough valid data points for correlation in segment: {segment_name} ({valid_count} points)"
+                f"Not enough valid data points for correlation in segment: "
+                f"{segment_name} ({valid_count} points)"
             )
             segment_correlations[segment_name] = None
             # Still keep the segment data for reference

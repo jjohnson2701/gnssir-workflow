@@ -35,10 +35,10 @@ script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from scripts.core_processing.config_loader import load_tool_paths, load_station_config
-from scripts.utils.logging_config import setup_main_logger
-from scripts.core_processing.parallel_orchestrator import process_station_parallel
-import scripts.results_handler as results_handler
+from scripts.core_processing.config_loader import load_tool_paths, load_station_config  # noqa: E402
+from scripts.utils.logging_config import setup_main_logger  # noqa: E402
+from scripts.core_processing.parallel_orchestrator import process_station_parallel  # noqa: E402
+import scripts.results_handler as results_handler  # noqa: E402
 
 # Default paths
 DEFAULT_GNSSREFL_WORKSPACE = project_root / "gnssrefl_data_workspace"
@@ -126,12 +126,14 @@ def validate_configuration(station: str, station_config: dict, project_root: Pat
                 if "minH" in params and "maxH" in params:
                     if params["minH"] >= params["maxH"]:
                         issues.append(
-                            f"Invalid reflector height range: minH ({params['minH']}) >= maxH ({params['maxH']})"
+                            f"Invalid reflector height range: "
+                            f"minH ({params['minH']}) >= maxH ({params['maxH']})"
                         )
                 if "e1" in params and "e2" in params:
                     if params["e1"] >= params["e2"]:
                         issues.append(
-                            f"Invalid elevation angle range: e1 ({params['e1']}) >= e2 ({params['e2']})"
+                            f"Invalid elevation angle range: "
+                            f"e1 ({params['e1']}) >= e2 ({params['e2']})"
                         )
             except json.JSONDecodeError as e:
                 issues.append(f"Invalid JSON in {params_path}: {e}")
@@ -204,8 +206,8 @@ def run_command(cmd: list, description: str) -> bool:
     logger.info(f"  Command: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(cmd, check=True, capture_output=False)
-        logger.info(f"  ✓ {description} completed successfully")
+        subprocess.run(cmd, check=True, capture_output=False)
+        logger.info(f"  {description} completed successfully")
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"  ✗ {description} failed with exit code {e.returncode}")
@@ -386,7 +388,8 @@ Examples:
                 f"Starting GNSS-IR Processing at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
             logging.info(
-                f"Station: {args.station}, Year: {args.year}, DOY range: {args.doy_start}-{args.doy_end}"
+                f"Station: {args.station}, Year: {args.year}, "
+                f"DOY range: {args.doy_start}-{args.doy_end}"
             )
             logging.info(f"Using {args.num_cores} cores for parallel processing")
             logging.info("=" * 80)
@@ -429,9 +432,9 @@ Examples:
             logging.info("=" * 80)
 
             results["gnssir"] = len(gnssir_results["successful"]) > 0
-            logger.info(
-                f"  ✓ GNSS-IR Processing completed: {len(gnssir_results['successful'])}/{gnssir_results['attempted']} DOYs successful"
-            )
+            successful = len(gnssir_results["successful"])
+            attempted = gnssir_results["attempted"]
+            logger.info(f"  GNSS-IR Processing completed: {successful}/{attempted} DOYs successful")
         except Exception as e:
             logger.error(f"  ✗ GNSS-IR Processing failed: {e}")
             results["gnssir"] = False
@@ -546,7 +549,7 @@ Examples:
 
     print()
     print("Next step: Run the dashboard")
-    print(f"  streamlit run dashboard.py")
+    print("  streamlit run dashboard.py")
 
     # Exit with error if any step failed
     if not all(results.values()):

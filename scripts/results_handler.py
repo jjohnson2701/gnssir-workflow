@@ -1,8 +1,6 @@
 # ABOUTME: Results aggregator for daily GNSS-IR reflector height files
 # ABOUTME: Combines daily outputs into annual CSV datasets with quality metrics
 
-import os
-import glob
 import logging
 import pandas as pd
 from pathlib import Path
@@ -75,7 +73,7 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
         # Process each RH file
         for rh_file in rh_files:
             try:
-                # First check if the file format has comment lines at the top (indicated by % symbol)
+                # Check if file format has comment lines at top (indicated by % symbol)
                 with open(rh_file, "r") as f:
                     lines = f.readlines()
 
@@ -102,12 +100,11 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
                     continue
 
                 # Try to extract column information from the header
-                column_names = None
                 column_descriptions = []
 
                 # Look for the line with column descriptions (typically line 3)
                 if header_lines >= 3:
-                    # Line 3 (index 2) typically has descriptions like "% year, doy, RH, sat,UTCtime, Azim, Amp..."
+                    # Line 3 (index 2) typically has descriptions like "% year, doy, RH..."
                     desc_line = lines[2]
                     if desc_line.startswith("%"):
                         # Remove the % and split by commas
@@ -147,7 +144,8 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
                     # Fewer columns than expected - use canonical names for available columns
                     df.columns = GNSSIR_V3_COLUMNS[:num_cols]
                     logging.warning(
-                        f"File has {num_cols} columns, expected {len(GNSSIR_V3_COLUMNS)}. Using partial canonical names."
+                        f"File has {num_cols} columns, expected {len(GNSSIR_V3_COLUMNS)}. "
+                        "Using partial canonical names."
                     )
                 else:
                     # More columns than expected - use canonical names + generic for extras
@@ -156,7 +154,8 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
                     ]
                     df.columns = col_names
                     logging.warning(
-                        f"File has {num_cols} columns, expected {len(GNSSIR_V3_COLUMNS)}. Added generic names for extras."
+                        f"File has {num_cols} columns, expected {len(GNSSIR_V3_COLUMNS)}. "
+                        "Added generic names for extras."
                     )
 
                 # Extract the DOY from the filename
@@ -202,7 +201,7 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
         # Sort by DOY if it exists
         if "doy" in combined_df.columns:
             combined_df.sort_values("doy", inplace=True)
-            logging.info(f"Sorted data by column: doy")
+            logging.info("Sorted data by column: doy")
 
         # We'll handle date creation in the aggregation section below
 
@@ -229,9 +228,7 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
                 logging.error("Cannot perform daily aggregation: date column is missing")
                 # Save the raw combined data and return
                 combined_df.to_csv(output_csv_path, index=False)
-                logging.info(
-                    f"Raw combined data saved to {output_csv_path} with {len(combined_df)} total rows"
-                )
+                logging.info(f"Raw combined data saved to {output_csv_path}")
                 return output_csv_path
 
             # Find the RH column
@@ -245,9 +242,7 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
                 logging.error("Cannot identify RH column for aggregation")
                 # Save the raw combined data and return
                 combined_df.to_csv(output_csv_path, index=False)
-                logging.info(
-                    f"Raw combined data saved to {output_csv_path} with {len(combined_df)} total rows"
-                )
+                logging.info(f"Raw combined data saved to {output_csv_path}")
                 return output_csv_path
 
             logging.info(f"Performing daily aggregation using '{rh_column}' column")
@@ -283,7 +278,7 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
             daily_rows = len(daily_agg)
             original_rows = len(combined_df)
             logging.info(
-                f"Daily aggregation complete: {original_rows} individual retrievals → {daily_rows} daily records"
+                f"Daily aggregation complete: {original_rows} retrievals -> {daily_rows} records"
             )
             logging.info(f"Daily aggregated columns: {daily_agg.columns.tolist()}")
 
@@ -304,24 +299,18 @@ def combine_daily_rh_results(station_id_4char_lower, year, daily_rh_base_dir, an
 
             # Log any processing errors
             if processing_errors:
-                logging.warning(
-                    f"Completed with {len(processing_errors)} processing errors: {processing_errors}"
-                )
+                logging.warning(f"Completed with {len(processing_errors)} processing errors")
 
             return output_csv_path
         except Exception as e:
             logging.error(f"Error during daily aggregation: {e}")
             # Save the raw combined data as fallback
             combined_df.to_csv(output_csv_path, index=False)
-            logging.info(
-                f"Raw combined data saved to {output_csv_path} with {len(combined_df)} total rows"
-            )
+            logging.info(f"Raw combined data saved to {output_csv_path}")
 
             # Log any processing errors
             if processing_errors:
-                logging.warning(
-                    f"Completed with {len(processing_errors)} processing errors: {processing_errors}"
-                )
+                logging.warning(f"Completed with {len(processing_errors)} processing errors")
 
             return output_csv_path
 

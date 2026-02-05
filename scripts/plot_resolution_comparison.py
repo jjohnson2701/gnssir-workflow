@@ -63,7 +63,7 @@ def plot_resolution_comparison(
     elif "gnss_dm" in df.columns:
         gnss_dm_col = "gnss_dm"
     else:
-        raise ValueError(f"No GNSS demeaned column found")
+        raise ValueError("No GNSS demeaned column found")
 
     # Find reference demeaned column (various naming conventions)
     ref_dm_candidates = ["usgs_wl_dm", "coops_dm", "bartlett_dm", "bartlett_cove_dm"]

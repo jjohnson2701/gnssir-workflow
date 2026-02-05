@@ -25,7 +25,8 @@ def download_rinex(station: str, year: int, doy: int, target_path: Path) -> bool
     station_upper = station.upper()
     yy = str(year)[-2:]
 
-    url = f"{GNSS_BASE_URL}/{RINEX_PATH_PATTERN.format(year=year, doy=doy, station=station_upper, yy=yy)}"
+    path = RINEX_PATH_PATTERN.format(year=year, doy=doy, station=station_upper, yy=yy)
+    url = f"{GNSS_BASE_URL}/{path}"
 
     return download_from_url(url, target_path)
 

@@ -16,7 +16,7 @@ import logging
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 import argparse
 import json
 
@@ -25,24 +25,22 @@ sys.path.append(str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 # Import project modules
-from utils.gnssir_loader import load_gnssir_data
-from utils.geo_utils import haversine_distance
-import reflector_height_utils
-from scripts.external_apis.noaa_coops import NOAACOOPSClient
+from utils.gnssir_loader import load_gnssir_data  # noqa: E402
+from utils.geo_utils import haversine_distance  # noqa: E402
+import reflector_height_utils  # noqa: E402
+from scripts.external_apis.noaa_coops import NOAACOOPSClient  # noqa: E402
 
 try:
     from scripts.utils.segmented_analysis import (
         generate_monthly_segments,
         generate_seasonal_segments,
         perform_segmented_correlation,
-        filter_by_segment,
     )
 except ImportError:
-    from utils.segmented_analysis import (
+    from utils.segmented_analysis import (  # noqa: F401
         generate_monthly_segments,
         generate_seasonal_segments,
         perform_segmented_correlation,
-        filter_by_segment,
     )
 
 try:
@@ -464,9 +462,8 @@ def main():
         print("=" * 70)
         print(f"CO-OPS Comparison Complete: {args.station} {args.year}")
         print("=" * 70)
-        print(
-            f"  CO-OPS Station: {results['coops_station']} ({results.get('coops_station_name', 'Unknown')})"
-        )
+        coops_name = results.get("coops_station_name", "Unknown")
+        print(f"  CO-OPS Station: {results['coops_station']} ({coops_name})")
         if results.get("coops_distance_km") is not None:
             print(f"  Distance from GNSS: {results['coops_distance_km']:.1f} km")
         print(f"  Station Source: {results.get('coops_source', 'unknown')}")

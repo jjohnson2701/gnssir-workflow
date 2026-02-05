@@ -4,7 +4,6 @@
 import json
 import logging
 import pandas as pd
-import numpy as np
 from pathlib import Path
 from dataretrieval import nwis
 from datetime import datetime, timedelta
@@ -143,7 +142,6 @@ def progressive_gauge_search(
     current_radius = initial_radius_km
     all_gauges = []
     matching_gauges = []
-    state_code = get_state_from_coordinates(gnss_station_lat, gnss_station_lon)
 
     while current_radius <= max_radius_km:
         logging.info(f"Searching with radius {current_radius} km")

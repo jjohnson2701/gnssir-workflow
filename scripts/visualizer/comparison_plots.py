@@ -2,16 +2,14 @@
 # ABOUTME: Provides quality diagnostics, seasonal investigation, and outlier detection
 
 import logging
-from typing import Dict, List, Tuple, Optional, Union, Any
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import matplotlib.colors as mcolors
 from pathlib import Path
 from scipy import stats
 
-from .base import ensure_output_dir, PLOT_COLORS
+from .base import PLOT_COLORS
 
 
 def create_comparison_plot(df, station_name, year, output_path):
@@ -95,7 +93,7 @@ def create_comparison_plot(df, station_name, year, output_path):
 
     # Combined legend
     lines = line1 + line2
-    labels = [l.get_label() for l in lines]
+    labels = [ln.get_label() for ln in lines]
     ax1.legend(lines, labels, loc="upper left", framealpha=0.9)
 
     # Add correlation text
@@ -411,7 +409,10 @@ def investigate_seasonal_correlation_issues(df, station_name, year):
                 "usgs_std": usgs_std,
                 "rh_count_mean": rh_count_mean,
                 "rh_std_mean": rh_std_mean,
-                "date_range": f"{valid_data.index.min().strftime('%m/%d')} - {valid_data.index.max().strftime('%m/%d')}",
+                "date_range": (
+                    f"{valid_data.index.min().strftime('%m/%d')} - "
+                    f"{valid_data.index.max().strftime('%m/%d')}"
+                ),
             }
 
             print(f"\n{season.upper()} ANALYSIS:")
@@ -443,7 +444,7 @@ def detect_outliers_and_anomalies(df, station_name, year):
         Tuple of (outliers_df, clean_correlation)
     """
     print(f"\n{'='*50}")
-    print(f"OUTLIER DETECTION ANALYSIS")
+    print("OUTLIER DETECTION ANALYSIS")
     print(f"{'='*50}")
 
     valid_data = df.dropna(subset=["wse_ellips_m", "usgs_value_m_median"])
@@ -466,25 +467,26 @@ def detect_outliers_and_anomalies(df, station_name, year):
 
     print(f"Total data points: {len(valid_data)}")
     print(f"Outliers detected: {len(outliers)} ({len(outliers)/len(valid_data)*100:.1f}%)")
-    print(f"Residual statistics:")
+    print("Residual statistics:")
     print(f"  Mean: {residuals.mean():.3f}m")
     print(f"  Std: {residuals.std():.3f}m")
     print(f"  IQR bounds: [{lower_bound:.3f}, {upper_bound:.3f}]")
 
     if len(outliers) > 0:
-        print(f"\nOutlier dates and residuals:")
+        print("\nOutlier dates and residuals:")
         for date, row in outliers.iterrows():
             residual = residuals.loc[date]
-            print(
-                f"  {date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else date}: {residual:.3f}m (GNSS: {row['wse_ellips_m']:.3f}, USGS: {row['usgs_value_m_median']:.3f})"
-            )
+            date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else date
+            gnss = row["wse_ellips_m"]
+            usgs = row["usgs_value_m_median"]
+            print(f"  {date_str}: {residual:.3f}m (GNSS: {gnss:.3f}, USGS: {usgs:.3f})")
 
     # Correlation without outliers
     clean_data = valid_data[(residuals >= lower_bound) & (residuals <= upper_bound)]
     clean_correlation = clean_data["wse_ellips_m"].corr(clean_data["usgs_value_m_median"])
     original_correlation = valid_data["wse_ellips_m"].corr(valid_data["usgs_value_m_median"])
 
-    print(f"\nCorrelation analysis:")
+    print("\nCorrelation analysis:")
     print(f"  Original correlation: {original_correlation:.4f}")
     print(f"  Without outliers: {clean_correlation:.4f}")
     print(f"  Improvement: {clean_correlation - original_correlation:.4f}")
@@ -624,8 +626,6 @@ def run_comprehensive_correlation_investigation(df, station_name, year, output_d
     Returns:
         Tuple of (seasonal_stats, outliers, clean_correlation)
     """
-    import os
-
     output_dir = Path(output_dir)
 
     print(f"Starting comprehensive correlation investigation for {station_name} {year}")
@@ -674,7 +674,7 @@ def run_comprehensive_correlation_investigation(df, station_name, year, output_d
         print("SUCCESS: Outlier removal significantly improves correlation")
         print("   - Consider implementing automated outlier filtering")
 
-    print(f"\nGenerated plots:")
+    print("\nGenerated plots:")
     print(f"  Enhanced comparison: {comparison_path}")
     print(f"  Quality diagnostics: {diagnostic_path}")
     print(f"  Spring investigation: {spring_plot_path}")

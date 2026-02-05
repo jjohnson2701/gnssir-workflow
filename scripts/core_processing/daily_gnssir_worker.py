@@ -1,10 +1,7 @@
 # ABOUTME: Daily GNSS-IR worker for single-day processing pipeline
 # ABOUTME: Handles RINEX download, conversion, SNR extraction, and reflector height retrieval
 
-import os
-import logging
 import shutil
-import glob
 from pathlib import Path
 
 # Import utilities from project modules using relative imports
@@ -46,8 +43,9 @@ def process_single_day(
         project_root (Path): Path to the project root directory
         refl_code_base (Path): Path to the REFL_CODE base directory
         orbits_base (Path): Path to the ORBITS base directory
-        skip_options (dict, optional): Dictionary of boolean flags for skipping steps if output exists
-                                     Keys: skip_download, skip_rinex_conversion, skip_snr, skip_rh, skip_quicklook
+        skip_options (dict, optional): Dictionary of boolean flags for skipping steps
+            if output exists. Keys: skip_download, skip_rinex_conversion, skip_snr,
+            skip_rh, skip_quicklook
 
     Returns:
         dict: Dictionary with processing results
@@ -148,7 +146,7 @@ def process_single_day(
     quicklook_exe_path = tool_paths.get("quicklook_path", "quickLook")
 
     # Log the actual paths being used
-    day_logger.info(f"Tool paths being used:")
+    day_logger.info("Tool paths being used:")
     day_logger.info(f"gfzrnx: {gfzrnx_exe_path}")
     day_logger.info(f"rinex2snr: {rinex2snr_exe_path}")
     day_logger.info(f"gnssir: {gnssir_exe_path}")
@@ -184,7 +182,8 @@ def process_single_day(
         day_logger.info("Step 2: RINEX 3 to RINEX 2.11 conversion - SKIPPING as requested.")
         if not check_file_exists(rinex2_file_path, min_size_bytes=MIN_RINEX2_SIZE_BYTES):
             day_logger.error(
-                f"RINEX conversion skipped, but expected file {rinex2_file_path} is missing or too small."
+                f"RINEX conversion skipped, but expected file {rinex2_file_path} "
+                "is missing or too small."
             )
             day_logger.warning("Attempting RINEX conversion despite skip flag...")
             try:
@@ -199,7 +198,8 @@ def process_single_day(
 
                 if rinex2_path is None or not rinex2_path.exists():
                     day_logger.error(
-                        f"Failed to convert RINEX 3 to RINEX 2.11 for {station_id.upper()} {year} {doy_padded}"
+                        f"Failed to convert RINEX 3 to RINEX 2.11 for "
+                        f"{station_id.upper()} {year} {doy_padded}"
                     )
                     result["errors"].append("Failed to convert RINEX 3 to RINEX 2.11")
                     return result
@@ -228,7 +228,8 @@ def process_single_day(
 
             if rinex2_path is None or not rinex2_path.exists():
                 day_logger.error(
-                    f"Failed to convert RINEX 3 to RINEX 2.11 for {station_id.upper()} {year} {doy_padded}"
+                    f"Failed to convert RINEX 3 to RINEX 2.11 for "
+                    f"{station_id.upper()} {year} {doy_padded}"
                 )
                 result["errors"].append("Failed to convert RINEX 3 to RINEX 2.11")
                 return result
@@ -253,7 +254,7 @@ def process_single_day(
             )
             result["skipped_steps"].append("rinex2snr")
         else:
-            day_logger.error(f"rinex2snr skipped, but expected SNR file is missing or too small.")
+            day_logger.error("rinex2snr skipped, but expected SNR file is missing or too small.")
             day_logger.warning("Attempting rinex2snr despite skip flag...")
             try:
                 rinex2snr_success = execute_rinex2snr(
@@ -409,7 +410,8 @@ def process_single_day(
 
             if plots_in_workspace:
                 day_logger.info(
-                    f"Found {len(plots_in_workspace)} existing quickLook plots in workspace directories."
+                    f"Found {len(plots_in_workspace)} existing quickLook plots "
+                    "in workspace directories."
                 )
 
                 # Copy plots to our project structure
@@ -442,7 +444,7 @@ def process_single_day(
                 )
 
                 try:
-                    quicklook_thread = execute_quicklook_threaded(
+                    execute_quicklook_threaded(
                         quicklook_exe_path=quicklook_exe_path,
                         station_4char_lower=station_id.lower(),
                         year=year,
@@ -453,9 +455,7 @@ def process_single_day(
                         logs_dir=logs_daily_dir,
                     )
 
-                    day_logger.info(
-                        f"quickLook started in background thread, continuing processing"
-                    )
+                    day_logger.info("quickLook started in background thread, continuing processing")
                 except Exception as e:
                     day_logger.error(f"Exception starting quickLook in background thread: {e}")
                     result["errors"].append(
@@ -467,7 +467,7 @@ def process_single_day(
         try:
             day_logger.info("Step 5: Running quickLook in background thread")
 
-            quicklook_thread = execute_quicklook_threaded(
+            execute_quicklook_threaded(
                 quicklook_exe_path=quicklook_exe_path,
                 station_4char_lower=station_id.lower(),
                 year=year,
@@ -478,7 +478,7 @@ def process_single_day(
                 logs_dir=logs_daily_dir,
             )
 
-            day_logger.info(f"quickLook started in background thread, continuing processing")
+            day_logger.info("quickLook started in background thread, continuing processing")
             # Don't wait for quickLook to finish - it will run in the background
 
         except Exception as e:

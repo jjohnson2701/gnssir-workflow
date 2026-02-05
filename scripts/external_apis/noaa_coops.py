@@ -5,13 +5,11 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional
 import logging
 from pathlib import Path
 import json
 import time
-from urllib.parse import urlencode
-import xml.etree.ElementTree as ET
 
 
 class NOAACOOPSClient:
@@ -109,7 +107,6 @@ class NOAACOOPSClient:
             station_id: Clear only cache for specific station (optional)
             product: Clear only specific product type ('predictions' or 'water_level') (optional)
         """
-        import glob
         import os
 
         if station_id and product:
@@ -378,7 +375,8 @@ class NOAACOOPSClient:
             DataFrame with water level observations
         """
         self.logger.info(
-            f"Fetching water level observations for station {station_id} from {start_date} to {end_date}"
+            f"Fetching water level observations for station {station_id} "
+            f"from {start_date} to {end_date}"
         )
 
         # Check if we can get all data from cache
@@ -406,7 +404,8 @@ class NOAACOOPSClient:
             date_diff = (end_date - start_date).days
             if date_diff > 31:
                 self.logger.warning(
-                    f"Date range ({date_diff} days) exceeds CO-OPS limit of 31 days for water level data. Fetching in chunks..."
+                    f"Date range ({date_diff} days) exceeds CO-OPS limit of 31 days "
+                    "for water level data. Fetching in chunks..."
                 )
 
             # Fetch data in 30-day chunks

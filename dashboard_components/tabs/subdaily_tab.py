@@ -21,13 +21,9 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 # Import station metadata helper
-from dashboard_components.station_metadata import (
-    get_antenna_height,
+from dashboard_components.station_metadata import (  # noqa: E402
     get_reference_source_info,
-    get_station_display_info,
 )
-
-from dashboard_components.constants import ENHANCED_COLORS
 
 
 def load_subdaily_matched_data(station_id: str, year: int) -> tuple:
@@ -88,7 +84,7 @@ def detect_column_names(df: pd.DataFrame) -> tuple:
         if ref_dm_cols:
             ref_dm_col = ref_dm_cols[0]
             # Extract source name from column prefix (e.g., 'bartlett_cove' from 'bartlett_cove_dm')
-            source_prefix = ref_dm_col.rsplit("_dm", 1)[0]
+            # source_prefix would be ref_dm_col.rsplit("_dm", 1)[0] if needed
             ref_source = "ERDDAP"
         else:
             ref_dm_col = None
@@ -174,9 +170,7 @@ def create_subdaily_plot(
         )
 
     # GNSS-IR as scatter points - use darker blue for contrast with ribbon
-    gnss_scatter = ax_main.scatter(
-        df["gnss_datetime"], df[gnss_col], c="#1A5276", s=8, alpha=0.6, zorder=4
-    )
+    ax_main.scatter(df["gnss_datetime"], df[gnss_col], c="#1A5276", s=8, alpha=0.6, zorder=4)
 
     # Build legend with proper handles
     from matplotlib.lines import Line2D
@@ -289,13 +283,14 @@ def render_subdaily_tab(station_id: str, year: int, rh_data=None, comparison_dat
     """
     st.header("🌊 Subdaily Comparison")
 
-    st.markdown("""
+    st.markdown(
+        """
     **Full-resolution comparison** of GNSS-IR individual retrievals versus reference gauge data.
     This view shows all subdaily measurements, revealing tidal patterns and retrieval scatter.
-    """)
+    """
+    )
 
     # Get station metadata
-    station_info = get_station_display_info(station_id)
     ref_info = get_reference_source_info(station_id)
 
     # Display reference source info
@@ -313,7 +308,8 @@ def render_subdaily_tab(station_id: str, year: int, rh_data=None, comparison_dat
 
     if error:
         st.error(f"❌ {error}")
-        st.markdown("""
+        st.markdown(
+            """
         **To generate subdaily matched data:**
 
         1. Ensure GNSS-IR processing is complete for this station/year
@@ -323,7 +319,10 @@ def render_subdaily_tab(station_id: str, year: int, rh_data=None, comparison_dat
            ```
 
         This creates the `{station_id}_{year}_subdaily_matched.csv` file needed for this view.
-        """.format(station_id=station_id, year=year))
+        """.format(
+                station_id=station_id, year=year
+            )
+        )
         return
 
     # Detect column names
@@ -463,7 +462,8 @@ def render_subdaily_tab(station_id: str, year: int, rh_data=None, comparison_dat
 
     # Interpretation guide
     with st.expander("📖 Interpretation Guide"):
-        st.markdown("""
+        st.markdown(
+            """
         **Understanding the Subdaily Comparison Plot:**
 
         **Top Panel - Time Series:**
@@ -486,7 +486,8 @@ def render_subdaily_tab(station_id: str, year: int, rh_data=None, comparison_dat
         - Wider scatter at high/low tide extremes is common
         - Gaps indicate periods with insufficient satellite visibility
         - Systematic offsets suggest datum alignment issues
-        """)
+        """
+        )
 
 
 # Export function

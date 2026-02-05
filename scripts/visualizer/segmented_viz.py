@@ -7,8 +7,9 @@ import pandas as pd
 from typing import Dict, Optional, Tuple, List, Union
 from pathlib import Path
 import matplotlib.dates as mdates
-from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
+
+from scripts.utils.segmented_analysis import filter_by_segment
 
 
 def plot_segment_correlations(

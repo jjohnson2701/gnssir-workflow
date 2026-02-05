@@ -2,7 +2,7 @@
 # ABOUTME: Creates annual RH plots with optional reference gauge overlay
 
 import logging
-from typing import Optional, Union, Dict, List, Any, Tuple
+from typing import List, Optional, Union
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,7 +10,6 @@ import matplotlib.dates as mdates
 from pathlib import Path
 
 from .base import (
-    ensure_output_dir,
     find_column_by_name,
     add_summary_textbox,
     PLOT_COLORS,
@@ -257,9 +256,9 @@ def plot_annual_rh_timeseries(
         # Add data summary in text box
         summary_stats = {
             "Total Points": len(df),
-            f"Min RH": f"{df[rh_column].min():.2f} m",
-            f"Max RH": f"{df[rh_column].max():.2f} m",
-            f"Mean RH": f"{df[rh_column].mean():.2f} m",
+            "Min RH": f"{df[rh_column].min():.2f} m",
+            "Max RH": f"{df[rh_column].max():.2f} m",
+            "Mean RH": f"{df[rh_column].mean():.2f} m",
         }
         add_summary_textbox(plt, df, summary_stats)
 

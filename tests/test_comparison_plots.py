@@ -9,16 +9,16 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")  # Non-interactive backend for testing
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 # Add scripts to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from visualizer.comparison_plots import (
+from visualizer.comparison_plots import (  # noqa: E402
     create_comparison_plot,
     detect_outliers_and_anomalies,
 )
-from visualizer.base import PLOT_COLORS
+from visualizer.base import PLOT_COLORS  # noqa: E402
 
 
 class TestColorScheme:

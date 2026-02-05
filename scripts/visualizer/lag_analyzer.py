@@ -2,16 +2,13 @@
 # ABOUTME: Computes cross-correlation and optimal lag for tidal propagation delays
 
 import logging
-from typing import Dict, List, Tuple, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from pathlib import Path
-from scipy import stats
-from scipy import signal
 
-from .base import ensure_output_dir, add_summary_textbox, PLOT_COLORS, PLOT_STYLES
+from .base import ensure_output_dir, PLOT_COLORS
 
 
 def calculate_optimal_time_lag(
@@ -35,7 +32,7 @@ def calculate_optimal_time_lag(
 
     Returns:
         Dictionary containing optimal lag info:
-            - optimal_lag_days: Optimal lag in days (negative means GNSS-IR leads, positive means USGS leads)
+            - optimal_lag_days: Optimal lag in days (negative=GNSS-IR leads, positive=USGS leads)
             - max_correlation: Maximum correlation coefficient achieved
             - lag_confidence: Confidence in the lag (high, medium, low)
             - lag_significant: Whether lag is statistically significant
@@ -255,7 +252,7 @@ def plot_lag_correlation(
 
         # Add text annotation for best lag
         plt.annotate(
-            f"Optimal Lag: {best_lag} days\nCorrelation: {best_corr:.4f}\nConfidence: {lag_confidence}",
+            f"Optimal Lag: {best_lag} days\nCorr: {best_corr:.4f}\nConf: {lag_confidence}",
             xy=(best_lag, best_corr),
             xytext=(0, 20),
             textcoords="offset points",

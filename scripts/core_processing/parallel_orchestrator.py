@@ -3,7 +3,6 @@
 
 import logging
 import multiprocessing
-from pathlib import Path
 
 # Import project modules using relative imports
 from .daily_gnssir_worker import process_single_day_wrapper
@@ -35,15 +34,15 @@ def process_station_parallel(
         refl_code_base (Path): Path to the REFL_CODE base directory
         orbits_base (Path): Path to the ORBITS base directory
         num_cores (int): Number of cores to use for parallel processing
-        results_handler (module, optional): Module containing the combine_daily_rh_results function.
-        skip_options (dict, optional): Dictionary of boolean flags for skipping steps if output exists
-                                      Keys: skip_download, skip_rinex_conversion, skip_snr, skip_rh, skip_quicklook
+        results_handler (module, optional): Module with combine_daily_rh_results func.
+        skip_options (dict, optional): Boolean flags for skipping steps if output
+            exists. Keys: skip_download, skip_rinex_conversion, skip_snr, skip_rh,
+            skip_quicklook
 
     Returns:
         dict: Summary of processing results
     """
     station_id = station_config.get("station_id_4char_lower", "").lower()
-    station_name = station_id.upper()
 
     # Setup gnssrefl workspace for the year
     setup_gnssrefl_workspace(station_id, year, refl_code_base, orbits_base)

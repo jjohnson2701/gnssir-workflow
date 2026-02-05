@@ -11,7 +11,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
-from dashboard_components.station_metadata import (
+from dashboard_components.station_metadata import (  # noqa: E402
     get_station_config,
     get_reference_source_info,
     _calculate_coops_distance,
@@ -37,7 +37,7 @@ def compare_station_references(station_id: str):
 
     # Current primary reference
     current_ref = get_reference_source_info(station_id)
-    print(f"CURRENT PRIMARY REFERENCE:")
+    print("CURRENT PRIMARY REFERENCE:")
     print(f"  Source: {current_ref['primary_source']}")
     print(f"  Station: {current_ref['station_name']}")
     print(f"  Distance: {current_ref.get('distance_km', 'Unknown')} km")
@@ -154,7 +154,7 @@ def compare_station_references(station_id: str):
             elif diff < 0:
                 print(f"  → {abs(diff):.1f} km FARTHER than current reference")
             else:
-                print(f"  → Same distance as current reference")
+                print("  -> Same distance as current reference")
 
         if ref.get("notes"):
             print(f"  Notes: {ref['notes']}")
@@ -181,13 +181,15 @@ def compare_station_references(station_id: str):
             improvement = current_dist - best["distance_km"]
             print(f"  ✓ Switch to {best['source']}: {best['station_name']}")
             print(
-                f"  Improvement: {improvement:.1f} km closer ({current_dist:.1f} km → {best['distance_km']:.1f} km)"
+                f"  Improvement: {improvement:.1f} km closer "
+                f"({current_dist:.1f} km -> {best['distance_km']:.1f} km)"
             )
             print(f"  Station ID: {best['station_id']}")
         else:
-            print(f"  ✓ Current reference is optimal")
+            print("  Current reference is optimal")
             print(
-                f"  {current_ref['primary_source']}: {current_ref['station_name']} at {current_dist} km"
+                f"  {current_ref['primary_source']}: {current_ref['station_name']} "
+                f"at {current_dist} km"
             )
 
         print(f"{'='*100}\n")
@@ -201,7 +203,7 @@ def main():
     stations = ["FORA", "GLBX", "VALR", "MDAI", "DESO"]
 
     print(f"\n{'='*100}")
-    print(f"REFERENCE SOURCE DISTANCE COMPARISON")
+    print("REFERENCE SOURCE DISTANCE COMPARISON")
     print(f"{'='*100}")
     print("\nComparing all configured reference sources for each station...")
     print("This helps identify the closest validation source.\n")

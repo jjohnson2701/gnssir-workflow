@@ -143,7 +143,8 @@ def register_station_coordinates(
 
         if existing:
             logging.debug(
-                f"Station {station_id} already in database: lat={existing[0]}, lon={existing[1]}, ht={existing[2]}"
+                f"Station {station_id} already in database: "
+                f"lat={existing[0]}, lon={existing[1]}, ht={existing[2]}"
             )
         else:
             # Insert the station
@@ -153,7 +154,8 @@ def register_station_coordinates(
             )
             conn.commit()
             logging.info(
-                f"Registered station {station_id} in gnssrefl database: lat={lat}, lon={lon}, ht={ht}"
+                f"Registered station {station_id} in gnssrefl database: "
+                f"lat={lat}, lon={lon}, ht={ht}"
             )
 
         conn.close()

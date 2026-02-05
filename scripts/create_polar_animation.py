@@ -4,19 +4,17 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge, Circle
+from matplotlib.patches import Wedge
 import matplotlib.colors as mcolors
 from matplotlib.cm import ScalarMappable
 from pathlib import Path
 import argparse
-from datetime import datetime, timedelta
+from datetime import timedelta
 import imageio.v2 as imageio
 import tempfile
 import json
 import contextily as ctx
 from pyproj import Transformer
-import geopandas as gpd
-from shapely.geometry import box
 
 # GPS L1 wavelength for Fresnel zone calculations
 GPS_L1_WAVELENGTH = 0.1903  # meters
@@ -296,10 +294,12 @@ def load_data(station: str, year: int, results_dir: Path):
     print(f"  Config elevation range: {e1}°-{e2}°")
     print(f"  Actual elevation range: {actual_elev_min:.2f}°-{actual_elev_max:.2f}°")
     print(
-        f"  Inner reflection: {inner_reflection_dist:.1f}m from antenna, Fresnel radius: {inner_fresnel_radius:.1f}m"
+        f"  Inner reflection: {inner_reflection_dist:.1f}m from antenna, "
+        f"Fresnel radius: {inner_fresnel_radius:.1f}m"
     )
     print(
-        f"  Outer reflection: {outer_reflection_dist:.1f}m from antenna, Fresnel radius: {outer_fresnel_radius:.1f}m"
+        f"  Outer reflection: {outer_reflection_dist:.1f}m from antenna, "
+        f"Fresnel radius: {outer_fresnel_radius:.1f}m"
     )
 
     metadata = {
@@ -363,7 +363,7 @@ def load_data(station: str, year: int, results_dir: Path):
         ref_df = pd.read_csv(coops_file)
         # Filter to observations only (exclude predictions)
         if "is_observation" in ref_df.columns:
-            ref_df = ref_df[ref_df["is_observation"] == True].copy()
+            ref_df = ref_df[ref_df["is_observation"]].copy()
         dt_col = [c for c in ref_df.columns if "datetime" in c.lower()][0]
         ref_df["datetime"] = pd.to_datetime(ref_df[dt_col], utc=True).dt.tz_convert(None)
         # CO-OPS files typically have water_level or predicted_wl columns
@@ -440,7 +440,7 @@ def create_frame(
     outer_fresnel_r = metadata.get("outer_fresnel_radius", 5)
     inner_refl_dist = metadata.get("inner_reflection_dist", 90)
     outer_refl_dist = metadata.get("outer_reflection_dist", 230)
-    mean_rh = metadata.get("mean_rh", 10.0)  # Mean reflector height for distance calculations
+    # mean_rh for distance calculations is computed internally
 
     # === Top panel: Time series (spans both columns) ===
     ax_ts = fig.add_subplot(gs[0, :])
@@ -947,7 +947,8 @@ def create_frame(
     ax_sat.set_aspect("equal")
     ax_sat.axis("off")
     ax_sat.set_title(
-        f"Reflection Distances ({inner_refl_dist:.0f}-{outer_refl_dist:.0f}m) | Current: {len(df_current)} pts",
+        f"Reflection Distances ({inner_refl_dist:.0f}-{outer_refl_dist:.0f}m) | "
+        f"Current: {len(df_current)} pts",
         fontsize=10,
     )
 

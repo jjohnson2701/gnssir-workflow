@@ -8,7 +8,11 @@ from pathlib import Path
 # Add scripts to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from find_reference_stations import haversine_distance, load_station_config, ReferenceStation
+from find_reference_stations import (  # noqa: E402
+    haversine_distance,
+    load_station_config,
+    ReferenceStation,
+)
 
 
 class TestHaversineDistance:

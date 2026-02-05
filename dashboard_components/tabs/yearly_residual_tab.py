@@ -8,16 +8,16 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from pathlib import Path
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from scipy import interpolate
-from typing import Optional, Tuple
+from typing import Tuple
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 # Import station metadata helper
-from dashboard_components.station_metadata import get_antenna_height
+from dashboard_components.station_metadata import get_antenna_height  # noqa: E402
 
 # Import visualization functions
 try:
@@ -457,11 +457,13 @@ def create_residual_analysis_plot(
 
     # Create statistics text
     if len(valid_data) > 0:
+        valid_pts = metadata.get("valid_points", 0)
+        total_pts = metadata.get("total_points", 0)
         stats_text = [
-            f"📊 RESIDUAL STATISTICS",
-            f"Valid Points: {metadata.get('valid_points', 0):,} / {metadata.get('total_points', 0):,}",
+            "RESIDUAL STATISTICS",
+            f"Valid Points: {valid_pts:,} / {total_pts:,}",
             f"Coverage: {metadata.get('data_coverage', 0):.1f}%",
-            f"",
+            "",
             f"Mean Difference: {metadata.get('mean_difference', 0):.4f} m",
             f"RMSE: {metadata.get('rmse', 0):.4f} m",
             f"Std Deviation: {metadata.get('std_difference', 0):.4f} m",
@@ -625,10 +627,13 @@ def render_yearly_residual_tab(
     """
     st.header("📈 Yearly Time Series & Residual Analysis")
 
-    st.markdown("""
-    **Comprehensive yearly view showing the complete time series comparison between GNSS-IR and reference measurements,
-    with detailed residual analysis to quantify measurement differences and uncertainty.**
-    """)
+    st.markdown(
+        """
+    **Comprehensive yearly view showing the complete time series comparison between GNSS-IR
+    and reference measurements, with detailed residual analysis to quantify measurement
+    differences and uncertainty.**
+    """
+    )
 
     if rh_data is None or rh_data.empty:
         st.warning("⚠️ No GNSS-IR data available for residual analysis")
@@ -671,7 +676,7 @@ def render_yearly_residual_tab(
         )
 
     with col2:
-        uncertainty_method = st.selectbox(
+        st.selectbox(
             "Uncertainty Estimation:",
             ["measurement_std", "rolling_variability", "none"],
             format_func=lambda x: {
@@ -834,7 +839,8 @@ def render_yearly_residual_tab(
                 st.pyplot(fig)
                 plt.close()
 
-                st.markdown("""
+                st.markdown(
+                    """
                 ### 📊 Multi-Parameter Timeline Analysis
 
                 This comprehensive timeline shows:
@@ -843,7 +849,8 @@ def render_yearly_residual_tab(
                 - **Correlation Analysis**: Rolling correlation with water level data (if available)
 
                 The timeline helps identify seasonal patterns and optimal measurement periods.
-                """)
+                """
+                )
 
         else:
             # Residual Analysis Processing
@@ -919,25 +926,32 @@ def render_yearly_residual_tab(
                 st.metric("Total Points", f"{metadata.get('total_points', 0):,}")
 
             # RMSE Explanation
-            st.markdown("### 🧮 RMSE Calculation Details")
-            st.markdown(f"""
-            **Root Mean Square Error (RMSE)** quantifies the magnitude of differences between GNSS-IR water surface elevation (WSE) and {reference_source} measurements:
+            st.markdown("### RMSE Calculation Details")
+            gnss_src = metadata.get("gnss_source_col", "Unknown")
+            ref_src = metadata.get("ref_source_col", "Unknown")
+            valid_pts = metadata.get("valid_points", 0)
+            rmse_val = metadata.get("rmse", 0)
+            st.markdown(
+                f"""
+            **Root Mean Square Error (RMSE)** quantifies the magnitude of differences
+            between GNSS-IR water surface elevation (WSE) and {reference_source} measurements:
 
             ```
-            RMSE = √(Σ(GNSS_water_level - {reference_source}_water_level)² / N)
+            RMSE = sqrt(sum((GNSS_water_level - {reference_source}_water_level)^2) / N)
             ```
-            
+
             **Current calculation method:**
-            - **Data Source**: {metadata.get('gnss_source_col', 'Unknown')} vs {metadata.get('ref_source_col', 'Unknown')}
+            - **Data Source**: {gnss_src} vs {ref_src}
             - **Temporal Alignment**: {resolution} resolution with interpolation
-            - **Valid Pairs**: {metadata.get('valid_points', 0):,} synchronized measurements
-            - **RMSE Value**: {metadata.get('rmse', 0):.4f} meters
-            
+            - **Valid Pairs**: {valid_pts:,} synchronized measurements
+            - **RMSE Value**: {rmse_val:.4f} meters
+
             **Interpretation:**
             - Lower RMSE indicates better agreement between measurement systems
             - Typical values for well-calibrated GNSS-IR: 0.05-0.15 m
             - Values > 0.20 m may indicate calibration or processing issues
-            """)
+            """
+            )
 
             # Export options
             if st.button("💾 Export Analysis Data"):

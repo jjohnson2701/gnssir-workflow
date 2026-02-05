@@ -27,7 +27,8 @@ def calculate_time_lag_correlation(series1, series2, max_lag_days=10):
         effective_max_lag = min(max_lag_days, series_length - 3)
         if effective_max_lag < max_lag_days:
             logging.info(
-                f"Limited maximum lag to {effective_max_lag} days to ensure at least 3 overlapping points"
+                f"Limited maximum lag to {effective_max_lag} days "
+                "to ensure at least 3 overlapping points"
             )
 
         if series_length < 4:  # Need at least 4 points to have 2+ points overlap with a lag

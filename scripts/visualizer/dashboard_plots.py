@@ -17,10 +17,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
-import seaborn as sns
 from datetime import datetime, timedelta
 import calendar
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Tuple
 import logging
 
 # Import the publication theme for consistent styling
@@ -844,12 +843,12 @@ def create_tidal_stage_performance(
     if tide_col is None:
         logger.warning("No tide data column found")
         # Create empty plot with message
-        for ax in axes:
-            ax.text(
-                0.5, 0.5, "No tide data available", ha="center", va="center", transform=ax.transAxes
-            )
-            ax.set_xticks([])
-            ax.set_yticks([])
+        ax = fig.add_subplot(gs[:, :])
+        ax.text(
+            0.5, 0.5, "No tide data available", ha="center", va="center", transform=ax.transAxes
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
         return fig
 
     # Classify tidal stages
@@ -881,17 +880,17 @@ def create_tidal_stage_performance(
 
     if not merged_data:
         logger.warning("No overlapping data found for tidal stage analysis")
-        for ax in axes:
-            ax.text(
-                0.5,
-                0.5,
-                "No overlapping data found",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            ax.set_xticks([])
-            ax.set_yticks([])
+        ax = fig.add_subplot(gs[:, :])
+        ax.text(
+            0.5,
+            0.5,
+            "No overlapping data found",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
         return fig
 
     merged_df = pd.DataFrame(merged_data)
@@ -1156,8 +1155,6 @@ def load_sub_hourly_data(
                             snr = float(parts[7])
 
                             # Convert to datetime
-                            from datetime import datetime, timedelta
-
                             date_obj = datetime(year_val, 1, 1) + timedelta(days=doy - 1)
                             datetime_obj = date_obj + timedelta(hours=utc_hour)
 
@@ -1370,7 +1367,7 @@ def create_multi_scale_performance(
     precision_array = np.array(precision_matrix).T
 
     # Create heatmap
-    im1 = ax1.imshow(precision_array, cmap="RdYlGn_r", aspect="auto")
+    ax1.imshow(precision_array, cmap="RdYlGn_r", aspect="auto")
     ax1.set_xticks(range(len(density_labels)))
     ax1.set_xticklabels(density_labels)
     ax1.set_yticks([0, 1])
@@ -1655,7 +1652,7 @@ def create_multi_scale_performance(
                 "r-",
                 alpha=0.8,
                 linewidth=2,
-                label=f"Trend",
+                label="Trend",
             )
 
             ax6.set_xlabel("Daily Aggregated Std (m)")
@@ -1676,7 +1673,7 @@ def create_multi_scale_performance(
     else:
         # Fallback: Show relationship between count and precision
         if "rh_count" in comparison_df.columns:
-            scatter = ax6.scatter(
+            ax6.scatter(
                 comparison_df["rh_count"],
                 comparison_df["rh_std_m"],
                 alpha=0.6,
@@ -2061,7 +2058,7 @@ def create_water_level_change_response(
 
     # Add combined legend
     lines = line1 + line2
-    labels = [l.get_label() for l in lines]
+    labels = [ln.get_label() for ln in lines]
     ax4.legend(lines, labels, loc="upper left")
 
     ax4.grid(True, alpha=0.3)

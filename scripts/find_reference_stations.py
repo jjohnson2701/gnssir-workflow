@@ -29,16 +29,17 @@ Usage:
 import argparse
 import json
 import logging
+import math
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from scripts.utils.geo_utils import haversine_distance
+from scripts.utils.geo_utils import haversine_distance  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -281,12 +282,15 @@ def search_erddap_stations(
             try:
                 # Use allDatasets endpoint which includes spatial metadata
                 # This is more efficient than querying each dataset individually
-                all_url = f"{server_info['base_url']}/tabledap/allDatasets.csv?datasetID,title,minLongitude,maxLongitude,minLatitude,maxLatitude"
+                all_url = (
+                    f"{server_info['base_url']}/tabledap/allDatasets.csv?"
+                    "datasetID,title,minLongitude,maxLongitude,minLatitude,maxLatitude"
+                )
                 response = requests.get(all_url, timeout=30)
 
                 if response.status_code != 200:
                     # Fallback to search if allDatasets not available
-                    logger.debug(f"    allDatasets not available, using search...")
+                    logger.debug("    allDatasets not available, using search...")
                     all_url = f"{server_info['base_url']}/search/index.csv?searchFor=water+level"
                     response = requests.get(all_url, timeout=30)
 
@@ -492,36 +496,44 @@ def print_results(results: List[ReferenceStation], gnss_station: str = None):
         print()
 
         if best.source == "USGS":
-            print(f"""  "usgs_comparison": {{
+            print(
+                f"""  "usgs_comparison": {{
     "target_usgs_site": "{best.station_id}",
     "usgs_gauge_stated_datum": "{best.datum}",
     "distance_km": {best.distance_km}
-  }}""")
+  }}"""
+            )
         elif best.source == "CO-OPS":
-            print(f"""  "external_data_sources": {{
+            print(
+                f"""  "external_data_sources": {{
     "noaa_coops": {{
       "enabled": true,
       "target_station": "{best.station_id}",
       "station_name": "{best.station_name}",
       "distance_km": {best.distance_km}
     }}
-  }}""")
+  }}"""
+            )
         elif "ERDDAP" in best.source:
             server_id = best.source.split("-")[-1] if "-" in best.source else "AOOS"
             is_colocated = best.distance_km < 1
-            print(f"""  "erddap": {{
+            print(
+                f"""  "erddap": {{
     "enabled": true,
     "dataset_id": "{best.station_id}",
     "station_name": "{best.station_name}",
     "distance_km": {best.distance_km},
-    "server": "{server_id}"{', ' + chr(10) + '    "primary_reference": true' if is_colocated else ''}
-  }}""")
+    "server": "{server_id}"\
+{', ' + chr(10) + '    "primary_reference": true' if is_colocated else ''}
+  }}"""
+            )
 
         print()
         print("Or run with --update-config to auto-update the config file:")
+        station_arg = gnss_station or "STATION"
         print(
-            f"  python scripts/find_reference_stations.py --station {gnss_station or 'STATION'} --update-config"
-        )
+            f"  python scripts/find_reference_stations.py --station {station_arg} --update-config"
+        )  # noqa: E501
         print()
 
 

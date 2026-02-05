@@ -2,7 +2,6 @@
 # ABOUTME: Displays station info, data counts, and reference source details
 
 import streamlit as st
-import pandas as pd
 from pathlib import Path
 import sys
 
@@ -10,11 +9,8 @@ import sys
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-# Import constants
-from dashboard_components.constants import ENHANCED_COLORS, DATA_SOURCE_EMOJI
-
 # Import station metadata helper
-from dashboard_components.station_metadata import get_reference_source_info
+from dashboard_components.station_metadata import get_reference_source_info  # noqa: E402
 
 
 def render_overview_tab(
@@ -187,12 +183,20 @@ def render_overview_tab(
                 gnss_end = rh_data["date"].max().strftime("%Y-%m-%d")
                 avg_retrievals = rh_data["rh_count"].mean()
 
-                st.success(f"✅ **Active** ({len(rh_data)} processing days)")
-                st.markdown(f"""
+                st.success(f"**Active** ({len(rh_data)} processing days)")
+                if avg_retrievals >= 50:
+                    quality = "Excellent"
+                elif avg_retrievals >= 20:
+                    quality = "Good"
+                else:
+                    quality = "Fair"
+                st.markdown(
+                    f"""
                 - **Date Range:** {gnss_start} to {gnss_end}
                 - **Daily Retrievals:** {avg_retrievals:.1f} average
-                - **Data Quality:** {'Excellent' if avg_retrievals >= 50 else 'Good' if avg_retrievals >= 20 else 'Fair'}
-                """)
+                - **Data Quality:** {quality}
+                """
+                )
             else:
                 st.error("❌ **No GNSS-IR data available**")
 
@@ -221,11 +225,15 @@ def render_overview_tab(
                     if water_col:
                         mean_level = erddap_data[water_col].mean()
                         std_level = erddap_data[water_col].std()
-                        st.markdown(f"""
-                        - **Water Level:** {mean_level:.2f} ± {std_level:.2f} m
-                        - **Range:** {erddap_data[water_col].min():.2f} to {erddap_data[water_col].max():.2f} m
+                        wl_min = erddap_data[water_col].min()
+                        wl_max = erddap_data[water_col].max()
+                        st.markdown(
+                            f"""
+                        - **Water Level:** {mean_level:.2f} +/- {std_level:.2f} m
+                        - **Range:** {wl_min:.2f} - {wl_max:.2f} m
                         - **Dataset:** {ref_info['station_id']}
-                        """)
+                        """
+                        )
                         if ref_info["distance_km"]:
                             st.markdown(
                                 f"- **Distance:** {ref_info['distance_km']*1000:.0f} m (co-located)"
@@ -258,11 +266,15 @@ def render_overview_tab(
                     if water_col:
                         mean_level = coops_data[water_col].mean()
                         std_level = coops_data[water_col].std()
-                        st.markdown(f"""
-                        - **Water Level:** {mean_level:.2f} ± {std_level:.2f} m
-                        - **Range:** {coops_data[water_col].min():.2f} to {coops_data[water_col].max():.2f} m
+                        wl_min = coops_data[water_col].min()
+                        wl_max = coops_data[water_col].max()
+                        st.markdown(
+                            f"""
+                        - **Water Level:** {mean_level:.2f} +/- {std_level:.2f} m
+                        - **Range:** {wl_min:.2f} - {wl_max:.2f} m
                         - **Station ID:** {ref_info['station_id']}
-                        """)
+                        """
+                        )
                         if ref_info["distance_km"]:
                             st.markdown(f"- **Distance:** {ref_info['distance_km']:.1f} km")
                 else:
@@ -275,7 +287,7 @@ def render_overview_tab(
 
         else:
             # USGS is primary
-            with st.expander(f"🌊 USGS Water Levels (Primary Reference)", expanded=True):
+            with st.expander("USGS Water Levels (Primary Reference)", expanded=True):
                 if usgs_data is not None and not usgs_data.empty:
                     st.success(f"✅ **Active** ({len(usgs_data)} records)")
 
@@ -289,10 +301,14 @@ def render_overview_tab(
                     if water_col:
                         mean_level = usgs_data[water_col].mean()
                         std_level = usgs_data[water_col].std()
-                        st.markdown(f"""
-                        - **Water Level:** {mean_level:.2f} ± {std_level:.2f} m
-                        - **Range:** {usgs_data[water_col].min():.2f} to {usgs_data[water_col].max():.2f} m
-                        """)
+                        wl_min = usgs_data[water_col].min()
+                        wl_max = usgs_data[water_col].max()
+                        st.markdown(
+                            f"""
+                        - **Water Level:** {mean_level:.2f} +/- {std_level:.2f} m
+                        - **Range:** {wl_min:.2f} - {wl_max:.2f} m
+                        """
+                        )
 
                     if "site_name" in usgs_data.columns:
                         st.markdown(f"- **Site:** {usgs_data['site_name'].iloc[0]}")
@@ -307,9 +323,9 @@ def render_overview_tab(
                     st.info(f"✅ **Available** (Station {coops_station_id})")
                     st.markdown(f"- **Records:** {len(coops_data)}")
                     if "water_level_m" in coops_data.columns:
-                        st.markdown(
-                            f"- **Tide Range:** {coops_data['water_level_m'].min():.2f} to {coops_data['water_level_m'].max():.2f} m"
-                        )
+                        wl_min = coops_data["water_level_m"].min()
+                        wl_max = coops_data["water_level_m"].max()
+                        st.markdown(f"- **Tide Range:** {wl_min:.2f} to {wl_max:.2f} m")
 
     # Yearly Summary Section
     st.markdown("---")
@@ -434,12 +450,12 @@ def render_overview_tab(
         st.markdown("#### 📊 Correlation vs Temporal Resolution")
         if resolution_plot.exists():
             st.image(str(resolution_plot), width="stretch")
-            st.caption(
-                f"Full-year correlation analysis showing how aggregation affects RMSE and correlation"
-            )
+            st.caption("Full-year correlation analysis showing how aggregation affects RMSE")
         else:
             st.info(
-                f"Resolution comparison plot not found. Generate with:\n```bash\npython scripts/plot_resolution_comparison.py --station {selected_station} --year {selected_year}\n```"
+                f"Resolution comparison plot not found. Generate with:\n"
+                f"```bash\npython scripts/plot_resolution_comparison.py "
+                f"--station {selected_station} --year {selected_year}\n```"
             )
 
     with viz_col2:
@@ -454,14 +470,15 @@ def render_overview_tab(
             doy_match = re.search(r"DOY(\d+)-(\d+)", gif_path.name)
             if doy_match:
                 doy_start, doy_end = doy_match.groups()
-                st.caption(
-                    f"Water level visualization with Fresnel zone reflections (DOY {doy_start}-{doy_end})"
-                )
+                st.caption(f"Water level with Fresnel zone reflections (DOY {doy_start}-{doy_end})")
             else:
                 st.caption("Water level visualization with Fresnel zone reflections")
         else:
             st.info(
-                f"Polar animation not found. Generate with:\n```bash\npython scripts/create_polar_animation.py --station {selected_station} --year {selected_year} --doy_start 260 --doy_end 266\n```"
+                f"Polar animation not found. Generate with:\n"
+                f"```bash\npython scripts/create_polar_animation.py "
+                f"--station {selected_station} --year {selected_year} "
+                f"--doy_start 260 --doy_end 266\n```"
             )
 
     # Enhanced Configuration information with station metadata
@@ -491,34 +508,44 @@ def render_overview_tab(
             with col1:
                 st.markdown("#### 🛰️ Station Metadata")
                 if station_config:
-                    st.markdown(f"""
+                    st.markdown(
+                        f"""
                     - **Station ID:** {selected_station}
                     - **Latitude:** {station_config.get('latitude_deg', 'N/A'):.6f}°
-                    - **Longitude:** {station_config.get('longitude_deg', 'N/A'):.6f}°  
+                    - **Longitude:** {station_config.get('longitude_deg', 'N/A'):.6f}
                     - **Ellipsoidal Height:** {station_config.get('ellipsoidal_height_m', 'N/A')} m
                     - **Analysis Year:** {selected_year}
-                    """)
+                    """
+                    )
 
                     if "usgs_comparison" in station_config:
                         usgs_config = station_config["usgs_comparison"]
                         target_site = usgs_config.get("target_usgs_site", "Auto-detected")
-                        st.markdown(f"""
+                        st.markdown(
+                            f"""
                         - **USGS Target:** {target_site}
                         - **Search Radius:** {usgs_config.get('search_radius_km', 'N/A')} km
-                        """)
+                        """
+                        )
                 else:
                     st.error("Station configuration not found")
 
             with col2:
                 st.markdown("#### 📏 GNSS-IR Processing Parameters")
                 if gnssir_params:
-                    st.markdown(f"""
-                    - **Reflector Height Range:** {gnssir_params.get('minH', 'N/A')} - {gnssir_params.get('maxH', 'N/A')} m
-                    - **Elevation Angles:** {gnssir_params.get('e1', 'N/A')}° - {gnssir_params.get('e2', 'N/A')}°
+                    minH = gnssir_params.get("minH", "N/A")
+                    maxH = gnssir_params.get("maxH", "N/A")
+                    e1 = gnssir_params.get("e1", "N/A")
+                    e2 = gnssir_params.get("e2", "N/A")
+                    st.markdown(
+                        f"""
+                    - **Reflector Height Range:** {minH} - {maxH} m
+                    - **Elevation Angles:** {e1} - {e2} deg
                     - **Peak Noise Threshold:** {gnssir_params.get('PkNoise', 'N/A')}
                     - **Polynomial Order:** {gnssir_params.get('polyV', 'N/A')}
-                    - **Azimuth Constraint:** {gnssir_params.get('azval2', 'All azimuths')}°
-                    """)
+                    - **Azimuth Constraint:** {gnssir_params.get('azval2', 'All azimuths')}
+                    """
+                    )
 
                     # Show frequency bands if available
                     if "freqs" in gnssir_params:
@@ -537,30 +564,36 @@ def render_overview_tab(
                     st.warning("GNSS-IR parameters file not found")
 
             # Processing pipeline info
-            st.markdown("#### 🔄 Processing Pipeline")
-            st.markdown("""
-            **Data Flow:** RINEX 3 → RINEX 2.11 → SNR Extraction → GNSS-IR Analysis → Water Level Estimation
+            st.markdown("#### Processing Pipeline")
+            st.markdown(
+                """
+            **Data Flow:** RINEX 3 -> RINEX 2.11 -> SNR Extraction -> GNSS-IR -> Water Level
             **External APIs:** USGS Water Services, NOAA CO-OPS, ERDDAP
             **Analysis Tools:** Time series comparison, correlation analysis, subdaily validation
-            """)
+            """
+            )
 
         except ImportError as e:
             st.warning(f"Could not load configuration details: {e}")
             # Fallback to basic info
-            st.markdown(f"""
+            st.markdown(
+                f"""
             **Station:** {selected_station}
             **Year:** {selected_year}
             **Processing Pipeline:** RINEX 3 → RINEX 2.11 → SNR → GNSS-IR
             **External APIs:** USGS, NOAA CO-OPS, ERDDAP
             **Analysis Tools:** Time series comparison, correlation analysis
-            """)
+            """
+            )
         except Exception as e:
             st.error(f"Error loading station configuration: {e}")
-            st.markdown(f"""
-            **Station:** {selected_station}  
-            **Year:** {selected_year}  
+            st.markdown(
+                f"""
+            **Station:** {selected_station}
+            **Year:** {selected_year}
             **Status:** Configuration loading error
-            """)
+            """
+            )
 
 
 # Export the render function

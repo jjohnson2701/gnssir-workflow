@@ -6,9 +6,8 @@ ABOUTME: Compares reflector height data with USGS gauge data, with WSE_ellips an
 import sys
 import logging
 import pandas as pd
-import numpy as np
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 import argparse
 
 # Force reload of visualizer modules to pick up changes
@@ -23,29 +22,27 @@ if "visualizer.segmented_viz" in sys.modules:
 sys.path.append(str(Path(__file__).resolve().parent))
 
 # Import project modules
-from utils.gnssir_loader import load_gnssir_data
-import usgs_data_handler
-import visualizer
-import time_lag_analyzer
-import reflector_height_utils
+from utils.gnssir_loader import load_gnssir_data  # noqa: E402
+import usgs_data_handler  # noqa: E402
+import visualizer  # noqa: E402
+import time_lag_analyzer  # noqa: E402
+import reflector_height_utils  # noqa: E402
 
 try:
     from utils.segmented_analysis import (
         generate_monthly_segments,
         generate_seasonal_segments,
         perform_segmented_correlation,
-        filter_by_segment,
     )
 except ImportError:
     # Import path when running from different location
     sys.path.append(str(Path(__file__).parent.parent))
-    from scripts.utils.segmented_analysis import (
+    from scripts.utils.segmented_analysis import (  # noqa: F401
         generate_monthly_segments,
         generate_seasonal_segments,
         perform_segmented_correlation,
-        filter_by_segment,
     )
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 # Define project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -147,7 +144,8 @@ def usgs_comparison(
 
     # Fetch USGS gauge data using the full date range
     logging.info(
-        f"Fetching USGS data for site {usgs_site_code}, parameter {parameter_code}, dates {start_date} to {end_date}"
+        f"Fetching USGS data for site {usgs_site_code}, parameter {parameter_code}, "
+        f"dates {start_date} to {end_date}"
     )
     usgs_df, gauge_info, param_code_used = usgs_data_handler.fetch_usgs_gauge_data(
         usgs_site_code,
@@ -221,7 +219,8 @@ def usgs_comparison(
         gauge_info["gnss_lat"] = station_config["latitude_deg"]
         gauge_info["gnss_lon"] = station_config["longitude_deg"]
         logging.info(
-            f"Added GNSS coordinates to gauge_info: ({gauge_info['gnss_lat']}, {gauge_info['gnss_lon']})"
+            f"Added GNSS coords to gauge_info: "
+            f"({gauge_info['gnss_lat']}, {gauge_info['gnss_lon']})"
         )
 
     # Try to get USGS gauge coordinates
@@ -229,7 +228,8 @@ def usgs_comparison(
         gauge_info["usgs_lat"] = gauge_info["latitude"]
         gauge_info["usgs_lon"] = gauge_info["longitude"]
         logging.info(
-            f"Using USGS coordinates from gauge_info: ({gauge_info['usgs_lat']}, {gauge_info['usgs_lon']})"
+            f"Using USGS coords from gauge_info: "
+            f"({gauge_info['usgs_lat']}, {gauge_info['usgs_lon']})"
         )
     elif (
         "site_info" in gauge_info
@@ -239,7 +239,8 @@ def usgs_comparison(
         gauge_info["usgs_lat"] = gauge_info["site_info"]["dec_lat_va"]
         gauge_info["usgs_lon"] = gauge_info["site_info"]["dec_long_va"]
         logging.info(
-            f"Using USGS coordinates from site_info: ({gauge_info['usgs_lat']}, {gauge_info['usgs_lon']})"
+            f"Using USGS coords from site_info: "
+            f"({gauge_info['usgs_lat']}, {gauge_info['usgs_lon']})"
         )
 
     # Process USGS data (convert units, aggregate, etc.)
@@ -295,7 +296,6 @@ def usgs_comparison(
             logging.error("No USGS value column found for demeaning")
 
     # Merge data for correlation analysis
-    merge_columns = ["date"]
     gnssir_columns = ["rh_median_m", "wse_ellips_m"]
     usgs_columns = []
 
@@ -343,10 +343,12 @@ def usgs_comparison(
     usgs_daily_df["merge_date"] = pd.to_datetime(usgs_daily_df["date"]).dt.date
 
     logging.info(
-        f"After conversion - GNSS-IR merge_date first few: {gnssir_daily_df['merge_date'].head().tolist()}"
+        f"After conversion - GNSS-IR merge_date first few: "
+        f"{gnssir_daily_df['merge_date'].head().tolist()}"
     )
     logging.info(
-        f"After conversion - USGS merge_date first few: {usgs_daily_df['merge_date'].head().tolist()}"
+        f"After conversion - USGS merge_date first few: "
+        f"{usgs_daily_df['merge_date'].head().tolist()}"
     )
 
     # Ensure we're using only the daily aggregated data from GNSS-IR
@@ -358,7 +360,7 @@ def usgs_comparison(
 
         # If we have multiple records per day, aggregate to daily
         if len(gnssir_daily_df) > unique_days:
-            logging.info(f"Found multiple GNSS-IR records per day. Aggregating to daily...")
+            logging.info("Found multiple GNSS-IR records per day. Aggregating to daily...")
 
             # Group by date and calculate daily statistics
             gnssir_daily_agg = (
@@ -441,8 +443,11 @@ def usgs_comparison(
             time_lag_results["rh_lag_correlation"] = rh_lag_corr
             time_lag_results["rh_lag_confidence"] = rh_lag_conf
 
+            is_valid = rh_lag_corr is not None and not pd.isna(rh_lag_corr)
+            rh_corr_str = rh_lag_corr if is_valid else "N/A"
             logging.info(
-                f"RH time lag analysis: {rh_lag} days, correlation {rh_lag_corr if rh_lag_corr is not None and not pd.isna(rh_lag_corr) else 'N/A'}, confidence {rh_lag_conf}"
+                f"RH time lag analysis: {rh_lag} days, correlation {rh_corr_str}, "
+                f"confidence {rh_lag_conf}"
             )
         except Exception as e:
             logging.error(f"Error calculating RH time lag correlation: {e}")
@@ -458,8 +463,11 @@ def usgs_comparison(
             time_lag_results["wse_lag_correlation"] = wse_lag_corr
             time_lag_results["wse_lag_confidence"] = wse_lag_conf
 
+            is_valid = wse_lag_corr is not None and not pd.isna(wse_lag_corr)
+            wse_corr_str = wse_lag_corr if is_valid else "N/A"
             logging.info(
-                f"WSE time lag analysis: {wse_lag} days, correlation {wse_lag_corr if wse_lag_corr is not None and not pd.isna(wse_lag_corr) else 'N/A'}, confidence {wse_lag_conf}"
+                f"WSE time lag analysis: {wse_lag} days, correlation {wse_corr_str}, "
+                f"confidence {wse_lag_conf}"
             )
         except Exception as e:
             logging.error(f"Error calculating WSE time lag correlation: {e}")
@@ -479,12 +487,11 @@ def usgs_comparison(
             logging.info(f"Just before plotting: rh_count exists with {len(gnssir_daily_df)} rows")
             logging.info(f"Sample rh_count values: {gnssir_daily_df['rh_count'].head(3).tolist()}")
 
-            # Create a new column in the DataFrame with a special name that our plotting function will look for
+            # Create a new column that our plotting function will look for
             gnssir_daily_df["rh_retrieval_count"] = gnssir_daily_df["rh_count"]
         else:
-            logging.error(
-                f"Just before plotting: rh_count missing from columns: {gnssir_daily_df.columns.tolist()}"
-            )
+            cols = gnssir_daily_df.columns.tolist()
+            logging.error(f"Just before plotting: rh_count missing from columns: {cols}")
 
         wse_plot_path = visualizer.plot_comparison_timeseries(
             daily_gnssir_rh_df=gnssir_daily_df,
@@ -524,11 +531,11 @@ def usgs_comparison(
         # Debug: verify rh_count again before demeaned plotting
         if "rh_count" in gnssir_daily_df.columns:
             logging.info(
-                f"Before demeaned plotting: rh_count column confirmed present in gnssir_daily_df"
+                "Before demeaned plotting: rh_count column confirmed present in gnssir_daily_df"
             )
         else:
             logging.error(
-                f"Before demeaned plotting: rh_count missing! Creating a dummy column for testing"
+                "Before demeaned plotting: rh_count missing! Creating a dummy column for testing"
             )
             # Create a dummy rh_count column to test if that's the issue
             gnssir_daily_df["rh_count"] = pd.Series([20] * len(gnssir_daily_df))
@@ -586,16 +593,14 @@ def usgs_comparison(
                 lag_plot_path = visualizer.plot_comparison_timeseries(
                     daily_gnssir_rh_df=lag_gnssir_df,
                     daily_usgs_gauge_df=lag_usgs_df,
-                    station_name=f"{station_name} (Lag-adjusted {wse_lag} days, {wse_lag_conf} confidence)",
+                    station_name=f"{station_name} (Lag-adjusted {wse_lag} d, {wse_lag_conf} conf)",
                     usgs_gauge_info=lag_gauge_info,
                     output_plot_path=lag_plot_path,
                     gnssir_rh_col="wse_ellips_m",
                     usgs_wl_col=usgs_value_col,
                     compare_demeaned=False,
                 )
-                logging.info(
-                    f"Generated lag-adjusted comparison plot with {num_points} points: {lag_plot_path}"
-                )
+                logging.info(f"Generated lag-adjusted comparison plot with {num_points} points")
             else:
                 logging.warning(
                     f"Not enough points for lag-adjusted plot (only {num_points} points)"
@@ -848,9 +853,9 @@ def perform_segmented_correlation_analysis(
         f.write("-" * 30 + "\n")
         valid_mask = merged_df[gnss_col].notna() & merged_df[usgs_col].notna()
         overall_corr = merged_df.loc[valid_mask, gnss_col].corr(merged_df.loc[valid_mask, usgs_col])
-        f.write(
-            f"Full Period: {overall_corr:.4f} ({valid_mask.sum()} valid points of {len(merged_df)} total)\n"
-        )
+        total = len(merged_df)
+        valid = valid_mask.sum()
+        f.write(f"Full Period: {overall_corr:.4f} ({valid} valid points of {total} total)\n")
 
     logger.info(f"Segmented correlation analysis saved to {summary_path}")
 
@@ -973,9 +978,8 @@ def main():
                 else "N/A"
             )
 
-            logging.info(
-                f"Optimal WSE time lag: {wse_lag_days if wse_lag_days is not None else 'N/A'} days (confidence: {wse_lag_conf})"
-            )
+            lag_str = wse_lag_days if wse_lag_days is not None else "N/A"
+            logging.info(f"Optimal WSE time lag: {lag_str} days (confidence: {wse_lag_conf})")
             logging.info(f"Lag-adjusted correlation: {wse_lag_corr_str}")
 
         # Log output paths

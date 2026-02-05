@@ -3,26 +3,23 @@
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
 import sys
-import time
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 # Import cache manager
-from dashboard_components.cache_manager import (
+from dashboard_components.cache_manager import (  # noqa: E402
     disk_cache,
-    load_and_aggregate_subhourly_data,
     monitor_performance,
 )
 
 # Import required modules
-from dashboard_components.station_metadata import get_station_config
+from dashboard_components.station_metadata import get_station_config  # noqa: E402
 
 try:
     from scripts.external_apis.noaa_coops import NOAACOOPSClient

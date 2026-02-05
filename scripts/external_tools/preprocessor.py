@@ -1,7 +1,6 @@
 # ABOUTME: RINEX format preprocessor using gfzrnx tool
 # ABOUTME: Converts RINEX 3 observation files to RINEX 2.11 format
 
-import os
 import logging
 import subprocess
 from pathlib import Path
@@ -102,7 +101,8 @@ def convert_rinex3_to_rinex2(
 
     except subprocess.TimeoutExpired:
         logging.error(
-            f"gfzrnx conversion timed out after {timeout_seconds} seconds for file size {file_size_mb:.1f}MB"
+            f"gfzrnx conversion timed out after {timeout_seconds} seconds "
+            f"for file size {file_size_mb:.1f}MB"
         )
         return None
     except Exception as e:

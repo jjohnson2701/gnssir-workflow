@@ -2,7 +2,7 @@
 # ABOUTME: Creates time series plots, ribbon comparisons, and subdaily overlays
 
 import logging
-from typing import Dict, List, Tuple, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,7 +13,6 @@ from math import radians, sin, cos, sqrt, atan2
 
 from .base import (
     ensure_output_dir,
-    add_summary_textbox,
     get_compass_direction,
     PLOT_COLORS,
     PLOT_STYLES,
@@ -362,12 +361,14 @@ def plot_comparison_timeseries(
         if "rh_count" in daily_gnssir_rh_df.columns:
             gnssir_counts = daily_gnssir_rh_df["rh_count"].values
             logging.info(
-                f"Using actual RH count values for color-coding: Min={min(gnssir_counts)}, Max={max(gnssir_counts)}"
+                f"Using actual RH count values for color-coding: "
+                f"Min={min(gnssir_counts)}, Max={max(gnssir_counts)}"
             )
         elif "rh_retrieval_count" in daily_gnssir_rh_df.columns:
             gnssir_counts = daily_gnssir_rh_df["rh_retrieval_count"].values
             logging.info(
-                f"Using rh_retrieval_count for color-coding: Min={min(gnssir_counts)}, Max={max(gnssir_counts)}"
+                f"Using rh_retrieval_count for color-coding: "
+                f"Min={min(gnssir_counts)}, Max={max(gnssir_counts)}"
             )
         else:
             logging.info("No count column found, will use synthetic data for coloring")
@@ -438,7 +439,8 @@ def plot_comparison_timeseries(
                             )
                             calc_n_points = len(merged_df)
                             logging.info(
-                                f"Calculated stats from data: r={calc_correlation:.4f}, RMSE={calc_rmse:.4f}, N={calc_n_points}"
+                                f"Calculated stats from data: r={calc_correlation:.4f}, "
+                                f"RMSE={calc_rmse:.4f}, N={calc_n_points}"
                             )
             except Exception as e:
                 logging.warning(f"Could not calculate correlation/RMSE: {e}")
@@ -576,7 +578,7 @@ def _create_demeaned_comparison_plot(
     else:
         # Use synthetic values as fallback
         gnssir_df["count"] = np.linspace(10, 30, len(gnssir_df))
-        logging.info(f"Using synthetic count values")
+        logging.info("Using synthetic count values")
 
     # Normalize counts for colormap
     min_c = gnssir_df["count"].min()
@@ -766,7 +768,7 @@ def _create_dual_axis_comparison_plot(
     else:
         # Use synthetic values as fallback
         gnssir_df["count"] = np.linspace(10, 30, len(gnssir_df))
-        logging.info(f"Using synthetic count values")
+        logging.info("Using synthetic count values")
 
     # Normalize counts for colormap
     min_c = gnssir_df["count"].min()
@@ -1154,9 +1156,6 @@ def _create_monthly_subdaily_panels(
 
     try:
         # Create 4x3 grid for 12 months
-        n_rows = 4 if show_residuals else 4
-        n_cols = 3
-
         if show_residuals:
             # Each month gets 2 rows: main + residuals
             fig = plt.figure(figsize=(18, 24))
@@ -1319,7 +1318,8 @@ def _create_monthly_subdaily_panels(
 
         # Main title
         fig.suptitle(
-            f"{station_name} Subdaily: GNSS-IR WSE vs USGS IV (r={correlation:.3f}, RMSE={rmse:.3f}m, N={n_points})",
+            f"{station_name} Subdaily: GNSS-IR WSE vs USGS IV "
+            f"(r={correlation:.3f}, RMSE={rmse:.3f}m, N={n_points})",
             fontsize=14,
             y=1.01,
         )

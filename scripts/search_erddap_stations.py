@@ -15,8 +15,11 @@ from typing import Dict, List, Tuple
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
-from dashboard_components.station_metadata import get_station_config, get_all_station_ids
-from scripts.utils.geo_utils import haversine_distance
+from dashboard_components.station_metadata import (  # noqa: E402
+    get_station_config,
+    get_all_station_ids,
+)
+from scripts.utils.geo_utils import haversine_distance  # noqa: E402
 
 # Regional ERDDAP servers
 ERDDAP_SERVERS = {
@@ -261,7 +264,7 @@ def main():
     station_ids = get_all_station_ids()
 
     print(f"\n{'='*100}")
-    print(f"ERDDAP WATER LEVEL STATION SEARCH")
+    print("ERDDAP WATER LEVEL STATION SEARCH")
     print(f"{'='*100}")
     print(f"\nConfigured GNSS-IR Stations: {', '.join(station_ids)}\n")
 
@@ -278,16 +281,17 @@ def main():
 
     # Final summary
     print(f"\n{'='*100}")
-    print(f"FINAL SUMMARY")
+    print("FINAL SUMMARY")
     print(f"{'='*100}\n")
 
     if all_results:
         for station_id, results in all_results.items():
             print(f"{station_id}: {len(results)} ERDDAP station(s) found")
             for result in results:
-                print(
-                    f"  • {result['dataset_id']} ({result['erddap_server']}) - {result['distance_km']} km"
-                )
+                dataset = result["dataset_id"]
+                server = result["erddap_server"]
+                dist = result["distance_km"]
+                print(f"  - {dataset} ({server}) - {dist} km")
 
         # Save results to JSON
         output_file = project_root / "results_annual" / "erddap_search_results.json"

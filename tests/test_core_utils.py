@@ -4,7 +4,6 @@
 import pytest
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
 import sys
 from pathlib import Path
 
@@ -19,7 +18,7 @@ class TestFresnelZoneCalculations:
     @pytest.mark.unit
     def test_calculate_fresnel_radius_basic(self):
         """Test Fresnel radius calculation with known values."""
-        from scripts.create_polar_animation import calculate_fresnel_radius, GPS_L1_WAVELENGTH
+        from scripts.create_polar_animation import calculate_fresnel_radius
 
         # At 10m reflector height and 10 degrees elevation
         # Slant distance = 10 / sin(10°) = 57.6m

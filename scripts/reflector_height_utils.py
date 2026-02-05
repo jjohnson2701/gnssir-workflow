@@ -3,7 +3,6 @@
 
 import logging
 import numpy as np
-import pandas as pd
 
 
 def calculate_wse_from_rh(gnssir_daily_df, antenna_ellipsoidal_height):
@@ -24,9 +23,9 @@ def calculate_wse_from_rh(gnssir_daily_df, antenna_ellipsoidal_height):
 
     # Log if rh_count exists
     if "rh_count" in gnssir_daily_df.columns:
-        logging.info(f"rh_count found in input DataFrame before WSE calculation")
+        logging.info("rh_count found in input DataFrame before WSE calculation")
     else:
-        logging.warning(f"rh_count NOT found in input DataFrame before WSE calculation")
+        logging.warning("rh_count NOT found in input DataFrame before WSE calculation")
 
     # Try to find the RH column with different possible names
     rh_col = None
@@ -55,7 +54,7 @@ def calculate_wse_from_rh(gnssir_daily_df, antenna_ellipsoidal_height):
             logging.info(f"Using column '{rh_col}' as RH data source")
         elif "RH" in gnssir_daily_df.columns:
             rh_col = "RH"
-            logging.info(f"Using 'RH' column")
+            logging.info("Using 'RH' column")
         else:
             # Get the numeric columns in case RH is there but not properly named
             numeric_cols = gnssir_daily_df.select_dtypes(include=[np.number]).columns.tolist()
@@ -86,9 +85,9 @@ def calculate_wse_from_rh(gnssir_daily_df, antenna_ellipsoidal_height):
 
     # Check if rh_count is preserved
     if "rh_count" in result_df.columns:
-        logging.info(f"rh_count column preserved after WSE calculation")
+        logging.info("rh_count column preserved after WSE calculation")
     else:
-        logging.warning(f"rh_count column LOST after WSE calculation")
+        logging.warning("rh_count column LOST after WSE calculation")
 
     logging.info(f"Calculated WSE_ellips using antenna height {antenna_ellipsoidal_height} m")
     return result_df

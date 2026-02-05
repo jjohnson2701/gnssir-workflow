@@ -102,7 +102,7 @@ PLOTLY_THEME = {
         },
         "legend": {
             "font": {"color": PUBLICATION_COLORS["text"], "size": 11},
-            "bgcolor": f"rgba(38, 50, 56, 0.9)",  # Semi-transparent background
+            "bgcolor": "rgba(38, 50, 56, 0.9)",  # Semi-transparent background
             "bordercolor": PUBLICATION_COLORS["grid"],
             "borderwidth": 1,
         },

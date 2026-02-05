@@ -4,11 +4,8 @@
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from pathlib import Path
-from scipy import stats
 import math
 
 # Configure matplotlib to avoid debug logging

@@ -13,7 +13,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 # Import station metadata helper
-from dashboard_components.station_metadata import get_antenna_height
+from dashboard_components.station_metadata import get_antenna_height  # noqa: E402
 
 # Import visualization functions
 try:
@@ -158,7 +158,7 @@ def render_monthly_data_tab(
             available_metrics.extend(["correlation", "rmse"])
             metric_labels.update(
                 {
-                    "correlation": "📈 Correlation with USGS (daily correlation coefficient: -1 to +1)",
+                    "correlation": "Correlation with USGS (daily coefficient: -1 to +1)",
                     "rmse": "📏 RMSE: WSE vs Water Level (meters) - RH converted to elevation",
                 }
             )
@@ -189,14 +189,10 @@ def render_monthly_data_tab(
                 st.info("💡 For RMSE: Green = Low Error (Good), Red = High Error (Bad)")
             elif selected_metric == "correlation":
                 default_cmap = "RdYlGn"  # Higher correlation is better (green)
-                st.info(
-                    "💡 For Correlation: Green = High Correlation (Good), Red = Low Correlation (Bad)"
-                )
+                st.info("For Correlation: Green = High (Good), Red = Low (Bad)")
             else:
                 default_cmap = "RdYlGn"  # Higher count is generally better
-                st.info(
-                    "💡 For Retrieval Count: Green = Many Measurements (Good), Red = Few Measurements (Poor)"
-                )
+                st.info("For Retrieval Count: Green = Many (Good), Red = Few (Poor)")
 
             cmap_options = list(color_schemes.keys())
             default_index = cmap_options.index(default_cmap) if default_cmap in cmap_options else 0
@@ -211,9 +207,8 @@ def render_monthly_data_tab(
 
         # Show conversion note if RMSE is selected
         if selected_metric == "rmse":
-            st.info(
-                f"📐 **RH to WSE Conversion**: Water Surface Elevation = Antenna Height ({get_antenna_height(selected_station):.3f} m) - Reflector Height"
-            )
+            ant_height = get_antenna_height(selected_station)
+            st.info(f"**RH to WSE Conversion**: WSE = Antenna Height ({ant_height:.3f} m) - RH")
 
         # Create calendar heat map
         fig = create_calendar_heatmap(
@@ -292,26 +287,28 @@ def render_monthly_data_tab(
         st.pyplot(fig)
         plt.close()
 
-        st.markdown("""
+        st.markdown(
+            """
         **Analysis**: This matrix compares performance across different temporal scales:
-        
-        **📊 Multi-Scale Comparison:**
-        - **Precision Matrix (top-left)**: How measurement uncertainty varies with data density
-        - **Environmental/Seasonal Effects (top-center)**: Wind conditions or seasonal patterns impact on precision  
+
+        **Multi-Scale Comparison:**
+        - **Precision Matrix (top-left)**: How uncertainty varies with data density
+        - **Environmental/Seasonal Effects (top-center)**: Wind/seasonal impact on precision
         - **Temporal Coverage (top-right)**: Hourly data availability patterns
-        - **Scale Correlation (bottom-center)**: Relationship between different temporal scales
-        - **Time Series (middle)**: Direct comparison of daily vs sub-hourly precision
-        
-        **🔍 Key Insights:**
+        - **Scale Correlation (bottom-center)**: Relationship between temporal scales
+        - **Time Series (middle)**: Daily vs sub-hourly precision comparison
+
+        **Key Insights:**
         - Shows whether higher temporal resolution improves measurement precision
         - Identifies optimal conditions for reliable measurements
         - Reveals temporal patterns in data quality and availability
         - Compares different aggregation methods for GNSS-IR data
-        
-        **📁 Data Sources**: The plot automatically tries to load actual sub-hourly data from 
-        the `rh_daily/` directory. If unavailable, it uses daily data as a comparison baseline.
+
+        **Data Sources**: The plot automatically tries to load actual sub-hourly data from
+        the `rh_daily/` directory. If unavailable, it uses daily data as comparison baseline.
         Check the plot title for data source information.
-        """)
+        """
+        )
 
     # Summary statistics for selected visualization
     st.markdown("---")

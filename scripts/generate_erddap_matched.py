@@ -304,7 +304,7 @@ def main():
     if erddap_file is None:
         available = list(results_dir.glob("*_raw.csv"))
         raise FileNotFoundError(
-            f"ERDDAP data file not found. Tried:\n"
+            "ERDDAP data file not found. Tried:\n"
             + "\n".join(f"  - {p}" for p in tried_paths[:5])
             + f"\nAvailable files: {[f.name for f in available]}"
         )

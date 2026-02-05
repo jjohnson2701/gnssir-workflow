@@ -5,13 +5,9 @@ import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional
 import logging
-from pathlib import Path
-import json
 import time
-import re
-from io import StringIO
 
 
 class NDBCClient:

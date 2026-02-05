@@ -3,16 +3,13 @@
 
 import pytest
 import sys
-import numpy as np
-import pandas as pd
 from pathlib import Path
-from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 # Add scripts to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from coops_comparison import (
+from coops_comparison import (  # noqa: E402
     load_station_config,
     find_nearest_coops_station,
     get_coops_station_info,

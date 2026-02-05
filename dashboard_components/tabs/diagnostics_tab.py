@@ -14,9 +14,7 @@ Features:
 """
 
 import streamlit as st
-import pandas as pd
 from pathlib import Path
-from datetime import datetime, date, timedelta
 from PIL import Image
 import sys
 
@@ -25,14 +23,12 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 # Import data loading functions
-from dashboard_components.data_loader import (
+from dashboard_components.data_loader import (  # noqa: E402
     get_available_diagnostic_days,
     get_quicklook_plots_for_day,
     doy_to_date,
     date_to_doy,
 )
-
-from dashboard_components.constants import ENHANCED_COLORS
 
 
 def display_annual_polar_plots(station_id, year):
@@ -75,14 +71,16 @@ def display_annual_polar_plots(station_id, year):
     available_plots = {key: info for key, info in polar_plots.items() if info["file"].exists()}
 
     if not available_plots:
-        st.info(f"""
+        st.info(
+            f"""
         📊 **Polar plots not yet generated for {station_id} {year}**
 
         To generate these plots, run:
         ```bash
         python scripts/plot_azimuth_analysis.py --station {station_id} --year {year}
         ```
-        """)
+        """
+        )
         return
 
     # Display available plots in expandable sections
@@ -113,10 +111,12 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
 
     # === Annual Polar Plots Section ===
     st.subheader("📊 Annual Quality Overview - Polar Plots")
-    st.markdown("""
+    st.markdown(
+        """
     **Spatial Distribution Analysis**: These polar plots show all retrievals for the year,
     revealing azimuth-dependent patterns in signal quality and measurement accuracy.
-    """)
+    """
+    )
 
     display_annual_polar_plots(station_id, year)
 
@@ -125,12 +125,14 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
     # === Daily Diagnostics Section ===
     st.subheader("�� Daily Diagnostics - QuickLook Plot Viewer")
 
-    st.markdown("""
+    st.markdown(
+        """
     **Expert-Level Diagnostic Plots**: View the same diagnostic plots that gnssrefl developers
     use to analyze GNSS-IR data quality. Each day's processing generates two key plots:
-    - **Lomb-Scargle Periodogram (LSP)**: Shows the frequency domain analysis used to detect reflector heights
+    - **Lomb-Scargle Periodogram (LSP)**: Shows frequency domain analysis for reflector heights
     - **Summary Plot**: Displays reflector height vs. azimuth with quality indicators
-    """)
+    """
+    )
 
     # Get available diagnostic days
     try:
@@ -138,13 +140,15 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
 
         if not available_days:
             st.warning(f"📊 No diagnostic plots found for {station_id} {year}")
-            st.info("""
+            st.info(
+                """
             Diagnostic plots are generated during GNSS-IR processing using the `quickLook` command.
             If you see this message, either:
             - No data has been processed for this station/year
             - The processing didn't generate diagnostic plots
             - The plots are stored in a different location
-            """)
+            """
+            )
             return
 
         st.success(f"📈 Found diagnostic plots for **{len(available_days)} days** in {year}")
@@ -236,7 +240,7 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
             display_diagnostic_plots(station_id, year, selected_doy, selected_date)
         else:
             st.warning(
-                f"🚫 No diagnostic plots available for {selected_date.strftime('%Y-%m-%d')} (DOY {selected_doy})"
+                f"No diagnostic plots for {selected_date.strftime('%Y-%m-%d')} (DOY {selected_doy})"
             )
 
             # Show nearest available days
@@ -280,13 +284,15 @@ def display_diagnostic_plots(station_id, year, doy, selected_date):
                 )
 
                 # Add explanation
-                st.info("""
+                st.info(
+                    """
                 **LSP Plot Interpretation:**
                 - Shows frequency domain analysis of SNR data
                 - Peaks indicate potential reflector heights
                 - Higher amplitude peaks = stronger reflections
                 - Multiple peaks may indicate multipath or multiple reflection surfaces
-                """)
+                """
+                )
             else:
                 st.warning("LSP plot not available")
 
@@ -302,13 +308,15 @@ def display_diagnostic_plots(station_id, year, doy, selected_date):
                 )
 
                 # Add explanation
-                st.info("""
+                st.info(
+                    """
                 **Summary Plot Interpretation:**
                 - Shows reflector height estimates vs. satellite azimuth
                 - Color indicates signal quality or amplitude
                 - Consistent heights across azimuths = good quality
                 - Scattered heights = potential multipath or poor conditions
-                """)
+                """
+                )
             else:
                 st.warning("Summary plot not available")
 
@@ -339,21 +347,23 @@ def display_diagnostic_plots(station_id, year, doy, selected_date):
                     )
 
         # Add technical details
-        with st.expander("🔧 Technical Details"):
-            st.markdown(f"""
+        with st.expander("Technical Details"):
+            st.markdown(
+                f"""
             **File Paths:**
             - LSP Plot: `{plot_files.get('lsp', 'Not available')}`
             - Summary Plot: `{plot_files.get('summary', 'Not available')}`
-            
+
             **Processing Information:**
             - Station: {station_id}
             - Year: {year}
             - Day of Year: {doy}
             - Date: {selected_date.strftime('%Y-%m-%d')}
-            
+
             These plots were generated by the `quickLook` command during GNSS-IR processing
             and provide the same diagnostic information used by gnssrefl developers.
-            """)
+            """
+            )
 
     except Exception as e:
         st.error(f"❌ Error displaying plots: {str(e)}")

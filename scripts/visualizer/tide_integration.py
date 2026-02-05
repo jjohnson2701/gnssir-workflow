@@ -2,22 +2,14 @@
 # ABOUTME: Fetches NOAA CO-OPS predictions and calculates tide residuals
 
 import logging
-from typing import Dict, List, Tuple, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any
 import pandas as pd
 import numpy as np
-import requests
 from pathlib import Path
 import datetime
-import io
-import re
-from urllib.parse import urlencode
-from datetime import timedelta
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.gridspec as gridspec
-from matplotlib.patches import Patch
-from matplotlib.lines import Line2D
-from scipy import stats
 
 from .base import ensure_output_dir, add_summary_textbox, PLOT_COLORS, PLOT_STYLES
 
@@ -547,7 +539,7 @@ def plot_subdaily_rh_vs_tide(
         tide_station_name = (
             tide_station_info.get("name", f"Station {tide_station_id}")
             if tide_station_info
-            else f"Tide Station"
+            else "Tide Station"
         )
         tide_datum = (
             tide_station_info.get("reference_datum", "Unknown") if tide_station_info else "Unknown"
@@ -555,11 +547,6 @@ def plot_subdaily_rh_vs_tide(
 
         usgs_site_code = (
             usgs_gauge_info.get("site_code", "Unknown") if usgs_gauge_info else "Unknown"
-        )
-        usgs_site_name = (
-            usgs_gauge_info.get("site_name", f"USGS {usgs_site_code}")
-            if usgs_gauge_info
-            else "USGS Gauge"
         )
         usgs_vertical_datum = (
             usgs_gauge_info.get("vertical_datum", "Unknown") if usgs_gauge_info else "Unknown"
@@ -580,10 +567,6 @@ def plot_subdaily_rh_vs_tide(
         else:
             gnssir_value_col = gnssir_rh_col
             gnssir_label = f"{station_name} RH (m)"
-
-        # Calculate time range for the plot
-        time_min = gnssir_raw_df[gnssir_datetime_col].min()
-        time_max = gnssir_raw_df[gnssir_datetime_col].max()
 
         # Apply the selected style
         if style in PLOT_STYLES:
@@ -736,7 +719,7 @@ def plot_subdaily_rh_vs_tide(
 
             # Plot residuals
             if color_by_azimuth and gnssir_azimuth_col in gnssir_raw_df.columns:
-                scatter2 = ax2.scatter(
+                ax2.scatter(
                     gnssir_raw_df[gnssir_datetime_col],
                     residuals,
                     c=gnssir_raw_df[gnssir_azimuth_col],

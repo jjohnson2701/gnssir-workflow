@@ -65,9 +65,12 @@ animation = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "black>=23.0.0",
+    "black==24.10.0",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
+    "contextily>=1.4.0",
+    "pyproj>=3.6.0",
+    "geopandas>=0.14.0",
 ]
 all = [
     "gnssir-workflow[dashboard,animation,dev]",

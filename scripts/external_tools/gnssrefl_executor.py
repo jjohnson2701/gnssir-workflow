@@ -4,10 +4,8 @@
 import os
 import logging
 import subprocess
-import glob
 import shutil
 import threading
-import time
 from pathlib import Path
 
 
@@ -79,7 +77,7 @@ def execute_rinex2snr(
         # Log the command, environment, and working directory
         day_logger.info(f"Running command: {' '.join(cmd)}")
         day_logger.info(f"Working directory: {cwd_for_rinex2snr}")
-        day_logger.info(f"Environment variables:")
+        day_logger.info("Environment variables:")
         day_logger.info(f"  REFL_CODE: {my_env['REFL_CODE']}")
         day_logger.info(f"  ORBITS: {my_env['ORBITS']}")
 
@@ -103,7 +101,8 @@ def execute_rinex2snr(
         # Check rinex2snr's own return code first
         if process_rinex2snr.returncode != 0:
             day_logger.error(
-                f"rinex2snr failed for {station_4char_lower} {year} {doy_padded} with explicit return code {process_rinex2snr.returncode}"
+                f"rinex2snr failed for {station_4char_lower} {year} {doy_padded} "
+                f"with explicit return code {process_rinex2snr.returncode}"
             )
             return False
 
@@ -128,7 +127,7 @@ def execute_rinex2snr(
             day_logger.error(
                 f"Expected SNR file not found at {expected_snr_file} or {expected_snr_file_gz}"
             )
-            day_logger.error(f"rinex2snr returned success (code 0) but no SNR file was created")
+            day_logger.error("rinex2snr returned success (code 0) but no SNR file was created")
             return False
 
     except Exception as e:
@@ -181,7 +180,7 @@ def execute_gnssir(
         # Log the command, environment, and working directory
         day_logger.info(f"Running command: {' '.join(cmd)}")
         day_logger.info(f"Working directory: {cwd_for_gnssir}")
-        day_logger.info(f"Environment variables:")
+        day_logger.info("Environment variables:")
         day_logger.info(f"  REFL_CODE: {my_env['REFL_CODE']}")
         day_logger.info(f"  ORBITS: {my_env['ORBITS']}")
 
@@ -198,7 +197,8 @@ def execute_gnssir(
         # Check gnssir's own return code first
         if process_gnssir.returncode != 0:
             day_logger.error(
-                f"gnssir failed for {station_4char_lower} {year} {doy_padded} with explicit return code {process_gnssir.returncode}"
+                f"gnssir failed for {station_4char_lower} {year} {doy_padded} "
+                f"with explicit return code {process_gnssir.returncode}"
             )
             return False
 
@@ -239,8 +239,8 @@ def execute_gnssir(
                         break
 
         if not result_file_found:
-            day_logger.error(f"No result files found in expected locations")
-            day_logger.error(f"gnssir returned success (code 0) but no result file was created")
+            day_logger.error("No result files found in expected locations")
+            day_logger.error("gnssir returned success (code 0) but no result file was created")
             return False
 
         day_logger.info(
@@ -363,7 +363,7 @@ def execute_quicklook(
         # Log the command, environment, and working directory
         day_logger.info(f"Running command: {' '.join(cmd)}")
         day_logger.info(f"Working directory: {cwd_for_quicklook}")
-        day_logger.info(f"Environment variables:")
+        day_logger.info("Environment variables:")
         day_logger.info(f"  REFL_CODE: {my_env['REFL_CODE']}")
         day_logger.info(f"  ORBITS: {my_env['ORBITS']}")
 
@@ -386,7 +386,8 @@ def execute_quicklook(
         # Check quickLook's own return code
         if process_quicklook.returncode != 0:
             day_logger.error(
-                f"quickLook failed for {station_4char_lower} {year} {doy_padded} with explicit return code {process_quicklook.returncode}"
+                f"quickLook failed for {station_4char_lower} {year} {doy_padded} "
+                f"with explicit return code {process_quicklook.returncode}"
             )
             return False
 
@@ -419,7 +420,7 @@ def execute_quicklook(
         )
 
         # Log all search directories
-        day_logger.info(f"Searching for plot files in the following directories:")
+        day_logger.info("Searching for plot files in the following directories:")
         for idx, loc in enumerate(plot_locations):
             if loc.exists():
                 day_logger.info(f"  {idx+1}. {loc}")
@@ -436,8 +437,8 @@ def execute_quicklook(
         standard_patterns = [
             f"{station_4char_lower}_lsp.png",  # LSP plot
             f"{station_4char_lower}_summary.png",  # Summary plot
-            f"quickLook_lsp.png",  # Alternative LSP plot name
-            f"quickLook_summary.png",  # Alternative summary plot name
+            "quickLook_lsp.png",  # Alternative LSP plot name
+            "quickLook_summary.png",  # Alternative summary plot name
         ]
 
         # Last resort, look for any PNG files
@@ -472,7 +473,7 @@ def execute_quicklook(
         if found_pattern_info:
             day_logger.info(f"Successful search patterns: {found_pattern_info}")
         else:
-            day_logger.warning(f"No files found with any search pattern")
+            day_logger.warning("No files found with any search pattern")
 
         # Copy plot files to quicklook_plots_daily_dir with consistent naming
         copied_files = []
