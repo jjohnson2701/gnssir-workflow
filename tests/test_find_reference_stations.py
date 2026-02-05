@@ -6,13 +6,9 @@ import sys
 from pathlib import Path
 
 # Add scripts to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from find_reference_stations import (
-    haversine_distance,
-    load_station_config,
-    ReferenceStation
-)
+from find_reference_stations import haversine_distance, load_station_config, ReferenceStation
 
 
 class TestHaversineDistance:
@@ -52,7 +48,7 @@ class TestHaversineDistance:
     def test_symmetry(self):
         """Distance A to B should equal distance B to A."""
         lat1, lon1 = 40.7128, -74.0060  # New York
-        lat2, lon2 = 51.5074, -0.1278   # London
+        lat2, lon2 = 51.5074, -0.1278  # London
 
         dist_ab = haversine_distance(lat1, lon1, lat2, lon2)
         dist_ba = haversine_distance(lat2, lon2, lat1, lon1)
@@ -76,35 +72,35 @@ class TestStationConfig:
     @pytest.mark.unit
     def test_load_valid_station(self, config_dir):
         """Test loading a valid station from config."""
-        config_path = config_dir / 'stations_config.json'
+        config_path = config_dir / "stations_config.json"
         if not config_path.exists():
             pytest.skip("Config file not found")
 
-        config = load_station_config('GLBX', config_path)
+        config = load_station_config("GLBX", config_path)
         if config is None:
             pytest.skip("GLBX not in config")
 
         # Config uses latitude_deg/longitude_deg naming convention
-        assert 'latitude_deg' in config or 'latitude' in config or 'lat' in config
+        assert "latitude_deg" in config or "latitude" in config or "lat" in config
 
     @pytest.mark.unit
     def test_load_nonexistent_station(self, config_dir):
         """Test loading a station that doesn't exist."""
-        config_path = config_dir / 'stations_config.json'
+        config_path = config_dir / "stations_config.json"
         if not config_path.exists():
             pytest.skip("Config file not found")
 
-        config = load_station_config('NONEXISTENT_STATION_XYZ', config_path)
+        config = load_station_config("NONEXISTENT_STATION_XYZ", config_path)
         assert config is None
 
     @pytest.mark.unit
     def test_config_has_required_fields(self, sample_station_config):
         """Test that station config has required fields."""
         for station_id, config in sample_station_config.items():
-            assert 'latitude' in config
-            assert 'longitude' in config
-            assert isinstance(config['latitude'], (int, float))
-            assert isinstance(config['longitude'], (int, float))
+            assert "latitude" in config
+            assert "longitude" in config
+            assert isinstance(config["latitude"], (int, float))
+            assert isinstance(config["longitude"], (int, float))
 
 
 class TestReferenceStation:
@@ -114,27 +110,27 @@ class TestReferenceStation:
     def test_reference_station_creation(self):
         """Test creating a ReferenceStation object."""
         station = ReferenceStation(
-            source='CO-OPS',
-            station_id='9447130',
-            station_name='Seattle',
+            source="CO-OPS",
+            station_id="9447130",
+            station_name="Seattle",
             latitude=47.6062,
             longitude=-122.3321,
             distance_km=5.2,
-            datum='NAVD88',
-            notes='Test station'
+            datum="NAVD88",
+            notes="Test station",
         )
 
-        assert station.source == 'CO-OPS'
-        assert station.station_id == '9447130'
+        assert station.source == "CO-OPS"
+        assert station.station_id == "9447130"
         assert station.distance_km == 5.2
 
     @pytest.mark.unit
     def test_reference_station_sorting(self):
         """Test that stations can be sorted by distance."""
         stations = [
-            ReferenceStation('A', 'id1', 'Name1', 0, 0, 10.0, 'NAVD88', ''),
-            ReferenceStation('B', 'id2', 'Name2', 0, 0, 5.0, 'NAVD88', ''),
-            ReferenceStation('C', 'id3', 'Name3', 0, 0, 15.0, 'NAVD88', ''),
+            ReferenceStation("A", "id1", "Name1", 0, 0, 10.0, "NAVD88", ""),
+            ReferenceStation("B", "id2", "Name2", 0, 0, 5.0, "NAVD88", ""),
+            ReferenceStation("C", "id3", "Name3", 0, 0, 15.0, "NAVD88", ""),
         ]
 
         sorted_stations = sorted(stations, key=lambda s: s.distance_km)

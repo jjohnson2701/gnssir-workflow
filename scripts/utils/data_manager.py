@@ -52,7 +52,7 @@ def download_from_url(url: str, target_path: Path) -> bool:
         response = requests.get(url, stream=True, timeout=120)
 
         if response.status_code == 200:
-            with open(target_path, 'wb') as f:
+            with open(target_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
@@ -96,7 +96,9 @@ def check_file_exists(file_path, min_size_bytes=0):
 
     file_size = file_path.stat().st_size
     if file_size < min_size_bytes:
-        logging.debug(f"File is too small: {file_path} ({file_size} bytes < {min_size_bytes} bytes required)")
+        logging.debug(
+            f"File is too small: {file_path} ({file_size} bytes < {min_size_bytes} bytes required)"
+        )
         return False
 
     return True

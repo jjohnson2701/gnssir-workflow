@@ -29,7 +29,7 @@ from dashboard_components.data_loader import (
     get_available_diagnostic_days,
     get_quicklook_plots_for_day,
     doy_to_date,
-    date_to_doy
+    date_to_doy,
 )
 
 from dashboard_components.constants import ENHANCED_COLORS
@@ -41,38 +41,38 @@ def display_annual_polar_plots(station_id, year):
 
     # Define the three polar plot types
     polar_plots = {
-        'polar_quality': {
-            'file': results_dir / f"{station_id}_{year}_polar_quality.png",
-            'title': "Retrieval Distribution by Azimuth",
-            'description': """
+        "polar_quality": {
+            "file": results_dir / f"{station_id}_{year}_polar_quality.png",
+            "title": "Retrieval Distribution by Azimuth",
+            "description": """
             **Left**: Colored by signal amplitude (v/v) - brighter = stronger reflection
             **Right**: Colored by peak-to-noise ratio - higher = cleaner signal
-            """
+            """,
         },
-        'azimuth_analysis': {
-            'file': results_dir / f"{station_id}_{year}_azimuth_analysis.png",
-            'title': "Azimuth-Dependent Quality Metrics",
-            'description': """
+        "azimuth_analysis": {
+            "file": results_dir / f"{station_id}_{year}_azimuth_analysis.png",
+            "title": "Azimuth-Dependent Quality Metrics",
+            "description": """
             Shows how measurement characteristics vary by look direction:
             - **Top Left**: Number of retrievals per azimuth sector
             - **Top Right**: Measurement variability (lower = more consistent)
             - **Bottom Left**: Signal amplitude by direction
             - **Bottom Right**: Signal quality (PkNoise) by direction
-            """
+            """,
         },
-        'quality_vs_accuracy': {
-            'file': results_dir / f"{station_id}_{year}_quality_vs_accuracy.png",
-            'title': "Quality Metrics vs Measurement Accuracy",
-            'description': """
+        "quality_vs_accuracy": {
+            "file": results_dir / f"{station_id}_{year}_quality_vs_accuracy.png",
+            "title": "Quality Metrics vs Measurement Accuracy",
+            "description": """
             Correlation between signal quality and measurement errors:
             - **Top**: Amplitude and PkNoise vs absolute residual
             - **Bottom**: Arc duration effects and azimuthal bias patterns
-            """
-        }
+            """,
+        },
     }
 
     # Check which plots are available
-    available_plots = {key: info for key, info in polar_plots.items() if info['file'].exists()}
+    available_plots = {key: info for key, info in polar_plots.items() if info["file"].exists()}
 
     if not available_plots:
         st.info(f"""
@@ -87,16 +87,12 @@ def display_annual_polar_plots(station_id, year):
 
     # Display available plots in expandable sections
     for key, info in available_plots.items():
-        with st.expander(f"🎯 {info['title']}", expanded=(key == 'polar_quality')):
-            st.markdown(info['description'])
+        with st.expander(f"🎯 {info['title']}", expanded=(key == "polar_quality")):
+            st.markdown(info["description"])
 
             try:
-                image = Image.open(info['file'])
-                st.image(
-                    image,
-                    caption=f"{station_id} {year} - {info['title']}",
-                    width='stretch'
-                )
+                image = Image.open(info["file"])
+                st.image(image, caption=f"{station_id} {year} - {info['title']}", width="stretch")
             except Exception as e:
                 st.error(f"Error loading plot: {e}")
 
@@ -169,7 +165,9 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
 
             # Get current DOY from session state
             current_doy = st.session_state[session_key]
-            current_date = doy_to_date(year, current_doy) if current_doy in available_days else max_date
+            current_date = (
+                doy_to_date(year, current_doy) if current_doy in available_days else max_date
+            )
 
             selected_date = st.date_input(
                 "📅 Select Date for Diagnostic View",
@@ -177,7 +175,7 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
                 min_value=min_date,
                 max_value=max_date,
                 help="Choose a date to view the diagnostic plots generated during processing",
-                key=f"diag_date_{station_id}_{year}"
+                key=f"diag_date_{station_id}_{year}",
             )
 
         # Update session state from date input
@@ -187,13 +185,17 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
 
         with col2:
             # Alternative DOY selection
-            current_idx = available_days.index(st.session_state[session_key]) if st.session_state[session_key] in available_days else 0
+            current_idx = (
+                available_days.index(st.session_state[session_key])
+                if st.session_state[session_key] in available_days
+                else 0
+            )
             doy_input = st.selectbox(
                 "🗓️ Or Select by Day of Year (DOY)",
                 available_days,
                 index=current_idx,
                 help="Day of Year (1-365) selection",
-                key=f"diag_doy_{station_id}_{year}"
+                key=f"diag_doy_{station_id}_{year}",
             )
 
             # Update session state if DOY selection changes
@@ -205,35 +207,47 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
         with col3:
             # Navigation buttons with session state
             st.markdown("**Quick Navigation:**")
-            current_idx = available_days.index(st.session_state[session_key]) if st.session_state[session_key] in available_days else 0
+            current_idx = (
+                available_days.index(st.session_state[session_key])
+                if st.session_state[session_key] in available_days
+                else 0
+            )
 
-            if st.button("⬅️ Previous Day", disabled=current_idx <= 0, key=f"prev_{station_id}_{year}"):
+            if st.button(
+                "⬅️ Previous Day", disabled=current_idx <= 0, key=f"prev_{station_id}_{year}"
+            ):
                 st.session_state[session_key] = available_days[current_idx - 1]
                 st.rerun()
 
-            if st.button("➡️ Next Day", disabled=current_idx >= len(available_days) - 1, key=f"next_{station_id}_{year}"):
+            if st.button(
+                "➡️ Next Day",
+                disabled=current_idx >= len(available_days) - 1,
+                key=f"next_{station_id}_{year}",
+            ):
                 st.session_state[session_key] = available_days[current_idx + 1]
                 st.rerun()
 
         # Use the session state DOY for display
         selected_doy = st.session_state[session_key]
         selected_date = doy_to_date(year, selected_doy)
-        
+
         # Display diagnostic plots for selected day
         if selected_doy in available_days:
             display_diagnostic_plots(station_id, year, selected_doy, selected_date)
         else:
-            st.warning(f"🚫 No diagnostic plots available for {selected_date.strftime('%Y-%m-%d')} (DOY {selected_doy})")
-            
+            st.warning(
+                f"🚫 No diagnostic plots available for {selected_date.strftime('%Y-%m-%d')} (DOY {selected_doy})"
+            )
+
             # Show nearest available days
             st.info("📍 **Nearest available days:**")
             distances = [(abs(doy - selected_doy), doy) for doy in available_days]
             nearest_days = sorted(distances)[:5]
-            
+
             for _, doy in nearest_days:
                 day_date = doy_to_date(year, doy)
                 st.write(f"- DOY {doy}: {day_date.strftime('%Y-%m-%d')}")
-        
+
     except Exception as e:
         st.error(f"❌ Error loading diagnostic data: {str(e)}")
         st.exception(e)
@@ -241,32 +255,30 @@ def render_diagnostics_tab(station_id="FORA", year=2024, data_dict=None):
 
 def display_diagnostic_plots(station_id, year, doy, selected_date):
     """Display the LSP and summary plots for a specific day."""
-    
+
     # Get plot file paths
     plot_files = get_quicklook_plots_for_day(station_id, year, doy)
-    
+
     if not plot_files:
         st.warning(f"🚫 Plot files not found for DOY {doy}")
         return
-    
+
     # Display day information
     st.subheader(f"📊 Diagnostic Plots for {selected_date.strftime('%Y-%m-%d')} (DOY {doy})")
-    
+
     # Create two columns for side-by-side display
     col1, col2 = st.columns(2)
-    
+
     try:
         # Display Lomb-Scargle Periodogram
         with col1:
             st.markdown("### 🌊 Lomb-Scargle Periodogram (LSP)")
-            if 'lsp' in plot_files:
-                lsp_image = Image.open(plot_files['lsp'])
+            if "lsp" in plot_files:
+                lsp_image = Image.open(plot_files["lsp"])
                 st.image(
-                    lsp_image,
-                    caption=f"LSP Analysis for {station_id} - DOY {doy}",
-                    width='stretch'
+                    lsp_image, caption=f"LSP Analysis for {station_id} - DOY {doy}", width="stretch"
                 )
-                
+
                 # Add explanation
                 st.info("""
                 **LSP Plot Interpretation:**
@@ -277,18 +289,18 @@ def display_diagnostic_plots(station_id, year, doy, selected_date):
                 """)
             else:
                 st.warning("LSP plot not available")
-        
+
         # Display Summary Plot
         with col2:
             st.markdown("### 📐 Reflector Height vs. Azimuth")
-            if 'summary' in plot_files:
-                summary_image = Image.open(plot_files['summary'])
+            if "summary" in plot_files:
+                summary_image = Image.open(plot_files["summary"])
                 st.image(
                     summary_image,
                     caption=f"Summary Analysis for {station_id} - DOY {doy}",
-                    width='stretch'
+                    width="stretch",
                 )
-                
+
                 # Add explanation
                 st.info("""
                 **Summary Plot Interpretation:**
@@ -299,33 +311,33 @@ def display_diagnostic_plots(station_id, year, doy, selected_date):
                 """)
             else:
                 st.warning("Summary plot not available")
-        
+
         # Add download options
         st.markdown("---")
         st.markdown("### 📥 Download Options")
-        
+
         download_col1, download_col2 = st.columns(2)
-        
+
         with download_col1:
-            if 'lsp' in plot_files:
-                with open(plot_files['lsp'], 'rb') as file:
+            if "lsp" in plot_files:
+                with open(plot_files["lsp"], "rb") as file:
                     st.download_button(
                         label="⬇️ Download LSP Plot",
                         data=file.read(),
                         file_name=f"{station_id}_{year}_{doy:03d}_lsp.png",
-                        mime="image/png"
+                        mime="image/png",
                     )
-        
+
         with download_col2:
-            if 'summary' in plot_files:
-                with open(plot_files['summary'], 'rb') as file:
+            if "summary" in plot_files:
+                with open(plot_files["summary"], "rb") as file:
                     st.download_button(
                         label="⬇️ Download Summary Plot",
                         data=file.read(),
                         file_name=f"{station_id}_{year}_{doy:03d}_summary.png",
-                        mime="image/png"
+                        mime="image/png",
                     )
-        
+
         # Add technical details
         with st.expander("🔧 Technical Details"):
             st.markdown(f"""
@@ -342,11 +354,11 @@ def display_diagnostic_plots(station_id, year, doy, selected_date):
             These plots were generated by the `quickLook` command during GNSS-IR processing
             and provide the same diagnostic information used by gnssrefl developers.
             """)
-            
+
     except Exception as e:
         st.error(f"❌ Error displaying plots: {str(e)}")
         st.exception(e)
 
 
 # Export function
-__all__ = ['render_diagnostics_tab']
+__all__ = ["render_diagnostics_tab"]

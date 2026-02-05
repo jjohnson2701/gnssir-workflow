@@ -24,7 +24,7 @@ sys.path.append(str(project_root))
 from dashboard_components.station_metadata import (
     get_antenna_height,
     get_reference_source_info,
-    get_station_display_info
+    get_station_display_info,
 )
 
 from dashboard_components.constants import ENHANCED_COLORS
@@ -45,8 +45,8 @@ def load_subdaily_matched_data(station_id: str, year: int) -> tuple:
 
     try:
         df = pd.read_csv(matched_file)
-        df['gnss_datetime'] = pd.to_datetime(df['gnss_datetime'], format='mixed', utc=True)
-        df = df.sort_values('gnss_datetime').reset_index(drop=True)
+        df["gnss_datetime"] = pd.to_datetime(df["gnss_datetime"], format="mixed", utc=True)
+        df = df.sort_values("gnss_datetime").reset_index(drop=True)
         return df, None
     except Exception as e:
         return None, f"Error loading subdaily data: {e}"
@@ -65,33 +65,34 @@ def detect_column_names(df: pd.DataFrame) -> tuple:
         Tuple of (gnss_col, ref_col, ref_source)
     """
     # GNSS-IR demeaned column
-    if 'gnss_wse_dm' in df.columns:
-        gnss_dm_col = 'gnss_wse_dm'
-    elif 'gnss_dm' in df.columns:
-        gnss_dm_col = 'gnss_dm'
+    if "gnss_wse_dm" in df.columns:
+        gnss_dm_col = "gnss_wse_dm"
+    elif "gnss_dm" in df.columns:
+        gnss_dm_col = "gnss_dm"
     else:
         gnss_dm_col = None
 
     # Reference demeaned column - check known sources first, then generic
-    if 'usgs_wl_dm' in df.columns:
-        ref_dm_col = 'usgs_wl_dm'
-        ref_source = 'USGS'
-    elif 'coops_dm' in df.columns:
-        ref_dm_col = 'coops_dm'
-        ref_source = 'CO-OPS'
+    if "usgs_wl_dm" in df.columns:
+        ref_dm_col = "usgs_wl_dm"
+        ref_source = "USGS"
+    elif "coops_dm" in df.columns:
+        ref_dm_col = "coops_dm"
+        ref_source = "CO-OPS"
     else:
         # Generic detection for ERDDAP and other sources
         # Look for any *_dm column that isn't the GNSS column
-        ref_dm_cols = [col for col in df.columns
-                       if col.endswith('_dm') and not col.startswith('gnss')]
+        ref_dm_cols = [
+            col for col in df.columns if col.endswith("_dm") and not col.startswith("gnss")
+        ]
         if ref_dm_cols:
             ref_dm_col = ref_dm_cols[0]
             # Extract source name from column prefix (e.g., 'bartlett_cove' from 'bartlett_cove_dm')
-            source_prefix = ref_dm_col.rsplit('_dm', 1)[0]
-            ref_source = 'ERDDAP'
+            source_prefix = ref_dm_col.rsplit("_dm", 1)[0]
+            ref_source = "ERDDAP"
         else:
             ref_dm_col = None
-            ref_source = 'Unknown'
+            ref_source = "Unknown"
 
     return gnss_dm_col, ref_dm_col, ref_source
 
@@ -106,13 +107,13 @@ def create_subdaily_plot(
     ref_site_name: str = "Reference",
     distance_km: float = 0.0,
     show_ribbon: bool = True,
-    ribbon_window: int = 50
+    ribbon_window: int = 50,
 ) -> plt.Figure:
     """Create subdaily comparison plot with statistics."""
 
     # Calculate statistics
     correlation = df[gnss_col].corr(df[ref_col])
-    rmse = np.sqrt(np.mean((df[gnss_col] - df[ref_col])**2))
+    rmse = np.sqrt(np.mean((df[gnss_col] - df[ref_col]) ** 2))
     n_points = len(df)
     residuals = df[gnss_col] - df[ref_col]
     resid_mean = residuals.mean()
@@ -120,29 +121,34 @@ def create_subdaily_plot(
 
     # Create figure with two panels - explicit white background
     fig, (ax_main, ax_resid) = plt.subplots(
-        2, 1, figsize=(16, 10), height_ratios=[3, 1], sharex=True,
-        facecolor='white'
+        2, 1, figsize=(16, 10), height_ratios=[3, 1], sharex=True, facecolor="white"
     )
-    ax_main.set_facecolor('white')
-    ax_resid.set_facecolor('white')
+    ax_main.set_facecolor("white")
+    ax_resid.set_facecolor("white")
 
     # Set spine colors explicitly to black
     for ax in [ax_main, ax_resid]:
         for spine in ax.spines.values():
-            spine.set_color('black')
+            spine.set_color("black")
             spine.set_linewidth(1.0)
 
     plt.subplots_adjust(hspace=0.05)
 
     # Main panel: both datasets demeaned
     # Reference as continuous line - group by hour
-    df['hour'] = df['gnss_datetime'].dt.floor('h')
-    hourly_ref = df.groupby('hour')[ref_col].mean()
+    df["hour"] = df["gnss_datetime"].dt.floor("h")
+    hourly_ref = df.groupby("hour")[ref_col].mean()
 
     # Plot reference line (USGS or CO-OPS) - make it prominent
-    ref_line, = ax_main.plot(hourly_ref.index, hourly_ref.values,
-                              color='#C0392B', linewidth=2.5, alpha=0.9, zorder=5,
-                              label=f'{ref_source}')
+    (ref_line,) = ax_main.plot(
+        hourly_ref.index,
+        hourly_ref.values,
+        color="#C0392B",
+        linewidth=2.5,
+        alpha=0.9,
+        zorder=5,
+        label=f"{ref_source}",
+    )
 
     # GNSS-IR ribbon (rolling ±σ) if enabled
     legend_handles = []
@@ -153,49 +159,64 @@ def create_subdaily_plot(
         rolling_std = df[gnss_col].rolling(ribbon_window, center=True, min_periods=5).std()
 
         # Plot the ribbon (±σ band)
-        ax_main.fill_between(df['gnss_datetime'],
-                             rolling_mean - rolling_std,
-                             rolling_mean + rolling_std,
-                             alpha=0.25, color='#3498DB', zorder=1)
+        ax_main.fill_between(
+            df["gnss_datetime"],
+            rolling_mean - rolling_std,
+            rolling_mean + rolling_std,
+            alpha=0.25,
+            color="#3498DB",
+            zorder=1,
+        )
 
         # Plot the central rolling mean line
-        ax_main.plot(df['gnss_datetime'], rolling_mean,
-                     color='#2471A3', linewidth=2.0, alpha=0.8, zorder=3)
+        ax_main.plot(
+            df["gnss_datetime"], rolling_mean, color="#2471A3", linewidth=2.0, alpha=0.8, zorder=3
+        )
 
     # GNSS-IR as scatter points - use darker blue for contrast with ribbon
-    gnss_scatter = ax_main.scatter(df['gnss_datetime'], df[gnss_col],
-                                   c='#1A5276', s=8, alpha=0.6, zorder=4)
+    gnss_scatter = ax_main.scatter(
+        df["gnss_datetime"], df[gnss_col], c="#1A5276", s=8, alpha=0.6, zorder=4
+    )
 
     # Build legend with proper handles
     from matplotlib.lines import Line2D
 
     # Reference line (USGS or CO-OPS) - thick red line
-    ref_marker = Line2D([0], [0], color='#C0392B', linewidth=2.5)
+    ref_marker = Line2D([0], [0], color="#C0392B", linewidth=2.5)
 
     # GNSS-IR scatter points
-    gnss_scatter_marker = Line2D([0], [0], marker='o', color='w', markerfacecolor='#1A5276',
-                                  markersize=6, linestyle='None')
+    gnss_scatter_marker = Line2D(
+        [0], [0], marker="o", color="w", markerfacecolor="#1A5276", markersize=6, linestyle="None"
+    )
 
     # Build legend - order depends on whether ribbon is shown
     if show_ribbon:
         # GNSS-IR rolling mean - blue line
-        gnss_mean_marker = Line2D([0], [0], color='#2471A3', linewidth=2)
+        gnss_mean_marker = Line2D([0], [0], color="#2471A3", linewidth=2)
         from matplotlib.patches import Patch
-        ribbon_patch = Patch(facecolor='#3498DB', alpha=0.25)
+
+        ribbon_patch = Patch(facecolor="#3498DB", alpha=0.25)
         legend_handles = [ref_marker, gnss_mean_marker, ribbon_patch, gnss_scatter_marker]
-        legend_labels = [f'{ref_source} ({ref_site_name[:20]})', 'GNSS-IR mean', 'GNSS-IR ±1σ', 'GNSS-IR points']
+        legend_labels = [
+            f"{ref_source} ({ref_site_name[:20]})",
+            "GNSS-IR mean",
+            "GNSS-IR ±1σ",
+            "GNSS-IR points",
+        ]
     else:
         legend_handles = [ref_marker, gnss_scatter_marker]
-        legend_labels = [f'{ref_source} ({ref_site_name[:20]})', 'GNSS-IR points']
+        legend_labels = [f"{ref_source} ({ref_site_name[:20]})", "GNSS-IR points"]
 
     # Zero line
-    ax_main.axhline(0, color='gray', linestyle='--', alpha=0.5, zorder=0)
+    ax_main.axhline(0, color="gray", linestyle="--", alpha=0.5, zorder=0)
 
     # Labels and formatting - explicit black text
-    ax_main.set_ylabel('Demeaned Water Level (m)', fontsize=12, color='black')
-    ax_main.set_title(f'{station_name} Subdaily: GNSS-IR WSE vs {ref_source} ({year})', fontsize=14, color='black')
-    ax_main.legend(handles=legend_handles, labels=legend_labels, loc='upper left', fontsize=10)
-    ax_main.tick_params(colors='black')
+    ax_main.set_ylabel("Demeaned Water Level (m)", fontsize=12, color="black")
+    ax_main.set_title(
+        f"{station_name} Subdaily: GNSS-IR WSE vs {ref_source} ({year})", fontsize=14, color="black"
+    )
+    ax_main.legend(handles=legend_handles, labels=legend_labels, loc="upper left", fontsize=10)
+    ax_main.tick_params(colors="black")
     ax_main.grid(True, alpha=0.3)
 
     # Set y-axis limits based on reference data range (prevents outliers from compressing ref line)
@@ -212,41 +233,51 @@ def create_subdaily_plot(
     if distance_km > 0:
         info_lines.append(f"Distance: {distance_km:.2f} km")
 
-    props = dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.9, edgecolor='gray')
-    ax_main.text(0.99, 0.98, '\n'.join(info_lines), transform=ax_main.transAxes,
-                 fontsize=10, va='top', ha='right', bbox=props, color='black')
+    props = dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.9, edgecolor="gray")
+    ax_main.text(
+        0.99,
+        0.98,
+        "\n".join(info_lines),
+        transform=ax_main.transAxes,
+        fontsize=10,
+        va="top",
+        ha="right",
+        bbox=props,
+        color="black",
+    )
 
     # Residual panel
-    ax_resid.scatter(df['gnss_datetime'], residuals,
-                     c='#8E44AD', s=2, alpha=0.4)
-    ax_resid.axhline(0, color='gray', linestyle='--', alpha=0.5)
+    ax_resid.scatter(df["gnss_datetime"], residuals, c="#8E44AD", s=2, alpha=0.4)
+    ax_resid.axhline(0, color="gray", linestyle="--", alpha=0.5)
 
     # Residual stats
-    ax_resid.text(0.02, 0.95, f'μ={resid_mean:.3f}m, σ={resid_std:.3f}m',
-                  transform=ax_resid.transAxes, fontsize=9, va='top',
-                  bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), color='black')
+    ax_resid.text(
+        0.02,
+        0.95,
+        f"μ={resid_mean:.3f}m, σ={resid_std:.3f}m",
+        transform=ax_resid.transAxes,
+        fontsize=9,
+        va="top",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        color="black",
+    )
 
-    ax_resid.set_ylabel('Residual (m)', fontsize=11, color='black')
-    ax_resid.set_xlabel('Date', fontsize=12, color='black')
-    ax_resid.tick_params(colors='black')
+    ax_resid.set_ylabel("Residual (m)", fontsize=11, color="black")
+    ax_resid.set_xlabel("Date", fontsize=12, color="black")
+    ax_resid.tick_params(colors="black")
     ax_resid.grid(True, alpha=0.3)
     ax_resid.set_ylim(-1.5, 1.5)
 
     # X-axis formatting - monthly ticks
-    ax_main.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+    ax_main.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
     ax_main.xaxis.set_major_locator(mdates.MonthLocator())
-    ax_resid.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+    ax_resid.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
 
     plt.tight_layout()
     return fig
 
 
-def render_subdaily_tab(
-    station_id: str,
-    year: int,
-    rh_data=None,
-    comparison_data=None
-):
+def render_subdaily_tab(station_id: str, year: int, rh_data=None, comparison_data=None):
     """
     Render the subdaily comparison tab.
 
@@ -270,9 +301,11 @@ def render_subdaily_tab(
     # Display reference source info
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.info(f"📍 **Reference Source:** {ref_info['primary_source']} - {ref_info['station_name']}")
+        st.info(
+            f"📍 **Reference Source:** {ref_info['primary_source']} - {ref_info['station_name']}"
+        )
     with col2:
-        if ref_info['distance_km']:
+        if ref_info["distance_km"]:
             st.metric("Distance to Reference", f"{ref_info['distance_km']:.1f} km")
 
     # Load subdaily data
@@ -308,29 +341,36 @@ def render_subdaily_tab(
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        show_ribbon = st.checkbox("Show scatter ribbon (±σ)", value=True,
-                                  help="Display rolling standard deviation band around GNSS-IR data")
+        show_ribbon = st.checkbox(
+            "Show scatter ribbon (±σ)",
+            value=True,
+            help="Display rolling standard deviation band around GNSS-IR data",
+        )
 
     with col2:
-        ribbon_window = st.slider("Ribbon window size", 20, 100, 50,
-                                  help="Number of points for rolling statistics",
-                                  disabled=not show_ribbon)
+        ribbon_window = st.slider(
+            "Ribbon window size",
+            20,
+            100,
+            50,
+            help="Number of points for rolling statistics",
+            disabled=not show_ribbon,
+        )
 
     with col3:
         # Date range filter
-        min_date = df['gnss_datetime'].min().date()
-        max_date = df['gnss_datetime'].max().date()
+        min_date = df["gnss_datetime"].min().date()
+        max_date = df["gnss_datetime"].max().date()
         date_range = st.date_input(
-            "Date range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date
+            "Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date
         )
 
     # Filter by date range if specified
     if len(date_range) == 2:
         start_date, end_date = date_range
-        mask = (df['gnss_datetime'].dt.date >= start_date) & (df['gnss_datetime'].dt.date <= end_date)
+        mask = (df["gnss_datetime"].dt.date >= start_date) & (
+            df["gnss_datetime"].dt.date <= end_date
+        )
         df_filtered = df[mask].copy()
     else:
         df_filtered = df.copy()
@@ -348,10 +388,10 @@ def render_subdaily_tab(
             gnss_col=gnss_col,
             ref_col=ref_col,
             ref_source=detected_source,
-            ref_site_name=ref_info['station_name'],
-            distance_km=ref_info['distance_km'] or 0.0,
+            ref_site_name=ref_info["station_name"],
+            distance_km=ref_info["distance_km"] or 0.0,
             show_ribbon=show_ribbon,
-            ribbon_window=ribbon_window
+            ribbon_window=ribbon_window,
         )
 
     st.pyplot(fig)
@@ -361,7 +401,7 @@ def render_subdaily_tab(
     st.markdown("### 📊 Statistics Summary")
 
     correlation = df_filtered[gnss_col].corr(df_filtered[ref_col])
-    rmse = np.sqrt(np.mean((df_filtered[gnss_col] - df_filtered[ref_col])**2))
+    rmse = np.sqrt(np.mean((df_filtered[gnss_col] - df_filtered[ref_col]) ** 2))
     residuals = df_filtered[gnss_col] - df_filtered[ref_col]
 
     col1, col2, col3, col4 = st.columns(4)
@@ -390,12 +430,13 @@ def render_subdaily_tab(
             label="⬇️ Download Filtered Data (CSV)",
             data=csv_data,
             file_name=f"{station_id}_{year}_subdaily_filtered.csv",
-            mime="text/csv"
+            mime="text/csv",
         )
 
     with col2:
         # PNG export - save to buffer
         import io
+
         buf = io.BytesIO()
         fig_export = create_subdaily_plot(
             df=df_filtered,
@@ -404,12 +445,12 @@ def render_subdaily_tab(
             gnss_col=gnss_col,
             ref_col=ref_col,
             ref_source=detected_source,
-            ref_site_name=ref_info['station_name'],
-            distance_km=ref_info['distance_km'] or 0.0,
+            ref_site_name=ref_info["station_name"],
+            distance_km=ref_info["distance_km"] or 0.0,
             show_ribbon=show_ribbon,
-            ribbon_window=ribbon_window
+            ribbon_window=ribbon_window,
         )
-        fig_export.savefig(buf, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+        fig_export.savefig(buf, format="png", dpi=300, bbox_inches="tight", facecolor="white")
         buf.seek(0)
         plt.close(fig_export)
 
@@ -417,7 +458,7 @@ def render_subdaily_tab(
             label="⬇️ Download Plot (PNG)",
             data=buf.getvalue(),
             file_name=f"{station_id}_{year}_subdaily_comparison.png",
-            mime="image/png"
+            mime="image/png",
         )
 
     # Interpretation guide
@@ -449,4 +490,4 @@ def render_subdaily_tab(
 
 
 # Export function
-__all__ = ['render_subdaily_tab']
+__all__ = ["render_subdaily_tab"]

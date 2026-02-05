@@ -4,4 +4,4 @@
 from .noaa_coops import NOAACOOPSClient
 from .ndbc_client import NDBCClient
 
-__all__ = ['NOAACOOPSClient', 'NDBCClient']
+__all__ = ["NOAACOOPSClient", "NDBCClient"]

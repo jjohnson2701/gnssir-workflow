@@ -7,11 +7,12 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend for testing
+
+matplotlib.use("Agg")  # Non-interactive backend for testing
 import matplotlib.pyplot as plt
 
 # Add scripts to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from visualizer.comparison_plots import (
     create_comparison_plot,
@@ -27,17 +28,18 @@ class TestColorScheme:
     def test_colors_defined(self):
         """Test that required colors are defined."""
         # PLOT_COLORS uses 'gnssir' not 'gnss'
-        required_colors = ['gnssir', 'reference', 'grid']
+        required_colors = ["gnssir", "reference", "grid"]
 
         for color_name in required_colors:
             assert color_name in PLOT_COLORS
-            assert PLOT_COLORS[color_name].startswith('#')
+            assert PLOT_COLORS[color_name].startswith("#")
 
     @pytest.mark.unit
     def test_colors_valid_hex(self):
         """Test that all colors are valid hex codes."""
         import re
-        hex_pattern = re.compile(r'^#[0-9A-Fa-f]{6}$')
+
+        hex_pattern = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
         for color_name, color_value in PLOT_COLORS.items():
             assert hex_pattern.match(color_value), f"Invalid hex color: {color_name}={color_value}"
@@ -50,35 +52,31 @@ class TestComparisonPlot:
     def test_plot_creation(self, mock_comparison_df, temp_output_dir):
         """Test that comparison plot can be created."""
         df = mock_comparison_df
-        output_path = temp_output_dir / 'test_comparison.png'
+        output_path = temp_output_dir / "test_comparison.png"
 
         # Should not raise an exception
         try:
-            corr, demeaned_corr = create_comparison_plot(
-                df, 'TEST', 2024, output_path
-            )
+            corr, demeaned_corr = create_comparison_plot(df, "TEST", 2024, output_path)
 
             assert output_path.exists()
             assert isinstance(corr, float)
             assert isinstance(demeaned_corr, float)
         except Exception as e:
             # If columns are missing, skip
-            if 'wse_ellips' not in str(e) and 'usgs' not in str(e):
+            if "wse_ellips" not in str(e) and "usgs" not in str(e):
                 raise
             pytest.skip(f"Missing required columns: {e}")
         finally:
-            plt.close('all')
+            plt.close("all")
 
     @pytest.mark.unit
     def test_plot_correlation_values(self, mock_comparison_df, temp_output_dir):
         """Test that returned correlation values are valid."""
         df = mock_comparison_df
-        output_path = temp_output_dir / 'test_corr.png'
+        output_path = temp_output_dir / "test_corr.png"
 
         try:
-            corr, demeaned_corr = create_comparison_plot(
-                df, 'TEST', 2024, output_path
-            )
+            corr, demeaned_corr = create_comparison_plot(df, "TEST", 2024, output_path)
 
             # Correlations should be between -1 and 1
             assert -1 <= corr <= 1
@@ -86,7 +84,7 @@ class TestComparisonPlot:
         except Exception:
             pytest.skip("Required columns not available")
         finally:
-            plt.close('all')
+            plt.close("all")
 
 
 class TestOutlierDetection:
@@ -98,19 +96,19 @@ class TestOutlierDetection:
         df = mock_comparison_df
 
         try:
-            outliers, clean_corr = detect_outliers_and_anomalies(
-                df, 'TEST', 2024
-            )
+            outliers, clean_corr = detect_outliers_and_anomalies(df, "TEST", 2024)
 
             # With synthetic data, there should be few outliers
-            outlier_count = len(outliers) if isinstance(outliers, (list, pd.DataFrame)) else outliers
+            outlier_count = (
+                len(outliers) if isinstance(outliers, (list, pd.DataFrame)) else outliers
+            )
             assert outlier_count >= 0
         except Exception as e:
-            if 'wse_ellips' in str(e) or 'usgs' in str(e):
+            if "wse_ellips" in str(e) or "usgs" in str(e):
                 pytest.skip("Required columns not available")
             raise
         finally:
-            plt.close('all')
+            plt.close("all")
 
     @pytest.mark.unit
     def test_outlier_detection_with_outliers(self):
@@ -149,7 +147,7 @@ class TestPlotUtilities:
         fig, ax = plt.subplots()
         ax.plot([1, 2, 3], [1, 2, 3])
 
-        output_path = temp_output_dir / 'test_save.png'
+        output_path = temp_output_dir / "test_save.png"
         fig.savefig(output_path, dpi=100)
         plt.close(fig)
 
@@ -163,11 +161,11 @@ class TestPlotUtilities:
 
         fig, ax = plt.subplots()
 
-        dates = pd.date_range('2024-01-01', periods=30, freq='D')
+        dates = pd.date_range("2024-01-01", periods=30, freq="D")
         values = np.random.randn(30)
 
         ax.plot(dates, values)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
 
         # Should not raise an exception
         fig.autofmt_xdate()
@@ -182,9 +180,9 @@ class TestSeasonalAnalysis:
     def test_monthly_grouping(self, sample_gnssir_data):
         """Test grouping data by month."""
         df = sample_gnssir_data.copy()
-        df['month'] = df['datetime'].dt.month
+        df["month"] = df["datetime"].dt.month
 
-        monthly_groups = df.groupby('month')
+        monthly_groups = df.groupby("month")
 
         # Should have at least 1 month
         assert len(monthly_groups) >= 1
@@ -193,23 +191,23 @@ class TestSeasonalAnalysis:
     def test_seasonal_grouping(self, sample_gnssir_data):
         """Test grouping data by season."""
         df = sample_gnssir_data.copy()
-        df['month'] = df['datetime'].dt.month
+        df["month"] = df["datetime"].dt.month
 
         # Define seasons
         def get_season(month):
             if month in [12, 1, 2]:
-                return 'Winter'
+                return "Winter"
             elif month in [3, 4, 5]:
-                return 'Spring'
+                return "Spring"
             elif month in [6, 7, 8]:
-                return 'Summer'
+                return "Summer"
             else:
-                return 'Fall'
+                return "Fall"
 
-        df['season'] = df['month'].apply(get_season)
+        df["season"] = df["month"].apply(get_season)
 
         # All rows should have a season assigned
-        assert not df['season'].isna().any()
+        assert not df["season"].isna().any()
 
 
 class TestRealDataIntegration:
@@ -221,13 +219,13 @@ class TestRealDataIntegration:
         df = real_gnssir_raw_data
 
         # Check expected columns exist
-        assert 'RH' in df.columns
-        assert 'date' in df.columns
-        assert 'Azim' in df.columns
+        assert "RH" in df.columns
+        assert "date" in df.columns
+        assert "Azim" in df.columns
 
         # Check data types
         assert len(df) > 0
-        assert df['RH'].dtype in [np.float64, np.float32]
+        assert df["RH"].dtype in [np.float64, np.float32]
 
     @pytest.mark.integration
     def test_real_subdaily_data_loads(self, real_subdaily_matched_data):
@@ -235,12 +233,12 @@ class TestRealDataIntegration:
         df = real_subdaily_matched_data
 
         # Check expected columns exist
-        assert 'gnss_wse' in df.columns
-        assert 'bartlett_cove_wl' in df.columns
-        assert 'residual' in df.columns
+        assert "gnss_wse" in df.columns
+        assert "bartlett_cove_wl" in df.columns
+        assert "residual" in df.columns
 
         # Check datetime parsing worked
-        assert pd.api.types.is_datetime64_any_dtype(df['gnss_datetime'])
+        assert pd.api.types.is_datetime64_any_dtype(df["gnss_datetime"])
 
     @pytest.mark.integration
     def test_real_comparison_data_loads(self, real_comparison_data):
@@ -248,8 +246,8 @@ class TestRealDataIntegration:
         df = real_comparison_data
 
         # Check expected columns exist
-        assert 'wse_ellips_m' in df.columns
-        assert 'usgs_value_m_median' in df.columns
+        assert "wse_ellips_m" in df.columns
+        assert "usgs_value_m_median" in df.columns
 
         # Check index is datetime
         assert isinstance(df.index, pd.DatetimeIndex)
@@ -260,7 +258,7 @@ class TestRealDataIntegration:
         df = real_comparison_data
 
         # Calculate correlation
-        corr = df['wse_ellips_m'].corr(df['usgs_value_m_median'])
+        corr = df["wse_ellips_m"].corr(df["usgs_value_m_median"])
 
         # Real data should have some correlation (positive or negative)
         assert not np.isnan(corr)
@@ -270,14 +268,12 @@ class TestRealDataIntegration:
     def test_plot_with_real_data(self, real_comparison_data, temp_output_dir):
         """Test creating comparison plot with real data."""
         df = real_comparison_data
-        output_path = temp_output_dir / 'test_real_comparison.png'
+        output_path = temp_output_dir / "test_real_comparison.png"
 
         try:
-            corr, demeaned_corr = create_comparison_plot(
-                df, 'GLBX', 2024, output_path
-            )
+            corr, demeaned_corr = create_comparison_plot(df, "GLBX", 2024, output_path)
 
             assert output_path.exists()
             assert isinstance(corr, float)
         finally:
-            plt.close('all')
+            plt.close("all")

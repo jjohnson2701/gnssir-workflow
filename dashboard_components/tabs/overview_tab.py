@@ -17,9 +17,15 @@ from dashboard_components.constants import ENHANCED_COLORS, DATA_SOURCE_EMOJI
 from dashboard_components.station_metadata import get_reference_source_info
 
 
-def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
-                       selected_station, selected_year,
-                       coops_station_id=None):
+def render_overview_tab(
+    rh_data,
+    usgs_data,
+    coops_data,
+    erddap_data,
+    selected_station,
+    selected_year,
+    coops_station_id=None,
+):
     """
     Render the redesigned overview tab with data availability indicator and yearly summary.
 
@@ -44,111 +50,143 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
 
     # Get reference source info for this station
     ref_info = get_reference_source_info(selected_station)
-    primary_source = ref_info['primary_source']  # 'ERDDAP', 'USGS', or 'CO-OPS'
+    primary_source = ref_info["primary_source"]  # 'ERDDAP', 'USGS', or 'CO-OPS'
 
     # Data availability status bar (horizontal red/green indicator)
     st.markdown("### 🚦 Data Source Availability")
 
     # Determine primary reference data based on station config
-    if primary_source == 'ERDDAP':
+    if primary_source == "ERDDAP":
         primary_ref_data = erddap_data
-        primary_ref_name = 'ERDDAP'
-        primary_ref_emoji = '🌐'
-        primary_ref_details = ref_info['station_name'] if erddap_data is not None and not erddap_data.empty else "No data"
+        primary_ref_name = "ERDDAP"
+        primary_ref_emoji = "🌐"
+        primary_ref_details = (
+            ref_info["station_name"]
+            if erddap_data is not None and not erddap_data.empty
+            else "No data"
+        )
         if erddap_data is not None and not erddap_data.empty:
             primary_ref_details = f"{ref_info['station_name']} ({len(erddap_data)} records)"
-    elif primary_source == 'CO-OPS':
+    elif primary_source == "CO-OPS":
         primary_ref_data = coops_data
-        primary_ref_name = 'CO-OPS'
-        primary_ref_emoji = '🌀'
-        primary_ref_details = f"Station {coops_station_id}" if coops_station_id and coops_data is not None and not coops_data.empty else ref_info['station_name']
+        primary_ref_name = "CO-OPS"
+        primary_ref_emoji = "🌀"
+        primary_ref_details = (
+            f"Station {coops_station_id}"
+            if coops_station_id and coops_data is not None and not coops_data.empty
+            else ref_info["station_name"]
+        )
     else:
         primary_ref_data = usgs_data
-        primary_ref_name = 'USGS'
-        primary_ref_emoji = '🌊'
-        primary_ref_details = f"{len(usgs_data)} records" if usgs_data is not None and not usgs_data.empty else "No data"
+        primary_ref_name = "USGS"
+        primary_ref_emoji = "🌊"
+        primary_ref_details = (
+            f"{len(usgs_data)} records"
+            if usgs_data is not None and not usgs_data.empty
+            else "No data"
+        )
 
     # Create the horizontal status bar - show GNSS-IR and primary reference first
     data_sources = [
         {
-            'name': 'GNSS-IR',
-            'emoji': '🛰️',
-            'available': rh_data is not None and not rh_data.empty,
-            'count': len(rh_data) if rh_data is not None and not rh_data.empty else 0,
-            'details': f"{len(rh_data)} days" if rh_data is not None and not rh_data.empty else "No data",
-            'is_primary': False
+            "name": "GNSS-IR",
+            "emoji": "🛰️",
+            "available": rh_data is not None and not rh_data.empty,
+            "count": len(rh_data) if rh_data is not None and not rh_data.empty else 0,
+            "details": (
+                f"{len(rh_data)} days" if rh_data is not None and not rh_data.empty else "No data"
+            ),
+            "is_primary": False,
         },
         {
-            'name': f'{primary_ref_name} (Primary)',
-            'emoji': primary_ref_emoji,
-            'available': primary_ref_data is not None and not primary_ref_data.empty,
-            'count': len(primary_ref_data) if primary_ref_data is not None and not primary_ref_data.empty else 0,
-            'details': primary_ref_details if primary_ref_data is not None and not primary_ref_data.empty else "No data",
-            'is_primary': True
-        }
+            "name": f"{primary_ref_name} (Primary)",
+            "emoji": primary_ref_emoji,
+            "available": primary_ref_data is not None and not primary_ref_data.empty,
+            "count": (
+                len(primary_ref_data)
+                if primary_ref_data is not None and not primary_ref_data.empty
+                else 0
+            ),
+            "details": (
+                primary_ref_details
+                if primary_ref_data is not None and not primary_ref_data.empty
+                else "No data"
+            ),
+            "is_primary": True,
+        },
     ]
 
     # Add secondary reference sources if data is available
-    if primary_source == 'ERDDAP':
+    if primary_source == "ERDDAP":
         # For ERDDAP primary, show USGS and CO-OPS as secondary if available
         if usgs_data is not None and not usgs_data.empty:
-            data_sources.append({
-                'name': 'USGS',
-                'emoji': '🌊',
-                'available': True,
-                'count': len(usgs_data),
-                'details': f"{len(usgs_data)} records",
-                'is_primary': False
-            })
+            data_sources.append(
+                {
+                    "name": "USGS",
+                    "emoji": "🌊",
+                    "available": True,
+                    "count": len(usgs_data),
+                    "details": f"{len(usgs_data)} records",
+                    "is_primary": False,
+                }
+            )
         if coops_data is not None and not coops_data.empty:
-            data_sources.append({
-                'name': 'CO-OPS',
-                'emoji': '🌀',
-                'available': True,
-                'count': len(coops_data),
-                'details': f"Station {coops_station_id}" if coops_station_id else "Available",
-                'is_primary': False
-            })
-    elif primary_source == 'CO-OPS' and usgs_data is not None and not usgs_data.empty:
-        data_sources.insert(2, {
-            'name': 'USGS',
-            'emoji': '🌊',
-            'available': True,
-            'count': len(usgs_data),
-            'details': f"{len(usgs_data)} records",
-            'is_primary': False
-        })
-    elif primary_source == 'USGS' and coops_data is not None and not coops_data.empty:
-        data_sources.insert(2, {
-            'name': 'CO-OPS',
-            'emoji': '🌀',
-            'available': True,
-            'count': len(coops_data),
-            'details': f"Station {coops_station_id}" if coops_station_id else "Available",
-            'is_primary': False
-        })
-    
+            data_sources.append(
+                {
+                    "name": "CO-OPS",
+                    "emoji": "🌀",
+                    "available": True,
+                    "count": len(coops_data),
+                    "details": f"Station {coops_station_id}" if coops_station_id else "Available",
+                    "is_primary": False,
+                }
+            )
+    elif primary_source == "CO-OPS" and usgs_data is not None and not usgs_data.empty:
+        data_sources.insert(
+            2,
+            {
+                "name": "USGS",
+                "emoji": "🌊",
+                "available": True,
+                "count": len(usgs_data),
+                "details": f"{len(usgs_data)} records",
+                "is_primary": False,
+            },
+        )
+    elif primary_source == "USGS" and coops_data is not None and not coops_data.empty:
+        data_sources.insert(
+            2,
+            {
+                "name": "CO-OPS",
+                "emoji": "🌀",
+                "available": True,
+                "count": len(coops_data),
+                "details": f"Station {coops_station_id}" if coops_station_id else "Available",
+                "is_primary": False,
+            },
+        )
+
     # Create horizontal status bar using Streamlit columns (more reliable than HTML)
     cols = st.columns(len(data_sources))
-    
+
     for i, source in enumerate(data_sources):
         with cols[i]:
             # Determine styling based on availability
-            if source['available']:
+            if source["available"]:
                 st.success(f"{source['emoji']} **{source['name']}**\n\n{source['details']}")
             else:
                 st.error(f"{source['emoji']} **{source['name']}**\n\n{source['details']}")
-    
+
     # Data source details in expandable sections
     col1, col2 = st.columns(2)
-    
+
     with col1:
         with st.expander("🛰️ GNSS-IR Details", expanded=True):
             if rh_data is not None and not rh_data.empty:
-                gnss_start = rh_data['date'].min().strftime('%Y-%m-%d')
-                gnss_end = rh_data['date'].max().strftime('%Y-%m-%d')
-                avg_retrievals = rh_data['rh_count'].mean()
-                
+                gnss_start = rh_data["date"].min().strftime("%Y-%m-%d")
+                gnss_end = rh_data["date"].max().strftime("%Y-%m-%d")
+                avg_retrievals = rh_data["rh_count"].mean()
+
                 st.success(f"✅ **Active** ({len(rh_data)} processing days)")
                 st.markdown(f"""
                 - **Date Range:** {gnss_start} to {gnss_end}
@@ -160,7 +198,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
 
     with col2:
         # Show primary reference source expander
-        if primary_source == 'ERDDAP':
+        if primary_source == "ERDDAP":
             with st.expander(f"🌐 {ref_info['station_name']} (Primary Reference)", expanded=True):
                 if erddap_data is not None and not erddap_data.empty:
                     st.success(f"✅ **Active** ({len(erddap_data)} records)")
@@ -168,12 +206,15 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                     # Find water level column (auto-detect from various naming conventions)
                     # ERDDAP column naming varies by station (e.g., bartlett_cove_wl for GLBX)
                     water_col = None
-                    if 'water_level_m' in erddap_data.columns:
-                        water_col = 'water_level_m'
+                    if "water_level_m" in erddap_data.columns:
+                        water_col = "water_level_m"
                     else:
                         # Look for any column ending in _wl that isn't gnss
-                        wl_cols = [col for col in erddap_data.columns
-                                   if col.endswith('_wl') and not col.startswith('gnss')]
+                        wl_cols = [
+                            col
+                            for col in erddap_data.columns
+                            if col.endswith("_wl") and not col.startswith("gnss")
+                        ]
                         if wl_cols:
                             water_col = wl_cols[0]
 
@@ -185,8 +226,10 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                         - **Range:** {erddap_data[water_col].min():.2f} to {erddap_data[water_col].max():.2f} m
                         - **Dataset:** {ref_info['station_id']}
                         """)
-                        if ref_info['distance_km']:
-                            st.markdown(f"- **Distance:** {ref_info['distance_km']*1000:.0f} m (co-located)")
+                        if ref_info["distance_km"]:
+                            st.markdown(
+                                f"- **Distance:** {ref_info['distance_km']*1000:.0f} m (co-located)"
+                            )
                 else:
                     st.warning(f"⚠️ ERDDAP data not loaded. Station: {ref_info['station_name']}")
 
@@ -200,14 +243,14 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                 with st.expander("🌀 NOAA CO-OPS Tides (Secondary)"):
                     st.info(f"✅ **Available** (Station {coops_station_id})")
 
-        elif primary_source == 'CO-OPS':
+        elif primary_source == "CO-OPS":
             with st.expander(f"🌀 {ref_info['station_name']} (Primary Reference)", expanded=True):
                 if coops_data is not None and not coops_data.empty:
                     st.success(f"✅ **Active** ({len(coops_data)} records)")
 
                     # Find water level column
                     water_col = None
-                    for col in ['water_level_m', 'water_level', 'v']:
+                    for col in ["water_level_m", "water_level", "v"]:
                         if col in coops_data.columns:
                             water_col = col
                             break
@@ -220,7 +263,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                         - **Range:** {coops_data[water_col].min():.2f} to {coops_data[water_col].max():.2f} m
                         - **Station ID:** {ref_info['station_id']}
                         """)
-                        if ref_info['distance_km']:
+                        if ref_info["distance_km"]:
                             st.markdown(f"- **Distance:** {ref_info['distance_km']:.1f} km")
                 else:
                     st.warning(f"⚠️ CO-OPS data not loaded. Station: {ref_info['station_name']}")
@@ -238,7 +281,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
 
                     # Find water level column
                     water_col = None
-                    for col in ['water_level_m', 'usgs_value', 'usgs_value_m_median', 'value']:
+                    for col in ["water_level_m", "usgs_value", "usgs_value_m_median", "value"]:
                         if col in usgs_data.columns:
                             water_col = col
                             break
@@ -251,9 +294,9 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                         - **Range:** {usgs_data[water_col].min():.2f} to {usgs_data[water_col].max():.2f} m
                         """)
 
-                    if 'site_name' in usgs_data.columns:
+                    if "site_name" in usgs_data.columns:
                         st.markdown(f"- **Site:** {usgs_data['site_name'].iloc[0]}")
-                    if ref_info['distance_km']:
+                    if ref_info["distance_km"]:
                         st.markdown(f"- **Distance:** {ref_info['distance_km']:.1f} km")
                 else:
                     st.error("❌ **No USGS data available**")
@@ -263,25 +306,27 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                 with st.expander("🌀 NOAA CO-OPS Tides (Secondary)"):
                     st.info(f"✅ **Available** (Station {coops_station_id})")
                     st.markdown(f"- **Records:** {len(coops_data)}")
-                    if 'water_level_m' in coops_data.columns:
-                        st.markdown(f"- **Tide Range:** {coops_data['water_level_m'].min():.2f} to {coops_data['water_level_m'].max():.2f} m")
-    
+                    if "water_level_m" in coops_data.columns:
+                        st.markdown(
+                            f"- **Tide Range:** {coops_data['water_level_m'].min():.2f} to {coops_data['water_level_m'].max():.2f} m"
+                        )
+
     # Yearly Summary Section
     st.markdown("---")
     st.markdown("### 📊 Yearly Summary")
-    
+
     if rh_data is not None and not rh_data.empty:
         # Calculate key yearly statistics
         total_days = len(rh_data)
-        total_retrievals = rh_data['rh_count'].sum()
-        avg_daily_retrievals = rh_data['rh_count'].mean()
+        total_retrievals = rh_data["rh_count"].sum()
+        avg_daily_retrievals = rh_data["rh_count"].mean()
         coverage_percent = (total_days / 365) * 100
-        
+
         # RH statistics
-        mean_rh = rh_data['rh_median_m'].mean()
-        std_rh = rh_data['rh_median_m'].std()
-        range_rh = rh_data['rh_median_m'].max() - rh_data['rh_median_m'].min()
-        
+        mean_rh = rh_data["rh_median_m"].mean()
+        std_rh = rh_data["rh_median_m"].std()
+        range_rh = rh_data["rh_median_m"].max() - rh_data["rh_median_m"].min()
+
         # Create summary metrics (using help text instead of delta to avoid misleading arrows)
         col1, col2, col3, col4 = st.columns(4)
 
@@ -289,7 +334,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
             st.metric(
                 label="📅 Data Coverage",
                 value=f"{coverage_percent:.1f}%",
-                help=f"{total_days} days with data out of 365"
+                help=f"{total_days} days with data out of 365",
             )
             st.caption(f"{total_days} days")
 
@@ -297,7 +342,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
             st.metric(
                 label="📡 Total Retrievals",
                 value=f"{total_retrievals:,}",
-                help="Total number of individual GNSS-IR water level retrievals"
+                help="Total number of individual GNSS-IR water level retrievals",
             )
             st.caption(f"{avg_daily_retrievals:.1f}/day avg")
 
@@ -305,7 +350,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
             st.metric(
                 label="📏 Mean RH",
                 value=f"{mean_rh:.3f} m",
-                help="Average reflector height (antenna to water surface)"
+                help="Average reflector height (antenna to water surface)",
             )
             st.caption(f"±{std_rh:.3f} m std")
 
@@ -313,28 +358,30 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
             st.metric(
                 label="📈 RH Range",
                 value=f"{range_rh:.3f} m",
-                help="Total variation in reflector height over the year"
+                help="Total variation in reflector height over the year",
             )
-            st.caption(f"{rh_data['rh_median_m'].min():.3f} to {rh_data['rh_median_m'].max():.3f} m")
-        
+            st.caption(
+                f"{rh_data['rh_median_m'].min():.3f} to {rh_data['rh_median_m'].max():.3f} m"
+            )
+
         # Performance indicators
         st.markdown("#### Performance Indicators")
         perf_col1, perf_col2, perf_col3 = st.columns(3)
-        
+
         with perf_col1:
             # Data quality based on retrievals
             if avg_daily_retrievals >= 50:
                 quality_color = "🟢"
                 quality_text = "Excellent"
             elif avg_daily_retrievals >= 20:
-                quality_color = "🟡" 
+                quality_color = "🟡"
                 quality_text = "Good"
             else:
                 quality_color = "🟠"
                 quality_text = "Fair"
-            
+
             st.markdown(f"**Data Quality:** {quality_color} {quality_text}")
-            
+
         with perf_col2:
             # Temporal coverage
             if coverage_percent >= 90:
@@ -342,13 +389,13 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                 coverage_text = "Excellent"
             elif coverage_percent >= 70:
                 coverage_color = "🟡"
-                coverage_text = "Good" 
+                coverage_text = "Good"
             else:
                 coverage_color = "🟠"
                 coverage_text = "Partial"
-            
+
             st.markdown(f"**Temporal Coverage:** {coverage_color} {coverage_text}")
-            
+
         with perf_col3:
             # Precision indicator
             if std_rh <= 0.1:
@@ -360,12 +407,12 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
             else:
                 precision_color = "🟠"
                 precision_text = "Variable"
-            
+
             st.markdown(f"**Precision:** {precision_color} {precision_text}")
-    
+
     else:
         st.warning("⚠️ No GNSS-IR data available for yearly summary")
-    
+
     # Diagnostic Visualizations Section
     st.markdown("---")
     st.markdown("### 🔬 Diagnostic Visualizations")
@@ -377,34 +424,45 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
     resolution_plot = results_dir / f"{selected_station}_{selected_year}_resolution_comparison.png"
 
     # Find polar animation GIF (look for any DOY range)
-    gif_files = list(results_dir.glob(f"{selected_station}_{selected_year}_polar_animation_DOY*.gif"))
+    gif_files = list(
+        results_dir.glob(f"{selected_station}_{selected_year}_polar_animation_DOY*.gif")
+    )
 
     viz_col1, viz_col2 = st.columns(2)
 
     with viz_col1:
         st.markdown("#### 📊 Correlation vs Temporal Resolution")
         if resolution_plot.exists():
-            st.image(str(resolution_plot), width='stretch')
-            st.caption(f"Full-year correlation analysis showing how aggregation affects RMSE and correlation")
+            st.image(str(resolution_plot), width="stretch")
+            st.caption(
+                f"Full-year correlation analysis showing how aggregation affects RMSE and correlation"
+            )
         else:
-            st.info(f"Resolution comparison plot not found. Generate with:\n```bash\npython scripts/plot_resolution_comparison.py --station {selected_station} --year {selected_year}\n```")
+            st.info(
+                f"Resolution comparison plot not found. Generate with:\n```bash\npython scripts/plot_resolution_comparison.py --station {selected_station} --year {selected_year}\n```"
+            )
 
     with viz_col2:
         st.markdown("#### 🌊 Weekly Polar Animation")
         if gif_files:
             # Use the first GIF found (sorted to be consistent)
             gif_path = sorted(gif_files)[0]
-            st.image(str(gif_path), width='stretch')
+            st.image(str(gif_path), width="stretch")
             # Extract DOY range from filename
             import re
-            doy_match = re.search(r'DOY(\d+)-(\d+)', gif_path.name)
+
+            doy_match = re.search(r"DOY(\d+)-(\d+)", gif_path.name)
             if doy_match:
                 doy_start, doy_end = doy_match.groups()
-                st.caption(f"Water level visualization with Fresnel zone reflections (DOY {doy_start}-{doy_end})")
+                st.caption(
+                    f"Water level visualization with Fresnel zone reflections (DOY {doy_start}-{doy_end})"
+                )
             else:
                 st.caption("Water level visualization with Fresnel zone reflections")
         else:
-            st.info(f"Polar animation not found. Generate with:\n```bash\npython scripts/create_polar_animation.py --station {selected_station} --year {selected_year} --doy_start 260 --doy_end 266\n```")
+            st.info(
+                f"Polar animation not found. Generate with:\n```bash\npython scripts/create_polar_animation.py --station {selected_station} --year {selected_year} --doy_start 260 --doy_end 266\n```"
+            )
 
     # Enhanced Configuration information with station metadata
     with st.expander("📋 Station Configuration & GNSS-IR Parameters", expanded=False):
@@ -416,20 +474,20 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
             station_config = None
 
             if stations_config_path.exists():
-                with open(stations_config_path, 'r') as f:
+                with open(stations_config_path, "r") as f:
                     all_stations = json.load(f)
                     station_config = all_stations.get(selected_station)
-            
+
             # Load GNSS-IR parameters if available
             gnssir_params = None
-            if station_config and 'gnssir_json_params_path' in station_config:
-                params_path = project_root / station_config['gnssir_json_params_path']
+            if station_config and "gnssir_json_params_path" in station_config:
+                params_path = project_root / station_config["gnssir_json_params_path"]
                 if params_path.exists():
-                    with open(params_path, 'r') as f:
+                    with open(params_path, "r") as f:
                         gnssir_params = json.load(f)
-            
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.markdown("#### 🛰️ Station Metadata")
                 if station_config:
@@ -440,17 +498,17 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                     - **Ellipsoidal Height:** {station_config.get('ellipsoidal_height_m', 'N/A')} m
                     - **Analysis Year:** {selected_year}
                     """)
-                    
-                    if 'usgs_comparison' in station_config:
-                        usgs_config = station_config['usgs_comparison']
-                        target_site = usgs_config.get('target_usgs_site', 'Auto-detected')
+
+                    if "usgs_comparison" in station_config:
+                        usgs_config = station_config["usgs_comparison"]
+                        target_site = usgs_config.get("target_usgs_site", "Auto-detected")
                         st.markdown(f"""
                         - **USGS Target:** {target_site}
                         - **Search Radius:** {usgs_config.get('search_radius_km', 'N/A')} km
                         """)
                 else:
                     st.error("Station configuration not found")
-            
+
             with col2:
                 st.markdown("#### 📏 GNSS-IR Processing Parameters")
                 if gnssir_params:
@@ -461,23 +519,23 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
                     - **Polynomial Order:** {gnssir_params.get('polyV', 'N/A')}
                     - **Azimuth Constraint:** {gnssir_params.get('azval2', 'All azimuths')}°
                     """)
-                    
+
                     # Show frequency bands if available
-                    if 'freqs' in gnssir_params:
-                        freq_count = len(gnssir_params['freqs'])
+                    if "freqs" in gnssir_params:
+                        freq_count = len(gnssir_params["freqs"])
                         st.markdown(f"- **GNSS Frequencies:** {freq_count} bands")
-                        
+
                     # Show processing options
                     processing_opts = []
-                    if gnssir_params.get('refraction', False):
+                    if gnssir_params.get("refraction", False):
                         processing_opts.append("Atmospheric Refraction")
-                    if gnssir_params.get('plt_screen', False):
+                    if gnssir_params.get("plt_screen", False):
                         processing_opts.append("Screen Plotting")
                     if processing_opts:
                         st.markdown(f"- **Processing Options:** {', '.join(processing_opts)}")
                 else:
                     st.warning("GNSS-IR parameters file not found")
-            
+
             # Processing pipeline info
             st.markdown("#### 🔄 Processing Pipeline")
             st.markdown("""
@@ -485,7 +543,7 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
             **External APIs:** USGS Water Services, NOAA CO-OPS, ERDDAP
             **Analysis Tools:** Time series comparison, correlation analysis, subdaily validation
             """)
-            
+
         except ImportError as e:
             st.warning(f"Could not load configuration details: {e}")
             # Fallback to basic info
@@ -506,4 +564,4 @@ def render_overview_tab(rh_data, usgs_data, coops_data, erddap_data,
 
 
 # Export the render function
-__all__ = ['render_overview_tab']
+__all__ = ["render_overview_tab"]

@@ -111,11 +111,13 @@ class TestReflectorHeightUtils:
         from scripts.reflector_height_utils import calculate_wse_from_rh
 
         # Create sample dataframe with daily RH data (using expected column names)
-        df = pd.DataFrame({
-            'date': pd.date_range('2024-01-01', periods=5),
-            'rh_median_m': [8.0, 8.5, 9.0, 8.5, 8.0],
-            'RH_std': [0.1, 0.15, 0.2, 0.15, 0.1]
-        })
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=5),
+                "rh_median_m": [8.0, 8.5, 9.0, 8.5, 8.0],
+                "RH_std": [0.1, 0.15, 0.2, 0.15, 0.1],
+            }
+        )
 
         antenna_height = 30.0  # meters
 
@@ -123,9 +125,9 @@ class TestReflectorHeightUtils:
 
         # WSE = antenna_height - RH
         # For rh_median_m = 8.0, WSE should be 30.0 - 8.0 = 22.0
-        assert 'wse_ellips_m' in result.columns
-        assert result['wse_ellips_m'].iloc[0] == pytest.approx(22.0)
-        assert result['wse_ellips_m'].iloc[2] == pytest.approx(21.0)
+        assert "wse_ellips_m" in result.columns
+        assert result["wse_ellips_m"].iloc[0] == pytest.approx(22.0)
+        assert result["wse_ellips_m"].iloc[2] == pytest.approx(21.0)
 
 
 class TestSegmentedAnalysis:
@@ -137,29 +139,25 @@ class TestSegmentedAnalysis:
         from scripts.utils.segmented_analysis import filter_by_segment
 
         # Create sample dataframe with datetime index
-        dates = pd.date_range('2024-01-01', periods=100, freq='D')
-        df = pd.DataFrame({
-            'value': np.random.randn(100)
-        }, index=dates)
-        df.index.name = 'datetime'
+        dates = pd.date_range("2024-01-01", periods=100, freq="D")
+        df = pd.DataFrame({"value": np.random.randn(100)}, index=dates)
+        df.index.name = "datetime"
 
         # Filter to February
-        result = filter_by_segment(df, ('2024-02-01', '2024-02-29'))
+        result = filter_by_segment(df, ("2024-02-01", "2024-02-29"))
 
         assert len(result) == 29  # February has 29 days in 2024
-        assert result.index.min() >= pd.Timestamp('2024-02-01')
-        assert result.index.max() <= pd.Timestamp('2024-02-29')
+        assert result.index.min() >= pd.Timestamp("2024-02-01")
+        assert result.index.max() <= pd.Timestamp("2024-02-29")
 
     @pytest.mark.unit
     def test_filter_by_segment_month_list(self):
         """Test filtering by month numbers as list."""
         from scripts.utils.segmented_analysis import filter_by_segment
 
-        dates = pd.date_range('2024-01-01', periods=365, freq='D')
-        df = pd.DataFrame({
-            'value': np.random.randn(365)
-        }, index=dates)
-        df.index.name = 'datetime'
+        dates = pd.date_range("2024-01-01", periods=365, freq="D")
+        df = pd.DataFrame({"value": np.random.randn(365)}, index=dates)
+        df.index.name = "datetime"
 
         # Filter to March using month list [3]
         result = filter_by_segment(df, [3])
@@ -176,7 +174,7 @@ class TestColorScheme:
         """Test that PLOT_COLORS has all required keys."""
         from scripts.visualizer.base import PLOT_COLORS
 
-        required_keys = ['gnssir', 'usgs', 'highlight', 'grid']
+        required_keys = ["gnssir", "usgs", "highlight", "grid"]
 
         for key in required_keys:
             assert key in PLOT_COLORS, f"Missing required color key: {key}"
@@ -187,7 +185,8 @@ class TestColorScheme:
         from scripts.visualizer.base import PLOT_COLORS
 
         import re
-        hex_pattern = re.compile(r'^#[0-9A-Fa-f]{6}$')
+
+        hex_pattern = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
         for key, color in PLOT_COLORS.items():
             assert hex_pattern.match(color), f"Invalid hex color for {key}: {color}"

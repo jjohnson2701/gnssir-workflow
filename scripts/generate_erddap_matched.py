@@ -26,7 +26,7 @@ from pathlib import Path
 from datetime import timedelta
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -50,18 +50,18 @@ def load_gnssir_data(raw_file: Path, antenna_height: float) -> pd.DataFrame:
 
     # Handle malformed column names (legacy fix)
     for col in df.columns:
-        if col.startswith('PkNoise') and col != 'PkNoise':
-            df = df.rename(columns={col: 'PkNoise'})
+        if col.startswith("PkNoise") and col != "PkNoise":
+            df = df.rename(columns={col: "PkNoise"})
             logger.debug(f"  Renamed malformed column: {col} -> PkNoise")
             break
 
     # Create datetime column (UTC-aware)
-    df['datetime'] = pd.to_datetime(df['date']) + pd.to_timedelta(df['UTCtime'], unit='h')
-    df['datetime'] = df['datetime'].dt.tz_localize('UTC')
+    df["datetime"] = pd.to_datetime(df["date"]) + pd.to_timedelta(df["UTCtime"], unit="h")
+    df["datetime"] = df["datetime"].dt.tz_localize("UTC")
 
     # Compute water surface elevation (WSE) from reflector height
     # WSE = Antenna Height - Reflector Height
-    df['wse_ellips'] = antenna_height - df['RH']
+    df["wse_ellips"] = antenna_height - df["RH"]
 
     logger.info(f"  Date range: {df['datetime'].min()} to {df['datetime'].max()}")
     logger.info(f"  RH range: {df['RH'].min():.2f} to {df['RH'].max():.2f} m")
@@ -78,19 +78,19 @@ def load_erddap_data(erddap_file: Path, erddap_config: dict) -> pd.DataFrame:
     logger.info(f"  Loaded {len(df):,} ERDDAP observations")
 
     # Parse datetime
-    time_col = erddap_config.get('variables', {}).get('time', 'time')
-    df['datetime'] = pd.to_datetime(df[time_col], utc=True)
+    time_col = erddap_config.get("variables", {}).get("time", "time")
+    df["datetime"] = pd.to_datetime(df[time_col], utc=True)
 
     # Get water level column from config
-    wl_col = erddap_config.get('variables', {}).get('water_level', None)
+    wl_col = erddap_config.get("variables", {}).get("water_level", None)
 
     # Try common column names if not specified in config
     if wl_col is None or wl_col not in df.columns:
         possible_cols = [
-            'water_surface_above_navd88',
-            'sea_surface_height_above_geopotential_datum',
-            'water_level',
-            'wl'
+            "water_surface_above_navd88",
+            "sea_surface_height_above_geopotential_datum",
+            "water_level",
+            "wl",
         ]
         for col in possible_cols:
             if col in df.columns:
@@ -100,7 +100,7 @@ def load_erddap_data(erddap_file: Path, erddap_config: dict) -> pd.DataFrame:
     if wl_col is None or wl_col not in df.columns:
         raise ValueError(f"Could not find water level column. Available: {df.columns.tolist()}")
 
-    df['wl'] = df[wl_col]
+    df["wl"] = df[wl_col]
 
     logger.info(f"  Using water level column: {wl_col}")
     logger.info(f"  Date range: {df['datetime'].min()} to {df['datetime'].max()}")
@@ -109,8 +109,12 @@ def load_erddap_data(erddap_file: Path, erddap_config: dict) -> pd.DataFrame:
     return df
 
 
-def match_observations(gnss_df: pd.DataFrame, ref_df: pd.DataFrame,
-                       max_time_diff_min: int = 30, ref_name: str = 'erddap') -> pd.DataFrame:
+def match_observations(
+    gnss_df: pd.DataFrame,
+    ref_df: pd.DataFrame,
+    max_time_diff_min: int = 30,
+    ref_name: str = "erddap",
+) -> pd.DataFrame:
     """Match GNSS-IR observations to reference water level data."""
     logger.info(f"Matching observations (max {max_time_diff_min} min difference)...")
 
@@ -118,10 +122,10 @@ def match_observations(gnss_df: pd.DataFrame, ref_df: pd.DataFrame,
     max_time_diff = timedelta(minutes=max_time_diff_min)
 
     for idx, gnss_row in gnss_df.iterrows():
-        gnss_time = gnss_row['datetime']
+        gnss_time = gnss_row["datetime"]
 
         # Find nearest reference observation
-        time_diffs = (ref_df['datetime'] - gnss_time).abs()
+        time_diffs = (ref_df["datetime"] - gnss_time).abs()
         nearest_idx = time_diffs.idxmin()
         min_diff = time_diffs.loc[nearest_idx]
 
@@ -129,21 +133,21 @@ def match_observations(gnss_df: pd.DataFrame, ref_df: pd.DataFrame,
             ref_row = ref_df.loc[nearest_idx]
 
             record = {
-                'gnss_datetime': gnss_time,
-                'gnss_wse': gnss_row['wse_ellips'],
-                'gnss_rh': gnss_row['RH'],
-                f'{ref_name}_datetime': ref_row['datetime'],
-                f'{ref_name}_wl': ref_row['wl'],
-                'time_diff_sec': min_diff.total_seconds(),
-                'satellite': gnss_row['sat'],
-                'azimuth': gnss_row['Azim'],
-                'amplitude': gnss_row['Amp'],
-                'freq': gnss_row['freq']
+                "gnss_datetime": gnss_time,
+                "gnss_wse": gnss_row["wse_ellips"],
+                "gnss_rh": gnss_row["RH"],
+                f"{ref_name}_datetime": ref_row["datetime"],
+                f"{ref_name}_wl": ref_row["wl"],
+                "time_diff_sec": min_diff.total_seconds(),
+                "satellite": gnss_row["sat"],
+                "azimuth": gnss_row["Azim"],
+                "amplitude": gnss_row["Amp"],
+                "freq": gnss_row["freq"],
             }
 
             # Add PkNoise if available
-            if 'PkNoise' in gnss_row.index:
-                record['pknoise'] = gnss_row['PkNoise']
+            if "PkNoise" in gnss_row.index:
+                record["pknoise"] = gnss_row["PkNoise"]
 
             matched_records.append(record)
 
@@ -159,36 +163,36 @@ def match_observations(gnss_df: pd.DataFrame, ref_df: pd.DataFrame,
     return matched_df
 
 
-def compute_statistics(matched_df: pd.DataFrame, ref_name: str = 'erddap') -> dict:
+def compute_statistics(matched_df: pd.DataFrame, ref_name: str = "erddap") -> dict:
     """Compute demeaned values, residuals, and statistics."""
     logger.info("Computing demeaned values and residuals...")
 
     # Column names
-    ref_wl_col = f'{ref_name}_wl'
-    ref_dm_col = f'{ref_name}_dm'
+    ref_wl_col = f"{ref_name}_wl"
+    ref_dm_col = f"{ref_name}_dm"
 
     # Demean both datasets
-    gnss_mean = matched_df['gnss_wse'].mean()
+    gnss_mean = matched_df["gnss_wse"].mean()
     ref_mean = matched_df[ref_wl_col].mean()
 
-    matched_df['gnss_dm'] = matched_df['gnss_wse'] - gnss_mean
+    matched_df["gnss_dm"] = matched_df["gnss_wse"] - gnss_mean
     matched_df[ref_dm_col] = matched_df[ref_wl_col] - ref_mean
 
     # Compute residual (GNSS - Reference)
-    matched_df['residual'] = matched_df['gnss_dm'] - matched_df[ref_dm_col]
+    matched_df["residual"] = matched_df["gnss_dm"] - matched_df[ref_dm_col]
 
     # Statistics
-    correlation = matched_df['gnss_dm'].corr(matched_df[ref_dm_col])
-    rmse = np.sqrt((matched_df['residual']**2).mean())
+    correlation = matched_df["gnss_dm"].corr(matched_df[ref_dm_col])
+    rmse = np.sqrt((matched_df["residual"] ** 2).mean())
 
     stats = {
-        'gnss_mean_wse': gnss_mean,
-        'ref_mean_wl': ref_mean,
-        'residual_mean': matched_df['residual'].mean(),
-        'residual_std': matched_df['residual'].std(),
-        'rmse': rmse,
-        'correlation': correlation,
-        'n_matched': len(matched_df)
+        "gnss_mean_wse": gnss_mean,
+        "ref_mean_wl": ref_mean,
+        "residual_mean": matched_df["residual"].mean(),
+        "residual_std": matched_df["residual"].std(),
+        "rmse": rmse,
+        "correlation": correlation,
+        "n_matched": len(matched_df),
     }
 
     logger.info(f"  RMSE: {rmse:.3f} m")
@@ -199,14 +203,22 @@ def compute_statistics(matched_df: pd.DataFrame, ref_name: str = 'erddap') -> di
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Generate matched subdaily data using ERDDAP reference'
+        description="Generate matched subdaily data using ERDDAP reference"
     )
-    parser.add_argument('--station', type=str, required=True, help='Station ID (e.g., GLBX)')
-    parser.add_argument('--year', type=int, required=True, help='Year to process')
-    parser.add_argument('--max_time_diff', type=int, default=30,
-                        help='Maximum time difference for matching (minutes)')
-    parser.add_argument('--config', type=str, default=None,
-                        help='Path to stations_config.json (default: auto-detect)')
+    parser.add_argument("--station", type=str, required=True, help="Station ID (e.g., GLBX)")
+    parser.add_argument("--year", type=int, required=True, help="Year to process")
+    parser.add_argument(
+        "--max_time_diff",
+        type=int,
+        default=30,
+        help="Maximum time difference for matching (minutes)",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to stations_config.json (default: auto-detect)",
+    )
     args = parser.parse_args()
 
     # Determine paths
@@ -216,30 +228,31 @@ def main():
     if args.config:
         config_path = Path(args.config)
     else:
-        config_path = project_root / 'config' / 'stations_config.json'
+        config_path = project_root / "config" / "stations_config.json"
 
-    results_dir = project_root / 'results_annual' / args.station
+    results_dir = project_root / "results_annual" / args.station
 
-    print("="*70)
+    print("=" * 70)
     print(f"{args.station} Matched Data Generation using ERDDAP Reference")
-    print("="*70)
+    print("=" * 70)
     print()
 
     # Load station configuration
     station_config = load_station_config(args.station, config_path)
 
     # Get ERDDAP configuration
-    erddap_config = station_config.get('external_data_sources', {}).get('erddap', {})
-    if not erddap_config.get('enabled', False):
+    erddap_config = station_config.get("external_data_sources", {}).get("erddap", {})
+    if not erddap_config.get("enabled", False):
         # Also check top-level erddap key
-        erddap_config = station_config.get('erddap', {})
+        erddap_config = station_config.get("erddap", {})
 
     if not erddap_config:
         raise ValueError(f"No ERDDAP configuration found for station {args.station}")
 
     # Get antenna height
-    antenna_height = station_config.get('ellipsoidal_height_m',
-                                         station_config.get('antenna_ellipsoidal_height_m'))
+    antenna_height = station_config.get(
+        "ellipsoidal_height_m", station_config.get("antenna_ellipsoidal_height_m")
+    )
     if antenna_height is None:
         raise ValueError(f"No antenna height found in config for station {args.station}")
 
@@ -248,8 +261,8 @@ def main():
     tried_paths = []
 
     # Pattern 1: station_name based (e.g., "Bartlett Cove, AK" -> "bartlett_cove_ak")
-    station_name_clean = erddap_config.get('station_name', '').lower()
-    station_name_clean = station_name_clean.replace(' ', '_').replace(',', '').replace('__', '_')
+    station_name_clean = erddap_config.get("station_name", "").lower()
+    station_name_clean = station_name_clean.replace(" ", "_").replace(",", "").replace("__", "_")
     if station_name_clean:
         candidate = results_dir / f"{station_name_clean}_{args.year}_raw.csv"
         tried_paths.append(candidate)
@@ -258,9 +271,9 @@ def main():
 
     # Pattern 2: Just the location name without state (e.g., "bartlett_cove")
     if erddap_file is None:
-        parts = station_name_clean.split('_')
+        parts = station_name_clean.split("_")
         if len(parts) > 1:
-            location_name = '_'.join(parts[:-1])  # Remove last part (often state code)
+            location_name = "_".join(parts[:-1])  # Remove last part (often state code)
             candidate = results_dir / f"{location_name}_{args.year}_raw.csv"
             tried_paths.append(candidate)
             if candidate.exists():
@@ -268,9 +281,9 @@ def main():
 
     # Pattern 3: dataset_id based
     if erddap_file is None:
-        dataset_id = erddap_config.get('dataset_id', '')
+        dataset_id = erddap_config.get("dataset_id", "")
         if dataset_id:
-            parts = dataset_id.split('_')
+            parts = dataset_id.split("_")
             for i in range(len(parts), 0, -1):
                 candidate = results_dir / f"{'_'.join(parts[-i:])}_{args.year}_raw.csv"
                 tried_paths.append(candidate)
@@ -280,24 +293,24 @@ def main():
 
     # Pattern 4: Search for any *_raw.csv that's not the GNSS combined file
     if erddap_file is None:
-        available = list(results_dir.glob('*_raw.csv'))
+        available = list(results_dir.glob("*_raw.csv"))
         gnss_raw = results_dir / f"{args.station}_{args.year}_combined_raw.csv"
         for f in available:
-            if f != gnss_raw and 'combined' not in f.name:
+            if f != gnss_raw and "combined" not in f.name:
                 erddap_file = f
                 logger.info(f"Auto-detected ERDDAP file: {f.name}")
                 break
 
     if erddap_file is None:
-        available = list(results_dir.glob('*_raw.csv'))
+        available = list(results_dir.glob("*_raw.csv"))
         raise FileNotFoundError(
-            f"ERDDAP data file not found. Tried:\n" +
-            '\n'.join(f"  - {p}" for p in tried_paths[:5]) +
-            f"\nAvailable files: {[f.name for f in available]}"
+            f"ERDDAP data file not found. Tried:\n"
+            + "\n".join(f"  - {p}" for p in tried_paths[:5])
+            + f"\nAvailable files: {[f.name for f in available]}"
         )
 
     # Reference name for column naming (from station name, simplified)
-    ref_name = erddap_config.get('station_name', 'erddap').split(',')[0].lower().replace(' ', '_')
+    ref_name = erddap_config.get("station_name", "erddap").split(",")[0].lower().replace(" ", "_")
 
     # Load data
     raw_file = results_dir / f"{args.station}_{args.year}_combined_raw.csv"
@@ -317,9 +330,9 @@ def main():
 
     # Print summary
     print()
-    print("="*70)
+    print("=" * 70)
     print(f"SUCCESS: {args.station} matched data generation complete")
-    print("="*70)
+    print("=" * 70)
     print()
     print("Summary Statistics:")
     print(f"  Total GNSS-IR obs: {len(gnss_df):,}")
@@ -330,5 +343,5 @@ def main():
     print(f"  Distance: {erddap_config.get('distance_km', 'unknown')} km")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

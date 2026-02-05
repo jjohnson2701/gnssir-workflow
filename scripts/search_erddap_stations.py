@@ -18,45 +18,44 @@ sys.path.append(str(project_root))
 from dashboard_components.station_metadata import get_station_config, get_all_station_ids
 from scripts.utils.geo_utils import haversine_distance
 
-
 # Regional ERDDAP servers
 ERDDAP_SERVERS = {
-    'AOOS': {
-        'name': 'Alaska Ocean Observing System',
-        'base_url': 'https://erddap.aoos.org/erddap',
-        'region': 'Alaska',
-        'coverage': {'lat': (50, 72), 'lon': (-180, -125)}
+    "AOOS": {
+        "name": "Alaska Ocean Observing System",
+        "base_url": "https://erddap.aoos.org/erddap",
+        "region": "Alaska",
+        "coverage": {"lat": (50, 72), "lon": (-180, -125)},
     },
-    'PacIOOS': {
-        'name': 'Pacific Islands Ocean Observing System',
-        'base_url': 'https://pae-paha.pacioos.hawaii.edu/erddap',
-        'region': 'Pacific Islands (Hawaii)',
-        'coverage': {'lat': (15, 30), 'lon': (-165, -150)}
+    "PacIOOS": {
+        "name": "Pacific Islands Ocean Observing System",
+        "base_url": "https://pae-paha.pacioos.hawaii.edu/erddap",
+        "region": "Pacific Islands (Hawaii)",
+        "coverage": {"lat": (15, 30), "lon": (-165, -150)},
     },
-    'SECOORA': {
-        'name': 'Southeast Coastal Ocean Observing',
-        'base_url': 'https://erddap.secoora.org/erddap',
-        'region': 'Southeast US (NC, SC, GA, FL)',
-        'coverage': {'lat': (24, 37), 'lon': (-90, -74)}
+    "SECOORA": {
+        "name": "Southeast Coastal Ocean Observing",
+        "base_url": "https://erddap.secoora.org/erddap",
+        "region": "Southeast US (NC, SC, GA, FL)",
+        "coverage": {"lat": (24, 37), "lon": (-90, -74)},
     },
-    'MARACOOS': {
-        'name': 'Mid-Atlantic Regional Coastal Ocean Observing',
-        'base_url': 'https://erddap.maracoos.org/erddap',
-        'region': 'Mid-Atlantic (NY, NJ, DE, MD, VA)',
-        'coverage': {'lat': (36, 42), 'lon': (-77, -70)}
+    "MARACOOS": {
+        "name": "Mid-Atlantic Regional Coastal Ocean Observing",
+        "base_url": "https://erddap.maracoos.org/erddap",
+        "region": "Mid-Atlantic (NY, NJ, DE, MD, VA)",
+        "coverage": {"lat": (36, 42), "lon": (-77, -70)},
     },
-    'GCOOS': {
-        'name': 'Gulf of Mexico Coastal Ocean Observing System',
-        'base_url': 'https://erddap.gcoos.org/erddap',
-        'region': 'Gulf of Mexico',
-        'coverage': {'lat': (24, 31), 'lon': (-98, -80)}
+    "GCOOS": {
+        "name": "Gulf of Mexico Coastal Ocean Observing System",
+        "base_url": "https://erddap.gcoos.org/erddap",
+        "region": "Gulf of Mexico",
+        "coverage": {"lat": (24, 31), "lon": (-98, -80)},
     },
-    'NOAA_COOPS': {
-        'name': 'NOAA CO-OPS ERDDAP',
-        'base_url': 'https://coastwatch.pfeg.noaa.gov/erddap',
-        'region': 'National (NOAA)',
-        'coverage': {'lat': (15, 72), 'lon': (-180, -65)}
-    }
+    "NOAA_COOPS": {
+        "name": "NOAA CO-OPS ERDDAP",
+        "base_url": "https://coastwatch.pfeg.noaa.gov/erddap",
+        "region": "National (NOAA)",
+        "coverage": {"lat": (15, 72), "lon": (-180, -65)},
+    },
 }
 
 
@@ -65,10 +64,10 @@ def get_relevant_erddap_servers(lat: float, lon: float) -> List[Tuple[str, Dict]
     relevant = []
 
     for server_id, server_info in ERDDAP_SERVERS.items():
-        coverage = server_info['coverage']
+        coverage = server_info["coverage"]
 
-        lat_in_range = coverage['lat'][0] <= lat <= coverage['lat'][1]
-        lon_in_range = coverage['lon'][0] <= lon <= coverage['lon'][1]
+        lat_in_range = coverage["lat"][0] <= lat <= coverage["lat"][1]
+        lon_in_range = coverage["lon"][0] <= lon <= coverage["lon"][1]
 
         if lat_in_range and lon_in_range:
             relevant.append((server_id, server_info))
@@ -76,7 +75,7 @@ def get_relevant_erddap_servers(lat: float, lon: float) -> List[Tuple[str, Dict]
     return relevant
 
 
-def search_erddap_datasets(base_url: str, search_term: str = 'water level') -> List[Dict]:
+def search_erddap_datasets(base_url: str, search_term: str = "water level") -> List[Dict]:
     """
     Search ERDDAP server for datasets matching search term.
 
@@ -90,16 +89,19 @@ def search_erddap_datasets(base_url: str, search_term: str = 'water level') -> L
 
         # Parse CSV response
         from io import StringIO
+
         df = pd.read_csv(StringIO(response.text))
 
         datasets = []
         for _, row in df.iterrows():
-            if 'Dataset ID' in row and pd.notna(row['Dataset ID']):
-                datasets.append({
-                    'dataset_id': row['Dataset ID'],
-                    'title': row.get('Title', 'Unknown'),
-                    'summary': row.get('Summary', '')
-                })
+            if "Dataset ID" in row and pd.notna(row["Dataset ID"]):
+                datasets.append(
+                    {
+                        "dataset_id": row["Dataset ID"],
+                        "title": row.get("Title", "Unknown"),
+                        "summary": row.get("Summary", ""),
+                    }
+                )
 
         return datasets
 
@@ -122,6 +124,7 @@ def get_dataset_coordinates(base_url: str, dataset_id: str) -> Tuple[float, floa
 
         # Parse metadata CSV
         from io import StringIO
+
         df = pd.read_csv(StringIO(response.text))
 
         # Look for latitude/longitude in metadata
@@ -129,16 +132,16 @@ def get_dataset_coordinates(base_url: str, dataset_id: str) -> Tuple[float, floa
         lon = None
 
         for _, row in df.iterrows():
-            var_name = str(row.get('Variable Name', '')).lower()
-            value = row.get('Value', None)
+            var_name = str(row.get("Variable Name", "")).lower()
+            value = row.get("Value", None)
 
-            if 'latitude' in var_name and 'actual_range' not in var_name:
+            if "latitude" in var_name and "actual_range" not in var_name:
                 try:
                     lat = float(value)
                 except (ValueError, TypeError):
                     pass
 
-            if 'longitude' in var_name and 'actual_range' not in var_name:
+            if "longitude" in var_name and "actual_range" not in var_name:
                 try:
                     lon = float(value)
                 except (ValueError, TypeError):
@@ -167,8 +170,8 @@ def search_nearby_erddap_stations(station_id: str, max_distance_km: float = 50) 
         print(f"ERROR: Station {station_id} not found in configuration")
         return []
 
-    gnss_lat = config.get('latitude_deg')
-    gnss_lon = config.get('longitude_deg')
+    gnss_lat = config.get("latitude_deg")
+    gnss_lon = config.get("longitude_deg")
 
     if gnss_lat is None or gnss_lon is None:
         print(f"ERROR: No coordinates found for station {station_id}")
@@ -203,10 +206,10 @@ def search_nearby_erddap_stations(station_id: str, max_distance_km: float = 50) 
         print(f"Searching {server_info['name']}...")
         print(f"{'-'*100}")
 
-        base_url = server_info['base_url']
+        base_url = server_info["base_url"]
 
         # Search for water level datasets
-        datasets = search_erddap_datasets(base_url, 'water level')
+        datasets = search_erddap_datasets(base_url, "water level")
 
         print(f"  Found {len(datasets)} dataset(s) matching 'water level'")
 
@@ -217,7 +220,7 @@ def search_nearby_erddap_stations(station_id: str, max_distance_km: float = 50) 
         print(f"\n  Checking proximity to {station_id}...")
 
         for dataset in datasets:
-            dataset_id = dataset['dataset_id']
+            dataset_id = dataset["dataset_id"]
 
             # Get dataset coordinates
             ds_lat, ds_lon = get_dataset_coordinates(base_url, dataset_id)
@@ -229,17 +232,19 @@ def search_nearby_erddap_stations(station_id: str, max_distance_km: float = 50) 
             distance = haversine_distance(gnss_lat, gnss_lon, ds_lat, ds_lon)
 
             if distance <= max_distance_km:
-                nearby_stations.append({
-                    'erddap_server': server_id,
-                    'erddap_name': server_info['name'],
-                    'base_url': base_url,
-                    'dataset_id': dataset_id,
-                    'title': dataset['title'],
-                    'latitude': ds_lat,
-                    'longitude': ds_lon,
-                    'distance_km': round(distance, 2),
-                    'gnss_station': station_id
-                })
+                nearby_stations.append(
+                    {
+                        "erddap_server": server_id,
+                        "erddap_name": server_info["name"],
+                        "base_url": base_url,
+                        "dataset_id": dataset_id,
+                        "title": dataset["title"],
+                        "latitude": ds_lat,
+                        "longitude": ds_lon,
+                        "distance_km": round(distance, 2),
+                        "gnss_station": station_id,
+                    }
+                )
 
                 print(f"\n    ✓ {dataset_id}")
                 print(f"      Title: {dataset['title']}")
@@ -280,11 +285,13 @@ def main():
         for station_id, results in all_results.items():
             print(f"{station_id}: {len(results)} ERDDAP station(s) found")
             for result in results:
-                print(f"  • {result['dataset_id']} ({result['erddap_server']}) - {result['distance_km']} km")
+                print(
+                    f"  • {result['dataset_id']} ({result['erddap_server']}) - {result['distance_km']} km"
+                )
 
         # Save results to JSON
         output_file = project_root / "results_annual" / "erddap_search_results.json"
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             json.dump(all_results, f, indent=2)
 
         print(f"\nResults saved to: {output_file}")
@@ -296,5 +303,5 @@ def main():
     print()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

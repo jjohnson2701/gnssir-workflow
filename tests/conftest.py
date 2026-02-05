@@ -23,13 +23,13 @@ def project_root():
 @pytest.fixture
 def config_dir(project_root):
     """Return the config directory."""
-    return project_root / 'config'
+    return project_root / "config"
 
 
 @pytest.fixture
 def stations_config(config_dir):
     """Load the stations configuration."""
-    config_path = config_dir / 'stations_config.json'
+    config_path = config_dir / "stations_config.json"
     if config_path.exists():
         with open(config_path) as f:
             return json.load(f)
@@ -51,8 +51,8 @@ def sample_station_config():
                 "station_name": "Bartlett Cove, AK",
                 "distance_km": 0.004,
                 "server": "AOOS",
-                "primary_reference": True
-            }
+                "primary_reference": True,
+            },
         },
         "FORA": {
             "name": "Fort Alava",
@@ -62,8 +62,8 @@ def sample_station_config():
             "usgs_comparison": {
                 "target_usgs_site": "12345678",
                 "usgs_gauge_stated_datum": "NAVD88",
-                "distance_km": 5.2
-            }
+                "distance_km": 5.2,
+            },
         },
         "VALR": {
             "name": "Volcano Hawaii",
@@ -76,10 +76,10 @@ def sample_station_config():
                 "noaa_coops": {
                     "enabled": True,
                     "preferred_stations": ["1612340"],
-                    "datum": "NAVD88"
+                    "datum": "NAVD88",
                 }
-            }
-        }
+            },
+        },
     }
 
 
@@ -90,7 +90,7 @@ def sample_gnssir_data():
     n_points = 100
 
     base_date = datetime(2024, 1, 1)
-    dates = [base_date + timedelta(hours=i*6) for i in range(n_points)]
+    dates = [base_date + timedelta(hours=i * 6) for i in range(n_points)]
 
     # Simulate tidal signal + noise
     hours = np.arange(n_points) * 6
@@ -98,14 +98,16 @@ def sample_gnssir_data():
     noise = np.random.normal(0, 0.1, n_points)
     rh_values = 5.0 + tidal_signal + noise
 
-    return pd.DataFrame({
-        'datetime': dates,
-        'rh': rh_values,
-        'azimuth': np.random.uniform(0, 360, n_points),
-        'amplitude': np.random.uniform(5, 15, n_points),
-        'peak2noise': np.random.uniform(2.5, 5, n_points),
-        'sat': np.random.randint(1, 32, n_points)
-    })
+    return pd.DataFrame(
+        {
+            "datetime": dates,
+            "rh": rh_values,
+            "azimuth": np.random.uniform(0, 360, n_points),
+            "amplitude": np.random.uniform(5, 15, n_points),
+            "peak2noise": np.random.uniform(2.5, 5, n_points),
+            "sat": np.random.randint(1, 32, n_points),
+        }
+    )
 
 
 @pytest.fixture
@@ -116,15 +118,15 @@ def sample_reference_data(sample_gnssir_data):
     # Derive reference from WSE (antenna_height - rh) with small noise
     # This ensures proper correlation between WSE and reference
     antenna_height = 10.5
-    wse = antenna_height - df['rh']
-    df['reference_wl'] = wse + np.random.normal(0, 0.05, len(df))
-    return df[['datetime', 'reference_wl']]
+    wse = antenna_height - df["rh"]
+    df["reference_wl"] = wse + np.random.normal(0, 0.05, len(df))
+    return df[["datetime", "reference_wl"]]
 
 
 @pytest.fixture
 def temp_output_dir():
     """Create a temporary directory for test outputs."""
-    temp_dir = tempfile.mkdtemp(prefix='gnssir_test_')
+    temp_dir = tempfile.mkdtemp(prefix="gnssir_test_")
     yield Path(temp_dir)
     # Cleanup after test
     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -136,54 +138,54 @@ def mock_comparison_df(sample_gnssir_data, sample_reference_data):
     gnss = sample_gnssir_data.copy()
     ref = sample_reference_data.copy()
 
-    gnss['merge_date'] = gnss['datetime'].dt.floor('h')
-    ref['merge_date'] = ref['datetime'].dt.floor('h')
+    gnss["merge_date"] = gnss["datetime"].dt.floor("h")
+    ref["merge_date"] = ref["datetime"].dt.floor("h")
 
-    merged = gnss.merge(ref, on='merge_date', suffixes=('', '_ref'))
+    merged = gnss.merge(ref, on="merge_date", suffixes=("", "_ref"))
     # Use column names that match the actual codebase conventions
-    merged['wse_ellips_m'] = 10.5 - merged['rh']  # Antenna height - RH
-    merged['usgs_value_m_median'] = merged['reference_wl']
-    merged['residual'] = merged['wse_ellips_m'] - merged['usgs_value_m_median']
+    merged["wse_ellips_m"] = 10.5 - merged["rh"]  # Antenna height - RH
+    merged["usgs_value_m_median"] = merged["reference_wl"]
+    merged["residual"] = merged["wse_ellips_m"] - merged["usgs_value_m_median"]
     # Also keep lowercase versions for backward compatibility with some tests
-    merged['wse_ellips'] = merged['wse_ellips_m']
-    merged['usgs_value'] = merged['usgs_value_m_median']
+    merged["wse_ellips"] = merged["wse_ellips_m"]
+    merged["usgs_value"] = merged["usgs_value_m_median"]
 
     return merged
 
 
 # Fixtures for loading real sample data
-FIXTURES_DIR = Path(__file__).parent / 'fixtures'
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
 def real_gnssir_raw_data():
     """Load real GNSS-IR raw data sample from fixtures."""
-    csv_path = FIXTURES_DIR / 'sample_gnssir_raw.csv'
+    csv_path = FIXTURES_DIR / "sample_gnssir_raw.csv"
     if not csv_path.exists():
         pytest.skip("Sample GNSS-IR raw data not found")
-    return pd.read_csv(csv_path, parse_dates=['date'])
+    return pd.read_csv(csv_path, parse_dates=["date"])
 
 
 @pytest.fixture
 def real_subdaily_matched_data():
     """Load real subdaily matched data sample from fixtures."""
-    csv_path = FIXTURES_DIR / 'sample_subdaily_matched.csv'
+    csv_path = FIXTURES_DIR / "sample_subdaily_matched.csv"
     if not csv_path.exists():
         pytest.skip("Sample subdaily matched data not found")
     df = pd.read_csv(csv_path)
-    df['gnss_datetime'] = pd.to_datetime(df['gnss_datetime'], format='ISO8601')
-    df['bartlett_cove_datetime'] = pd.to_datetime(df['bartlett_cove_datetime'], format='ISO8601')
+    df["gnss_datetime"] = pd.to_datetime(df["gnss_datetime"], format="ISO8601")
+    df["bartlett_cove_datetime"] = pd.to_datetime(df["bartlett_cove_datetime"], format="ISO8601")
     return df
 
 
 @pytest.fixture
 def real_comparison_data():
     """Load real comparison data sample from fixtures (ERDDAP/GLBX)."""
-    csv_path = FIXTURES_DIR / 'sample_comparison.csv'
+    csv_path = FIXTURES_DIR / "sample_comparison.csv"
     if not csv_path.exists():
         pytest.skip("Sample comparison data not found")
-    df = pd.read_csv(csv_path, parse_dates=['merge_date', 'date'])
-    df.set_index('merge_date', inplace=True)
+    df = pd.read_csv(csv_path, parse_dates=["merge_date", "date"])
+    df.set_index("merge_date", inplace=True)
     return df
 
 
@@ -191,23 +193,23 @@ def real_comparison_data():
 @pytest.fixture
 def usgs_subdaily_matched_data():
     """Load real subdaily matched data with USGS reference (MDAI station)."""
-    csv_path = FIXTURES_DIR / 'sample_usgs_matched.csv'
+    csv_path = FIXTURES_DIR / "sample_usgs_matched.csv"
     if not csv_path.exists():
         pytest.skip("Sample USGS matched data not found")
     df = pd.read_csv(csv_path)
-    df['gnss_datetime'] = pd.to_datetime(df['gnss_datetime'], format='ISO8601')
-    df['usgs_datetime'] = pd.to_datetime(df['usgs_datetime'], format='ISO8601')
+    df["gnss_datetime"] = pd.to_datetime(df["gnss_datetime"], format="ISO8601")
+    df["usgs_datetime"] = pd.to_datetime(df["usgs_datetime"], format="ISO8601")
     return df
 
 
 @pytest.fixture
 def usgs_comparison_data():
     """Load real comparison data with USGS reference (MDAI station)."""
-    csv_path = FIXTURES_DIR / 'sample_usgs_comparison.csv'
+    csv_path = FIXTURES_DIR / "sample_usgs_comparison.csv"
     if not csv_path.exists():
         pytest.skip("Sample USGS comparison data not found")
-    df = pd.read_csv(csv_path, parse_dates=['merge_date', 'date'])
-    df.set_index('merge_date', inplace=True)
+    df = pd.read_csv(csv_path, parse_dates=["merge_date", "date"])
+    df.set_index("merge_date", inplace=True)
     return df
 
 
@@ -215,23 +217,23 @@ def usgs_comparison_data():
 @pytest.fixture
 def coops_subdaily_matched_data():
     """Load real subdaily matched data with CO-OPS reference (VALR station)."""
-    csv_path = FIXTURES_DIR / 'sample_coops_matched.csv'
+    csv_path = FIXTURES_DIR / "sample_coops_matched.csv"
     if not csv_path.exists():
         pytest.skip("Sample CO-OPS matched data not found")
     df = pd.read_csv(csv_path)
-    df['gnss_datetime'] = pd.to_datetime(df['gnss_datetime'])
-    df['coops_datetime'] = pd.to_datetime(df['coops_datetime'])
+    df["gnss_datetime"] = pd.to_datetime(df["gnss_datetime"])
+    df["coops_datetime"] = pd.to_datetime(df["coops_datetime"])
     return df
 
 
 @pytest.fixture
 def coops_comparison_data():
     """Load real comparison data with CO-OPS reference (VALR station)."""
-    csv_path = FIXTURES_DIR / 'sample_coops_comparison.csv'
+    csv_path = FIXTURES_DIR / "sample_coops_comparison.csv"
     if not csv_path.exists():
         pytest.skip("Sample CO-OPS comparison data not found")
-    df = pd.read_csv(csv_path, parse_dates=['merge_date', 'date'])
-    df.set_index('merge_date', inplace=True)
+    df = pd.read_csv(csv_path, parse_dates=["merge_date", "date"])
+    df.set_index("merge_date", inplace=True)
     return df
 
 

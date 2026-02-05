@@ -8,9 +8,9 @@ from .diagnostics_tab import render_diagnostics_tab
 from .subdaily_tab import render_subdaily_tab
 
 __all__ = [
-    'render_overview_tab',
-    'render_monthly_data_tab',
-    'render_subdaily_tab',
-    'render_yearly_residual_tab',
-    'render_diagnostics_tab',
+    "render_overview_tab",
+    "render_monthly_data_tab",
+    "render_subdaily_tab",
+    "render_yearly_residual_tab",
+    "render_diagnostics_tab",
 ]

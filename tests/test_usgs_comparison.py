@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # Add scripts to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 
 class TestDataLoading:
@@ -20,10 +20,10 @@ class TestDataLoading:
         """Test that sample data has expected structure."""
         df = sample_gnssir_data
 
-        assert 'datetime' in df.columns
-        assert 'rh' in df.columns
+        assert "datetime" in df.columns
+        assert "rh" in df.columns
         assert len(df) > 0
-        assert df['rh'].dtype in [np.float64, np.float32]
+        assert df["rh"].dtype in [np.float64, np.float32]
 
     @pytest.mark.unit
     def test_sample_data_values(self, sample_gnssir_data):
@@ -31,18 +31,18 @@ class TestDataLoading:
         df = sample_gnssir_data
 
         # Reflector heights should be positive
-        assert (df['rh'] > 0).all()
+        assert (df["rh"] > 0).all()
 
         # Azimuths should be 0-360
-        assert (df['azimuth'] >= 0).all()
-        assert (df['azimuth'] <= 360).all()
+        assert (df["azimuth"] >= 0).all()
+        assert (df["azimuth"] <= 360).all()
 
     @pytest.mark.unit
     def test_datetime_parsing(self, sample_gnssir_data):
         """Test that datetime column is properly parsed."""
         df = sample_gnssir_data
 
-        assert pd.api.types.is_datetime64_any_dtype(df['datetime'])
+        assert pd.api.types.is_datetime64_any_dtype(df["datetime"])
 
 
 class TestCorrelationCalculations:
@@ -81,7 +81,7 @@ class TestCorrelationCalculations:
         df = mock_comparison_df
 
         # Calculate correlation
-        correlation = df['wse_ellips'].corr(df['usgs_value'])
+        correlation = df["wse_ellips"].corr(df["usgs_value"])
 
         # Should have reasonably high correlation for synthetic data
         assert correlation > 0.9
@@ -91,9 +91,9 @@ class TestCorrelationCalculations:
         """Test that residuals are calculated correctly."""
         df = mock_comparison_df
 
-        expected_residual = df['wse_ellips'] - df['usgs_value']
+        expected_residual = df["wse_ellips"] - df["usgs_value"]
 
-        assert np.allclose(df['residual'], expected_residual)
+        assert np.allclose(df["residual"], expected_residual)
 
     @pytest.mark.unit
     def test_residual_statistics(self, mock_comparison_df):
@@ -101,10 +101,10 @@ class TestCorrelationCalculations:
         df = mock_comparison_df
 
         # Mean residual should be close to zero for well-matched data
-        mean_residual = df['residual'].mean()
+        mean_residual = df["residual"].mean()
 
         # Std should be relatively small for synthetic data
-        std_residual = df['residual'].std()
+        std_residual = df["residual"].std()
 
         assert abs(mean_residual) < 1.0  # Less than 1 meter
         assert std_residual < 0.5  # Less than 0.5 meter
@@ -127,7 +127,7 @@ class TestWaterSurfaceElevation:
     def test_wse_with_array(self, sample_gnssir_data):
         """Test WSE calculation with array of RH values."""
         antenna_height = 10.5
-        rh_values = sample_gnssir_data['rh'].values
+        rh_values = sample_gnssir_data["rh"].values
 
         wse_values = antenna_height - rh_values
 
@@ -149,7 +149,7 @@ class TestTimeLagAnalysis:
         signal = np.sin(2 * np.pi * t / 24)
 
         # Cross-correlation should peak at lag=0
-        cross_corr = np.correlate(signal, signal, mode='full')
+        cross_corr = np.correlate(signal, signal, mode="full")
         peak_lag = np.argmax(cross_corr) - (len(signal) - 1)
 
         assert peak_lag == 0
@@ -167,7 +167,7 @@ class TestTimeLagAnalysis:
 
         # Cross-correlation should detect the lag
         # correlate(a, b) finds how much b should be shifted to align with a
-        cross_corr = np.correlate(signal1, signal2, mode='full')
+        cross_corr = np.correlate(signal1, signal2, mode="full")
         detected_lag = np.argmax(cross_corr) - (len(signal1) - 1)
 
         # np.roll shifts right, cross-corr detects negative lag (signal2 lags signal1)
@@ -183,11 +183,11 @@ class TestDataAlignment:
         gnss = sample_gnssir_data.copy()
         ref = sample_reference_data.copy()
 
-        gnss['hour'] = gnss['datetime'].dt.floor('h')
-        ref['hour'] = ref['datetime'].dt.floor('h')
+        gnss["hour"] = gnss["datetime"].dt.floor("h")
+        ref["hour"] = ref["datetime"].dt.floor("h")
 
         # Group by hour and check we get reasonable counts
-        gnss_hourly = gnss.groupby('hour').size()
+        gnss_hourly = gnss.groupby("hour").size()
 
         assert len(gnss_hourly) > 0
 
@@ -197,8 +197,8 @@ class TestDataAlignment:
         df = mock_comparison_df
 
         # Should have both GNSS and reference columns
-        assert 'rh' in df.columns
-        assert 'usgs_value' in df.columns or 'reference_wl' in df.columns
+        assert "rh" in df.columns
+        assert "usgs_value" in df.columns or "reference_wl" in df.columns
 
         # No NaN in key columns after merge
-        assert not df['rh'].isna().any()
+        assert not df["rh"].isna().any()

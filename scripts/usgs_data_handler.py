@@ -20,12 +20,13 @@ STATIONS_CONFIG_PATH = PROJECT_ROOT / "config" / "stations_config.json"
 # Configuration Loading Functions (from usgs_gauge_finder.py)
 # =============================================================================
 
+
 def load_config(config_path=None):
     """Load configuration from JSON file."""
     if config_path is None:
         config_path = STATIONS_CONFIG_PATH
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             return json.load(f)
     except Exception as e:
         logging.error(f"Error loading configuration from {config_path}: {e}")
@@ -52,8 +53,8 @@ def find_usgs_gauge_for_station(station_name):
     if station_config is None:
         return None
 
-    usgs_config = station_config.get('usgs_comparison', {})
-    target_site = usgs_config.get('target_usgs_site')
+    usgs_config = station_config.get("usgs_comparison", {})
+    target_site = usgs_config.get("target_usgs_site")
 
     if target_site:
         logging.info(f"Using pre-configured USGS gauge: {target_site}")
@@ -69,14 +70,15 @@ def get_usgs_parameter_code(station_name):
     if station_config is None:
         return "00065"
 
-    usgs_config = station_config.get('usgs_comparison', {})
-    parameter_code = usgs_config.get('usgs_parameter_code_to_use', '00065')
+    usgs_config = station_config.get("usgs_comparison", {})
+    parameter_code = usgs_config.get("usgs_parameter_code_to_use", "00065")
     return parameter_code
 
 
 # =============================================================================
 # Progressive Search Functions (from usgs_progressive_search.py)
 # =============================================================================
+
 
 def get_state_from_coordinates(lat, lon):
     """Determine the most likely US state based on coordinates."""
@@ -121,10 +123,17 @@ def construct_bbox_string(min_lat, max_lat, min_lon, max_lon):
     return f"{min_lon},{min_lat},{max_lon},{max_lat}"
 
 
-def progressive_gauge_search(gnss_station_lat, gnss_station_lon,
-                            initial_radius_km, radius_increment_km, max_radius_km,
-                            desired_parameter_codes, min_gauges_found=3,
-                            data_start_date=None, data_end_date=None):
+def progressive_gauge_search(
+    gnss_station_lat,
+    gnss_station_lon,
+    initial_radius_km,
+    radius_increment_km,
+    max_radius_km,
+    desired_parameter_codes,
+    min_gauges_found=3,
+    data_start_date=None,
+    data_end_date=None,
+):
     """
     Perform progressive search for USGS gauges, expanding radius until
     minimum gauges found or maximum radius reached.
@@ -151,35 +160,36 @@ def progressive_gauge_search(gnss_station_lat, gnss_station_lon,
 
             try:
                 sites_df = nwis.get_record(
-                    service='site',
+                    service="site",
                     bBox=bbox_str,
                     parameterCd=parameter_codes_str,
-                    siteType=",".join(site_types)
+                    siteType=",".join(site_types),
                 )
 
                 if sites_df is not None and not sites_df.empty:
                     for site_no, site in sites_df.iterrows():
                         try:
-                            site_code = site.get('site_no', site_no)
-                            site_lat = float(site.get('dec_lat_va', 0))
-                            site_lon = float(site.get('dec_long_va', 0))
+                            site_code = site.get("site_no", site_no)
+                            site_lat = float(site.get("dec_lat_va", 0))
+                            site_lon = float(site.get("dec_long_va", 0))
 
                             distance = haversine_distance(
-                                gnss_station_lat, gnss_station_lon,
-                                site_lat, site_lon
+                                gnss_station_lat, gnss_station_lon, site_lat, site_lon
                             )
 
                             if distance <= current_radius:
-                                gauges_this_radius.append({
-                                    'site_no': site_code,
-                                    'station_nm': site.get('station_nm', ''),
-                                    'dec_lat_va': site_lat,
-                                    'dec_long_va': site_lon,
-                                    'distance_km': distance,
-                                    'site_tp_cd': site.get('site_tp_cd', ''),
-                                    'alt_datum_cd': site.get('alt_datum_cd', 'Unknown'),
-                                    'matched_parameters': []
-                                })
+                                gauges_this_radius.append(
+                                    {
+                                        "site_no": site_code,
+                                        "station_nm": site.get("station_nm", ""),
+                                        "dec_lat_va": site_lat,
+                                        "dec_long_va": site_lon,
+                                        "distance_km": distance,
+                                        "site_tp_cd": site.get("site_tp_cd", ""),
+                                        "alt_datum_cd": site.get("alt_datum_cd", "Unknown"),
+                                        "matched_parameters": [],
+                                    }
+                                )
                         except Exception as e:
                             logging.warning(f"Error processing site: {e}")
 
@@ -190,10 +200,10 @@ def progressive_gauge_search(gnss_station_lat, gnss_station_lon,
 
             site_codes_seen = set()
             matching_gauges = []
-            for gauge in sorted(all_gauges, key=lambda g: g['distance_km']):
-                if gauge['site_no'] not in site_codes_seen:
+            for gauge in sorted(all_gauges, key=lambda g: g["distance_km"]):
+                if gauge["site_no"] not in site_codes_seen:
                     matching_gauges.append(gauge)
-                    site_codes_seen.add(gauge['site_no'])
+                    site_codes_seen.add(gauge["site_no"])
 
             if len(matching_gauges) >= min_gauges_found:
                 break
@@ -213,8 +223,15 @@ def progressive_gauge_search(gnss_station_lat, gnss_station_lon,
 # Gauge Discovery Functions
 # =============================================================================
 
-def find_nearby_usgs_gauges(gnss_station_lat, gnss_station_lon, radius_km=50.0,
-                           desired_parameter_codes=None, state_code=None, huc=None):
+
+def find_nearby_usgs_gauges(
+    gnss_station_lat,
+    gnss_station_lon,
+    radius_km=50.0,
+    desired_parameter_codes=None,
+    state_code=None,
+    huc=None,
+):
     """Find nearby USGS gauges within a specified radius of a GNSS station."""
     logging.info(f"Finding nearby USGS gauges for ({gnss_station_lat:.6f}, {gnss_station_lon:.6f})")
 
@@ -233,16 +250,16 @@ def find_nearby_usgs_gauges(gnss_station_lat, gnss_station_lon, radius_km=50.0,
         desired_parameter_codes=desired_parameter_codes,
         min_gauges_found=1,
         data_start_date=start_date,
-        data_end_date=end_date
+        data_end_date=end_date,
     )
 
     if gauges_df is not None and not gauges_df.empty:
         column_mapping = {
-            'site_no': 'site_code',
-            'dec_lat_va': 'latitude',
-            'dec_long_va': 'longitude',
-            'site_tp_cd': 'site_type',
-            'alt_datum_cd': 'vertical_datum'
+            "site_no": "site_code",
+            "dec_lat_va": "latitude",
+            "dec_long_va": "longitude",
+            "site_tp_cd": "site_type",
+            "alt_datum_cd": "vertical_datum",
         }
         for old_col, new_col in column_mapping.items():
             if old_col in gauges_df.columns:
@@ -259,8 +276,15 @@ def find_nearby_usgs_gauges(gnss_station_lat, gnss_station_lon, radius_km=50.0,
 # Data Fetching Functions
 # =============================================================================
 
-def fetch_usgs_gauge_data(usgs_site_code, parameter_code=None, start_date_str=None,
-                         end_date_str=None, service="iv", priority_parameter_codes=None):
+
+def fetch_usgs_gauge_data(
+    usgs_site_code,
+    parameter_code=None,
+    start_date_str=None,
+    end_date_str=None,
+    service="iv",
+    priority_parameter_codes=None,
+):
     """Fetch water level data for a specific USGS gauge."""
     logging.info(f"Fetching USGS gauge data for site {usgs_site_code}")
 
@@ -280,11 +304,11 @@ def fetch_usgs_gauge_data(usgs_site_code, parameter_code=None, start_date_str=No
                 service="iv",
                 parameterCd=param_code,
                 start=start_date_str,
-                end=end_date_str
+                end=end_date_str,
             )
 
             if site_data is not None and not site_data.empty:
-                metadata = _create_metadata(usgs_site_code, param_code, 'iv')
+                metadata = _create_metadata(usgs_site_code, param_code, "iv")
                 metadata = enhance_gauge_metadata(usgs_site_code, param_code, site_data, metadata)
                 return site_data, metadata, param_code
         except Exception as e:
@@ -298,11 +322,11 @@ def fetch_usgs_gauge_data(usgs_site_code, parameter_code=None, start_date_str=No
                 parameterCd=param_code,
                 start=start_date_str,
                 end=end_date_str,
-                statCd="00003"
+                statCd="00003",
             )
 
             if site_data is not None and not site_data.empty:
-                metadata = _create_metadata(usgs_site_code, param_code, 'dv')
+                metadata = _create_metadata(usgs_site_code, param_code, "dv")
                 metadata = enhance_gauge_metadata(usgs_site_code, param_code, site_data, metadata)
                 return site_data, metadata, param_code
         except Exception as e:
@@ -315,55 +339,55 @@ def fetch_usgs_gauge_data(usgs_site_code, parameter_code=None, start_date_str=No
 def _create_metadata(site_code, param_code, service):
     """Create initial metadata dictionary."""
     return {
-        'site_code': site_code,
-        'parameter_code': param_code,
-        'site_name': 'Unknown',
-        'parameter_desc': 'Unknown',
-        'units': 'Unknown',
-        'datum': 'Unknown',
-        'service': service
+        "site_code": site_code,
+        "parameter_code": param_code,
+        "site_name": "Unknown",
+        "parameter_desc": "Unknown",
+        "units": "Unknown",
+        "datum": "Unknown",
+        "service": service,
     }
 
 
 def enhance_gauge_metadata(usgs_site_code, parameter_code, site_data, metadata):
     """Enhance gauge metadata with site information."""
     try:
-        site_info = nwis.get_record(sites=usgs_site_code, service='site')
+        site_info = nwis.get_record(sites=usgs_site_code, service="site")
 
         if site_info is not None and not site_info.empty:
             row = site_info.iloc[0]
-            if 'station_nm' in site_info.columns:
-                metadata['site_name'] = row['station_nm']
-            if 'alt_datum_cd' in site_info.columns:
-                metadata['datum'] = row['alt_datum_cd']
-            if 'dec_lat_va' in site_info.columns:
-                metadata['latitude'] = row['dec_lat_va']
-            if 'dec_long_va' in site_info.columns:
-                metadata['longitude'] = row['dec_long_va']
+            if "station_nm" in site_info.columns:
+                metadata["site_name"] = row["station_nm"]
+            if "alt_datum_cd" in site_info.columns:
+                metadata["datum"] = row["alt_datum_cd"]
+            if "dec_lat_va" in site_info.columns:
+                metadata["latitude"] = row["dec_lat_va"]
+            if "dec_long_va" in site_info.columns:
+                metadata["longitude"] = row["dec_long_va"]
     except Exception as e:
         logging.warning(f"Error retrieving site metadata: {e}")
 
     # Apply parameter-specific defaults
     param_descriptions = {
-        '00065': 'Gage height',
-        '62610': 'Water level, elevation, NAVD88',
-        '62611': 'Water level, elevation, NGVD29',
-        '62620': 'Water level, elevation, MSL'
+        "00065": "Gage height",
+        "62610": "Water level, elevation, NAVD88",
+        "62611": "Water level, elevation, NGVD29",
+        "62620": "Water level, elevation, MSL",
     }
 
     if parameter_code in param_descriptions:
-        metadata['parameter_desc'] = param_descriptions[parameter_code]
-        metadata['units'] = 'ft'
+        metadata["parameter_desc"] = param_descriptions[parameter_code]
+        metadata["units"] = "ft"
 
-        if parameter_code == '62610':
-            metadata['datum'] = 'NAVD88'
-        elif parameter_code == '62611':
-            metadata['datum'] = 'NGVD29'
-        elif parameter_code == '62620':
-            metadata['datum'] = 'MSL'
+        if parameter_code == "62610":
+            metadata["datum"] = "NAVD88"
+        elif parameter_code == "62611":
+            metadata["datum"] = "NGVD29"
+        elif parameter_code == "62620":
+            metadata["datum"] = "MSL"
 
-    if not metadata.get('site_name'):
-        metadata['site_name'] = f"USGS Site {usgs_site_code}"
+    if not metadata.get("site_name"):
+        metadata["site_name"] = f"USGS Site {usgs_site_code}"
 
     return metadata
 
@@ -374,37 +398,37 @@ def process_usgs_data(usgs_df, usgs_metadata, convert_to_meters=True):
         return pd.DataFrame()
 
     df = usgs_df.copy()
-    param_code = usgs_metadata.get('parameter_code', None)
+    param_code = usgs_metadata.get("parameter_code", None)
 
     # Find value column
     if param_code and param_code in df.columns:
-        df['usgs_value'] = df[param_code].astype(float)
-    elif 'usgs_value' not in df.columns:
-        value_cols = [c for c in df.columns if 'value' in str(c).lower() and not c.endswith('_cd')]
+        df["usgs_value"] = df[param_code].astype(float)
+    elif "usgs_value" not in df.columns:
+        value_cols = [c for c in df.columns if "value" in str(c).lower() and not c.endswith("_cd")]
         if value_cols:
-            df['usgs_value'] = df[value_cols[0]].astype(float)
+            df["usgs_value"] = df[value_cols[0]].astype(float)
         else:
             logging.warning("Could not identify data column in USGS data")
             return pd.DataFrame()
 
     # Convert to meters
-    if convert_to_meters and 'usgs_value' in df.columns:
-        df['usgs_value_m'] = df['usgs_value'] * 0.3048
+    if convert_to_meters and "usgs_value" in df.columns:
+        df["usgs_value_m"] = df["usgs_value"] * 0.3048
 
     # Aggregate to daily
-    if 'usgs_value_m' in df.columns:
+    if "usgs_value_m" in df.columns:
         try:
             if pd.api.types.is_datetime64_any_dtype(df.index):
-                df['date'] = df.index.date
-            elif 'datetime' in df.columns:
-                df['date'] = pd.to_datetime(df['datetime']).dt.date
+                df["date"] = df.index.date
+            elif "datetime" in df.columns:
+                df["date"] = pd.to_datetime(df["datetime"]).dt.date
 
-            daily_stats = df.groupby('date').agg({
-                'usgs_value_m': ['count', 'mean', 'median', 'std', 'min', 'max']
-            })
-            daily_stats.columns = ['_'.join(col).strip() for col in daily_stats.columns.values]
+            daily_stats = df.groupby("date").agg(
+                {"usgs_value_m": ["count", "mean", "median", "std", "min", "max"]}
+            )
+            daily_stats.columns = ["_".join(col).strip() for col in daily_stats.columns.values]
             daily_stats = daily_stats.reset_index()
-            daily_stats['datetime'] = pd.to_datetime(daily_stats['date'])
+            daily_stats["datetime"] = pd.to_datetime(daily_stats["date"])
 
             return daily_stats
         except Exception as e:
