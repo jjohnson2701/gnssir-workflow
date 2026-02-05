@@ -220,7 +220,8 @@ def plot_ribbon_comparison(
             info_lines.append(f"RMSE = {rmse:.3f} m")
         if n_points > 0:
             info_lines.append(f"N = {n_points}")
-        info_lines.append(f"Distance: {distance_km:.2f} km")
+        if distance_km is not None:
+            info_lines.append(f"Distance: {distance_km:.2f} km")
         if usgs_site_name:
             display_name = usgs_site_name[:25] + "..." if len(usgs_site_name) > 25 else usgs_site_name
             info_lines.append(f"USGS: {display_name}")
@@ -587,7 +588,8 @@ def _create_demeaned_comparison_plot(
         info_lines.append(f"RMSE = {rmse:.3f} m")
     if n_points > 0:
         info_lines.append(f"N = {n_points}")
-    info_lines.append(f"Distance: {distance_km:.2f} km")
+    if distance_km is not None:
+        info_lines.append(f"Distance: {distance_km:.2f} km")
     if usgs_site_name and usgs_site_name != 'Unknown':
         # Truncate long site names
         display_name = usgs_site_name[:30] + "..." if len(usgs_site_name) > 30 else usgs_site_name
@@ -752,7 +754,8 @@ def _create_dual_axis_comparison_plot(
         info_lines.append(f"RMSE = {rmse:.3f} m")
     if n_points > 0:
         info_lines.append(f"N = {n_points}")
-    info_lines.append(f"Distance: {distance_km:.2f} km")
+    if distance_km is not None:
+        info_lines.append(f"Distance: {distance_km:.2f} km")
     if usgs_site_name and usgs_site_name != 'Unknown':
         # Truncate long site names
         display_name = usgs_site_name[:30] + "..." if len(usgs_site_name) > 30 else usgs_site_name
@@ -1217,10 +1220,13 @@ def _create_subdaily_overview(
             f"r = {corr:.3f}",
             f"RMSE = {rmse:.3f}m",
             f"N = {n}",
-            f"Distance: {distance_km:.2f} km",
+        ]
+        if distance_km is not None:
+            info_lines.append(f"Distance: {distance_km:.2f} km")
+        info_lines.extend([
             f"USGS: {usgs_site_name[:25]}..." if len(usgs_site_name) > 25 else f"USGS: {usgs_site_name}",
             f"Datum: {usgs_datum}"
-        ]
+        ])
         props = dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.9, edgecolor='gray')
         ax_main.text(0.98, 0.98, '\n'.join(info_lines), transform=ax_main.transAxes,
                     fontsize=9, va='top', ha='right', bbox=props)

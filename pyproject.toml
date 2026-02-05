@@ -38,7 +38,6 @@ dependencies = [
     "numpy>=1.24.0",
     "scipy>=1.10.0",
     "matplotlib>=3.7.0",
-    "boto3>=1.28.0",
     "dataretrieval>=1.0.0",
     "requests>=2.28.0",
     "geopy>=2.4.0",
@@ -78,7 +77,7 @@ Repository = "https://github.com/jjohnson2701/gnssir-workflow"
 Issues = "https://github.com/jjohnson2701/gnssir-workflow/issues"
 
 [project.scripts]
-gnssir-process = "scripts.run_gnssir_processing:main"
+gnssir-process = "scripts.process_station:main"
 gnssir-animate = "scripts.create_polar_animation:main"
 gnssir-compare = "scripts.usgs_comparison:main"
 gnssir-coops = "scripts.coops_comparison:main"

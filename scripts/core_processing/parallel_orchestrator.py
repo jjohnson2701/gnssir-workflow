@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Import project modules using relative imports
 from .daily_gnssir_worker import process_single_day_wrapper
-from .workspace_setup import setup_gnssrefl_workspace
+from .workspace_setup import setup_gnssrefl_workspace, register_station_coordinates
 from ..visualizer.timeseries import plot_annual_rh_timeseries
 
 def process_station_parallel(station_config, year, doy_range, tool_paths, project_root, refl_code_base, orbits_base, 
@@ -36,7 +36,14 @@ def process_station_parallel(station_config, year, doy_range, tool_paths, projec
     
     # Setup gnssrefl workspace for the year
     setup_gnssrefl_workspace(station_id, year, refl_code_base, orbits_base)
-    
+
+    # Register station coordinates in gnssrefl database (prevents quickLook warning)
+    lat = station_config.get('latitude_deg')
+    lon = station_config.get('longitude_deg')
+    ht = station_config.get('ellipsoidal_height_m')
+    if lat and lon and ht:
+        register_station_coordinates(station_id, lat, lon, ht, refl_code_base)
+
     # Set default skip options if not provided
     if skip_options is None:
         skip_options = {
@@ -108,13 +115,21 @@ def finalize_station_processing(task_results, station_id, year, project_root, re
         'attempted': len(task_results),
         'successful': [],
         'failed': [],
+        'total_retrievals': 0,
+        'low_retrieval_days': [],
         'details': task_results
     }
-    
-    # Process results
+
+    LOW_RETRIEVAL_THRESHOLD = 10  # Warn if fewer than this many retrievals per day
+
+    # Process results and count retrievals
     for result in task_results:
         if result['status'] == 'success':
             results['successful'].append(result['doy'])
+            retrieval_count = result.get('retrieval_count', 0)
+            results['total_retrievals'] += retrieval_count
+            if retrieval_count < LOW_RETRIEVAL_THRESHOLD:
+                results['low_retrieval_days'].append((result['doy'], retrieval_count))
         else:
             results['failed'].append(result['doy'])
     
@@ -171,8 +186,20 @@ def finalize_station_processing(task_results, station_id, year, project_root, re
     logging.info(f"  Attempted: {results['attempted']} DOYs")
     logging.info(f"  Successful: {len(results['successful'])} DOYs")
     logging.info(f"  Failed: {len(results['failed'])} DOYs")
-    
+    logging.info(f"  Total retrievals: {results['total_retrievals']}")
+
+    if results['successful']:
+        avg_retrievals = results['total_retrievals'] / len(results['successful'])
+        logging.info(f"  Average retrievals/day: {avg_retrievals:.1f}")
+
     if results['failed']:
         logging.info(f"  Failed DOYs: {results['failed']}")
-    
+
+    # Warn about low retrieval days
+    if results['low_retrieval_days']:
+        logging.warning(f"Low retrieval count detected on {len(results['low_retrieval_days'])} day(s):")
+        for doy, count in results['low_retrieval_days']:
+            logging.warning(f"  DOY {doy:03d}: {count} retrievals (threshold: {LOW_RETRIEVAL_THRESHOLD})")
+        logging.warning("Consider widening the azimuth window in the station's gnssir params file.")
+
     return results

@@ -25,7 +25,8 @@ sys.path.append(str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 # Import project modules
-from usgs_comparison_analyzer import load_gnssir_data
+from utils.gnssir_loader import load_gnssir_data
+from utils.geo_utils import haversine_distance
 import reflector_height_utils
 from scripts.external_apis.noaa_coops import NOAACOOPSClient
 
@@ -115,6 +116,10 @@ def get_coops_station_info(station_config: dict) -> dict:
     """
     coops_config = station_config.get('external_data_sources', {}).get('noaa_coops', {})
 
+    # Get GNSS station coordinates for distance calculation
+    gnss_lat = station_config.get('latitude_deg')
+    gnss_lon = station_config.get('longitude_deg')
+
     # Check preferred stations first
     preferred = coops_config.get('preferred_stations', [])
     if preferred:
@@ -123,12 +128,18 @@ def get_coops_station_info(station_config: dict) -> dict:
         client = NOAACOOPSClient()
         metadata = client.get_station_metadata(station_id)
         if metadata:
+            coops_lat = metadata.get('latitude')
+            coops_lon = metadata.get('longitude')
+            # Calculate distance if we have both coordinates
+            distance_km = None
+            if gnss_lat and gnss_lon and coops_lat and coops_lon:
+                distance_km = haversine_distance(gnss_lat, gnss_lon, coops_lat, coops_lon)
             return {
                 'id': station_id,
                 'name': metadata.get('name', f'CO-OPS {station_id}'),
-                'latitude': metadata.get('latitude'),
-                'longitude': metadata.get('longitude'),
-                'distance_km': None,  # Unknown since it was manually configured
+                'latitude': coops_lat,
+                'longitude': coops_lon,
+                'distance_km': distance_km,
                 'source': 'config_preferred'
             }
         else:
@@ -342,14 +353,17 @@ def coops_comparison(station_name: str, year: int, doy_range: tuple = None,
         }
 
         plot_path = output_dir / f"{station_name}_{year}_coops_comparison.png"
-        visualizer.plot_comparison_timeseries(
+        plot_result = visualizer.plot_comparison_timeseries(
             merged_df, merged_df,
             station_name, gauge_info, plot_path,
             gnssir_rh_col='gnssir_dm',
             usgs_wl_col='coops_dm',
             compare_demeaned=True
         )
-        logging.info(f"Saved comparison plot: {plot_path}")
+        if plot_result is not None:
+            logging.info(f"Saved comparison plot: {plot_path}")
+        else:
+            plot_path = None
     except Exception as e:
         logging.warning(f"Could not create comparison plot: {e}")
         plot_path = None

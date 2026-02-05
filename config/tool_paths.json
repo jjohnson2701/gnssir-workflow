@@ -1,6 +1,6 @@
 {
-    "gfzrnx_path": "/home/jjohnson/JoelShare3E/GNSSIR/GNSSIRWorkflow-standalone/tools/gfzrnx",
-    "rinex2snr_path": "/home/jjohnson/miniconda3/envs/py39/bin/rinex2snr",
-    "gnssir_path": "/home/jjohnson/miniconda3/envs/py39/bin/gnssir",
-    "quicklook_path": "/home/jjohnson/miniconda3/envs/py39/bin/quickLook"
+    "gfzrnx_path": "gfzrnx",
+    "rinex2snr_path": "rinex2snr",
+    "gnssir_path": "gnssir",
+    "quicklook_path": "quickLook"
 }

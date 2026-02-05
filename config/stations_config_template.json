@@ -3,6 +3,7 @@
     "description": "Template for configuring GNSS-IR stations. Copy this file to stations_config.json and customize.",
     "reference_source_priority": "ERDDAP (primary_reference=true) > USGS > CO-OPS",
     "required_fields": ["station_id_4char_lower", "ellipsoidal_height_m", "latitude_deg", "longitude_deg"],
+    "rinex_source": "RINEX files are downloaded from https://gnss.nps.gov/doi-gnss (configured in data_manager.py)",
     "notes": "Remove this _documentation section from your actual config file"
   },
   "XXXX": {
@@ -12,8 +13,6 @@
     "longitude_deg": 0.0,
     "gnssir_json_params_path": "config/xxxx.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "your-bucket",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/XXXX/XXXX{DOY_PADDED}0.{YY}o",
 
     "usgs_comparison": {
       "search_radius_km": 50,
@@ -73,8 +72,6 @@
     "longitude_deg": -122.0,
     "gnssir_json_params_path": "config/exus.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "your-bucket",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/EXUS/EXUS{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "search_radius_km": 50,
       "priority_param_codes": ["00065"],
@@ -91,8 +88,6 @@
     "longitude_deg": -157.9,
     "gnssir_json_params_path": "config/exco.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "your-bucket",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/EXCO/EXCO{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "target_usgs_site": null
     },

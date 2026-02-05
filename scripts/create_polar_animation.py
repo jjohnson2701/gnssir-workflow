@@ -165,12 +165,9 @@ def load_data(station: str, year: int, results_dir: Path):
     raw_file = results_dir / station / f"{station}_{year}_combined_raw.csv"
     matched_file = results_dir / station / f"{station}_{year}_subdaily_matched.csv"
 
-    # Try USGS file first (for USGS-based stations)
+    # Reference file paths (will be set based on config)
     usgs_file = results_dir / station / f"{station}_{year}_usgs_iv.csv"
-    # Could also support CO-OPS files if needed
     coops_file = results_dir / station / f"{station}_{year}_coops_6min.csv"
-    # Support ERDDAP files (e.g., Bartlett Cove for GLBX)
-    erddap_file = results_dir / station / f"bartlett_cove_{year}_raw.csv"
 
     print(f"Loading raw data from {raw_file}")
     df = pd.read_csv(raw_file)
@@ -197,17 +194,36 @@ def load_data(station: str, year: int, results_dir: Path):
     # Also check for external_data_sources structure
     ext_sources = station_config.get('external_data_sources', {})
     noaa_coops = ext_sources.get('noaa_coops', {})
+    erddap_config = ext_sources.get('erddap', {})
+
+    # Build ERDDAP filename from config if available
+    erddap_file = None
+    erddap_station_name = None
+    if erddap_config.get('enabled'):
+        erddap_station_name = erddap_config.get('station_name', '')
+        if erddap_station_name:
+            # Convert "Bartlett Cove, AK" -> "bartlett_cove_ak"
+            station_name_clean = erddap_station_name.lower().replace(' ', '_').replace(',', '').replace('.', '')
+            erddap_file = results_dir / station / f"{station_name_clean}_{year}_raw.csv"
+            # Also try without state suffix
+            if not erddap_file.exists():
+                parts = station_name_clean.split('_')
+                if len(parts) > 1:
+                    erddap_file = results_dir / station / f"{'_'.join(parts[:-1])}_{year}_raw.csv"
 
     # Determine reference type and coordinates
     ref_source = 'Unknown'
     ref_site_id = 'Unknown'
     gauge_lat, gauge_lon = station_lat, station_lon  # Default to station location
 
-    # Check if ERDDAP file exists first (for stations like GLBX with Bartlett Cove)
-    if erddap_file.exists():
-        ref_source = 'Bartlett Cove ERDDAP'
-        ref_site_id = 'Bartlett Cove'
-        # Use station location as gauge location (Bartlett Cove is nearby)
+    # Check ERDDAP first if configured and file exists
+    if erddap_file and erddap_file.exists():
+        ref_source = f'{erddap_station_name} ERDDAP' if erddap_station_name else 'ERDDAP'
+        ref_site_id = erddap_station_name or 'ERDDAP Station'
+        if 'latitude' in erddap_config and 'longitude' in erddap_config:
+            gauge_lat = erddap_config['latitude']
+            gauge_lon = erddap_config['longitude']
+            print(f"Using ERDDAP station {ref_site_id} at ({gauge_lat}, {gauge_lon})")
     elif noaa_coops.get('enabled') and noaa_coops.get('nearest_station'):
         # Check external_data_sources.noaa_coops structure first (more detailed)
         ref_source = 'CO-OPS'
@@ -308,7 +324,7 @@ def load_data(station: str, year: int, results_dir: Path):
 
     # Load reference data (ERDDAP, USGS, or CO-OPS)
     ref_df = None
-    if erddap_file.exists():
+    if erddap_file and erddap_file.exists():
         ref_df = pd.read_csv(erddap_file, skiprows=[1])  # Skip units row
         # ERDDAP files have 'time' and water level columns
         ref_df['datetime'] = pd.to_datetime(ref_df['time'], utc=True).dt.tz_convert(None)

@@ -6,8 +6,6 @@
     "longitude_deg": -75.7081602909,
     "gnssir_json_params_path": "config/fora_params.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "doi-gnss",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/FORA/FORA{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "search_radius_km": 50,
       "priority_param_codes": [
@@ -51,8 +49,6 @@
     "longitude_deg": -52.115436,
     "gnssir_json_params_path": "config/umnq.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "doi-gnss",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/UMNQ/UMNQ{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
@@ -73,10 +69,6 @@
     "longitude_deg": -135.8884838318,
     "gnssir_json_params_path": "config/glbx.json",
     "reference_gauge_id": null,
-    "data_source_base_url": "https://gnss.nps.gov/doi-gnss",
-    "rinex_path_template": "Rinex/{YEAR}/{DOY_PADDED}/GLBX/GLBX{DOY_PADDED}0.{YY}o",
-    "s3_bucket_name": "doi-gnss",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/GLBX/GLBX{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "search_radius_km": 75,
       "priority_param_codes": [
@@ -149,8 +141,6 @@
     "longitude_deg": -82.6439784939,
     "gnssir_json_params_path": "config/deso.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "doi-gnss",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/DESO/DESO{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "search_radius_km": 50,
       "priority_param_codes": [
@@ -171,8 +161,6 @@
     "longitude_deg": -157.939405742,
     "gnssir_json_params_path": "config/valr.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "doi-gnss",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/VALR/VALR{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
@@ -225,8 +213,6 @@
     "longitude_deg": -75.1888452235,
     "gnssir_json_params_path": "config/mdai.json",
     "reference_gauge_id": null,
-    "s3_bucket_name": "doi-gnss",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/MDAI/MDAI{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
@@ -251,6 +237,44 @@
         ],
         "datum": "NAVD88",
         "time_zone": "lst_ldt",
+        "interval": "h"
+      },
+      "ndbc_buoys": {
+        "enabled": false
+      }
+    }
+  },
+  "KEFJ": {
+    "station_id_4char_lower": "kefj",
+    "ellipsoidal_height_m": 26.488,
+    "latitude_deg": 60.116227034,
+    "longitude_deg": -149.4396758829,
+    "gnssir_json_params_path": "config/kefj.json",
+    "reference_gauge_id": null,
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown",
+      "notes": "Kenai Fjords National Park, Alaska - reference station TBD"
+    },
+    "external_data_sources": {
+      "noaa_coops": {
+        "enabled": true,
+        "search_radius_km": 100,
+        "preferred_stations": [],
+        "data_products": [
+          "predictions",
+          "water_level"
+        ],
+        "datum": "NAVD88",
+        "time_zone": "gmt",
         "interval": "h"
       },
       "ndbc_buoys": {

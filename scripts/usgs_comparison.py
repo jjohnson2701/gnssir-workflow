@@ -22,10 +22,9 @@ if 'visualizer.segmented_viz' in sys.modules:
 sys.path.append(str(Path(__file__).resolve().parent))
 
 # Import project modules
-from usgs_comparison_analyzer import load_gnssir_data
+from utils.gnssir_loader import load_gnssir_data
 import usgs_data_handler
 import visualizer
-import usgs_gauge_finder
 import time_lag_analyzer
 import reflector_height_utils
 try:
@@ -68,7 +67,7 @@ def usgs_comparison(station_name, year, doy_range=None, max_lag_days=10, output_
     year = str(year)
     
     # Get station configuration
-    station_config = usgs_gauge_finder.get_station_config(station_name)
+    station_config = usgs_data_handler.get_station_config(station_name)
     if station_config is None:
         return {'success': False, 'error': f'Station {station_name} not found or config error'}
     
@@ -121,13 +120,13 @@ def usgs_comparison(station_name, year, doy_range=None, max_lag_days=10, output_
     logging.info(f"Total rows in GNSS-IR data: {len(gnssir_daily_df)}")
     
     # Find appropriate USGS gauge
-    usgs_site_code = usgs_gauge_finder.find_usgs_gauge_for_station(station_name)
+    usgs_site_code = usgs_data_handler.find_usgs_gauge_for_station(station_name)
     if usgs_site_code is None:
         logging.error(f"No USGS gauge found for station {station_name}")
         return {'success': False, 'error': 'No USGS gauge found'}
     
     # Get USGS parameter code from config
-    parameter_code = usgs_gauge_finder.get_usgs_parameter_code(station_name)
+    parameter_code = usgs_data_handler.get_usgs_parameter_code(station_name)
     if parameter_code is None:
         parameter_code = "00065"  # Default to gage height
     

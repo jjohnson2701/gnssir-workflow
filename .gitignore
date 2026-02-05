@@ -90,6 +90,7 @@ cache/
 CLAUDE.md
 
 # Session logs
+session_logs/
 processing_session_log.md
 *_session_log.md
 

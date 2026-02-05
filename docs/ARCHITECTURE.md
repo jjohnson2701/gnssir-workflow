@@ -6,40 +6,36 @@ This document maps the module dependencies and categorizes scripts by their role
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  process_station.py        ← Unified workflow (recommended entry point) │
-│       ↓ subprocess.run()                                                │
-│  run_gnssir_processing.py  ← Core GNSS-IR processing                    │
-│  dashboard.py              ← Streamlit analysis interface               │
+│  process_station.py   ← Single entry point for full workflow            │
+│  dashboard.py         ← Streamlit analysis interface                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 | Entry Point | Purpose | Usage |
 |-------------|---------|-------|
-| `process_station.py` | Unified workflow coordinator | `python scripts/process_station.py --station FORA --year 2024 --doy_start 60 --doy_end 120` |
-| `run_gnssir_processing.py` | Core GNSS-IR processing only | Called by process_station.py or standalone |
+| `process_station.py` | Full workflow (GNSS-IR processing, comparison, visualization) | `python scripts/process_station.py --station FORA --year 2024 --doy_start 60 --doy_end 120` |
 | `dashboard.py` | Interactive analysis UI | `streamlit run dashboard.py` |
 
 ## Workflow Visualization
 
 ```
-process_station.py (UNIFIED ENTRY POINT)
+process_station.py (SINGLE ENTRY POINT)
     │
-    ├─[Phase 1: Core Processing]
-    │   └─► run_gnssir_processing.py
-    │           └─► parallel_orchestrator.py
-    │                   └─► daily_gnssir_worker.py (per DOY)
-    │                           ├─► data_manager.py (S3/HTTP download)
-    │                           ├─► preprocessor.py (RINEX3→2.11)
-    │                           └─► gnssrefl_executor.py (rinex2snr, gnssir)
+    ├─[Phase 1: Core Processing] (direct function calls)
+    │   └─► parallel_orchestrator.py
+    │           └─► daily_gnssir_worker.py (per DOY)
+    │                   ├─► data_manager.py (HTTP download)
+    │                   ├─► preprocessor.py (RINEX3→2.11)
+    │                   └─► gnssrefl_executor.py (rinex2snr, gnssir)
     │
-    ├─[Phase 2: Reference Matching]
+    ├─[Phase 2: Reference Matching] (subprocess calls)
     │   ├─► usgs_comparison.py (for USGS-based stations)
-    │   │       └─► usgs_data_handler, usgs_comparison_analyzer, etc.
+    │   │       └─► usgs_data_handler.py
     │   ├─► coops_comparison.py (for coastal CO-OPS tide gauge stations)
     │   │       └─► noaa_coops.py (CO-OPS API client with auto-discovery)
     │   └─► generate_erddap_matched.py (for ERDDAP-based stations like GLBX)
     │
-    └─[Phase 3: Visualization]
+    └─[Phase 3: Visualization] (subprocess calls)
         ├─► plot_resolution_comparison.py
         └─► create_polar_animation.py
 ```
@@ -53,8 +49,8 @@ These are pure library code - they define functions/classes but have no `if __na
 #### Core Processing (`scripts/core_processing/`)
 | Module | Purpose | Used By |
 |--------|---------|---------|
-| `config_loader.py` | Load station/tool configs from JSON | run_gnssir_processing |
-| `parallel_orchestrator.py` | Multi-core daily processing | run_gnssir_processing |
+| `config_loader.py` | Load station/tool configs from JSON | process_station |
+| `parallel_orchestrator.py` | Multi-core daily processing | process_station |
 | `daily_gnssir_worker.py` | Single-day processing pipeline | parallel_orchestrator |
 | `workspace_setup.py` | Create gnssrefl directory structure | daily_gnssir_worker |
 
@@ -67,15 +63,15 @@ These are pure library code - they define functions/classes but have no `if __na
 #### Utilities (`scripts/utils/`)
 | Module | Purpose | Used By |
 |--------|---------|---------|
-| `data_manager.py` | S3/HTTP file downloads | daily_gnssir_worker |
+| `data_manager.py` | RINEX file downloads | daily_gnssir_worker |
 | `logging_config.py` | Logger setup | multiple modules |
 | `segmented_analysis.py` | Monthly/seasonal filtering | visualizer modules |
 
 #### External APIs (`scripts/external_apis/`)
 | Module | Purpose | Used By |
 |--------|---------|---------|
-| `noaa_coops.py` | NOAA CO-OPS tide data client | dashboard, multi_source_comparison |
-| `ndbc_client.py` | NDBC buoy data client | dashboard, multi_source_comparison |
+| `noaa_coops.py` | NOAA CO-OPS tide data client | dashboard, coops_comparison |
+| `ndbc_client.py` | NDBC buoy data client | dashboard |
 
 #### Visualization (`scripts/visualizer/`)
 | Module | Purpose |
@@ -93,10 +89,7 @@ These are pure library code - they define functions/classes but have no `if __na
 #### USGS Integration (root `scripts/`)
 | Module | Purpose | Used By |
 |--------|---------|---------|
-| `usgs_gauge_finder.py` | Load configured gauge info | usgs_comparison |
-| `usgs_data_handler.py` | Fetch USGS water level data | usgs_comparison |
-| `usgs_comparison_analyzer.py` | Compute correlation statistics | usgs_comparison |
-| `usgs_progressive_search.py` | Expanding radius gauge search | usgs_comparison |
+| `usgs_data_handler.py` | USGS gauge discovery, config, and data fetching | usgs_comparison |
 | `time_lag_analyzer.py` | Cross-correlation lag detection | usgs_comparison |
 | `reflector_height_utils.py` | RH → WSE conversion | usgs_comparison |
 | `results_handler.py` | Combine daily RH files | parallel_orchestrator |
@@ -131,7 +124,6 @@ These are standalone tools for exploration and debugging, not part of the main p
 | `find_reference_stations.py` | Discover nearby USGS/CO-OPS/NDBC stations | Setting up a new GNSS station |
 | `search_erddap_stations.py` | Search NOAA ERDDAP for water level data | Finding alternative reference data |
 | `compare_reference_distances.py` | Compare distances to reference sources | Evaluating reference options |
-| `multi_source_comparison.py` | Multi-source validation analysis | Advanced validation (dual-mode: library + CLI) |
 
 ## Package Structure
 
@@ -141,11 +133,11 @@ GNSSIRWorkflow-standalone/
 │   ├── core_processing/      # Pipeline orchestration
 │   ├── external_tools/       # gfzrnx, gnssrefl wrappers
 │   ├── external_apis/        # NOAA CO-OPS, NDBC clients
-│   ├── utils/                # Data management, logging
+│   ├── utils/                # Data management, logging, geo utilities
 │   ├── visualizer/           # All plotting modules
-│   ├── run_gnssir_processing.py   # [ENTRY] Core processing
-│   ├── process_station.py         # [ENTRY] Unified workflow
+│   ├── process_station.py         # [ENTRY] Single entry point for full workflow
 │   ├── usgs_comparison.py         # [SUBPROCESS] USGS matching
+│   ├── coops_comparison.py        # [SUBPROCESS] CO-OPS matching
 │   ├── generate_erddap_matched.py # [SUBPROCESS] ERDDAP matching
 │   ├── create_polar_animation.py  # [SUBPROCESS] Animation
 │   ├── plot_resolution_comparison.py # [SUBPROCESS] Resolution plots
@@ -160,10 +152,12 @@ GNSSIRWorkflow-standalone/
 
 ## Design Patterns
 
-1. **Subprocess Isolation**: `process_station.py` uses `subprocess.run()` rather than imports to avoid shared state issues in the parallel processing pipeline.
+1. **Direct Processing Calls**: `process_station.py` directly imports and calls `parallel_orchestrator.process_station_parallel()` for Phase 1 processing.
 
-2. **Reference Source Abstraction**: The pipeline auto-detects whether to use USGS or ERDDAP based on station config, calling the appropriate comparison script.
+2. **Subprocess Isolation for Phases 2-3**: Comparison and visualization scripts are invoked via `subprocess.run()` to maintain process isolation.
 
-3. **Lazy Dashboard Imports**: Dashboard components use try/except for optional dependencies (plotly, advanced tabs) to allow graceful degradation.
+3. **Reference Source Abstraction**: The pipeline auto-detects whether to use USGS, ERDDAP, or CO-OPS based on station config, calling the appropriate comparison script.
 
-4. **Shared Color Scheme**: All visualization modules import `PLOT_COLORS` from `visualizer/base.py` for consistency.
+4. **Lazy Dashboard Imports**: Dashboard components use try/except for optional dependencies (plotly, advanced tabs) to allow graceful degradation.
+
+5. **Shared Color Scheme**: All visualization modules import `PLOT_COLORS` from `visualizer/base.py` for consistency.

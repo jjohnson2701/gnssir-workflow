@@ -1,13 +1,13 @@
 # GNSS-IR Processing Workflow
 
-Python-based workflow for GNSS Interferometric Reflectometry (GNSS-IR) data processing. Downloads RINEX 3 data from AWS S3, processes it to calculate reflector heights for water level estimation, and validates results against external reference sources.
+Python-based workflow for GNSS Interferometric Reflectometry (GNSS-IR) data processing. Downloads RINEX 3 data from the NPS GNSS archive, processes it to calculate reflector heights for water level estimation, and validates results against external reference sources.
 
 This effectively is built on top of, and works as a wrapper of https://github.com/kristinemlarson/gnssrefl 
-Was created in hopes of creating more user friendly visualizations, and allowing for one time config files per station to allow visualization and comparison of GNSSIR to nearby reference data. 
+Was created in hopes of creating more user friendly visualizations, and allowing for one time config files per station to allow visualization and comparison of GNSSIR to nearby reference data. The imagined use case is a set up where cron jobs can be scheduled to update GNSS data as it is uploaded.
 
 ## Processing Flow
 
-1. **Download**: RINEX 3 files from AWS S3 `doi-gnss` bucket
+1. **Download**: RINEX 3 files from NPS GNSS archive (`https://gnss.nps.gov/doi-gnss`)
 2. **Convert**: RINEX 3 → RINEX 2.11 using `gfzrnx`
 3. **SNR Extraction**: Generate signal-to-noise ratio data with `rinex2snr`
 4. **GNSS-IR Processing**: Calculate reflector heights using `gnssir`
@@ -38,8 +38,7 @@ Was created in hopes of creating more user friendly visualizations, and allowing
 │   ├── stations_config.json     # Station definitions and reference sources
 │   └── tool_paths.json          # External tool paths
 ├── scripts/
-│   ├── process_station.py       # Unified station processing workflow
-│   ├── run_gnssir_processing.py # Core GNSS-IR processing orchestrator
+│   ├── process_station.py       # Single entry point for full processing workflow
 │   ├── usgs_comparison.py       # USGS gauge comparison with time lag analysis
 │   ├── coops_comparison.py      # CO-OPS tide gauge comparison (coastal)
 │   ├── generate_erddap_matched.py # ERDDAP data source matching
@@ -119,28 +118,62 @@ Each station requires configuration in `config/stations_config.json`. Reference 
 ## Usage
 
 ```bash
-# Run unified processing workflow (recommended)
+# Process today's data (for cron jobs)
+python scripts/process_station.py --station GLBX --today
+
+# Process last 7 days (catch up after gaps)
+python scripts/process_station.py --station GLBX --days 7
+
+# Validate configuration before processing
+python scripts/process_station.py --station GLBX --year 2024 --validate
+
+# Run full year processing
 python scripts/process_station.py --station GLBX --year 2024 --doy_start 1 --doy_end 31
-
-# Process GNSS data only (Phase 1)
-python scripts/run_gnssir_processing.py --station GLBX --year 2024 --doy_start 1 --doy_end 31 --num_cores 8
-
-# Reference comparison scripts (Phase 2) - called automatically by process_station.py
-python scripts/usgs_comparison.py --station FORA --year 2024 --max_lag_days 5
-python scripts/coops_comparison.py --station VALR --year 2024
-python scripts/generate_erddap_matched.py --station GLBX --year 2024
 
 # Launch dashboard
 streamlit run dashboard.py
-
-# Find reference stations for a new station
-python scripts/find_reference_stations.py --station GLBX --radius 50
 ```
 
-### Skip Flags
+### Scheduled Processing (Cron)
 
-Avoid reprocessing completed stages:
-- `--skip_download`: Skip RINEX 3 download if files exist
+Set up daily updates with cron:
+
+```bash
+# Edit crontab
+crontab -e
+
+# Add daily processing at 6 AM (GNSS data typically available by then)
+0 6 * * * cd /path/to/GNSSIRWorkflow-standalone && /path/to/conda/envs/py39/bin/python scripts/process_station.py --station GLBX --today >> logs/glbx_cron.log 2>&1
+
+# Or process multiple stations
+0 6 * * * cd /path/to/project && ./scripts/run_daily.sh
+```
+
+Example `scripts/run_daily.sh`:
+```bash
+#!/bin/bash
+source /path/to/conda/etc/profile.d/conda.sh
+conda activate py39
+cd /path/to/GNSSIRWorkflow-standalone
+
+for station in GLBX FORA VALR; do
+    python scripts/process_station.py --station $station --today
+done
+```
+
+### Output
+
+Results are saved to `results_annual/{STATION}/`:
+- `{STATION}_{year}_combined_rh.csv` - Reflector heights (water levels)
+- `{STATION}_{year}_matched_data.csv` - GNSS-IR matched with reference
+- Various plots (time series, polar animations, comparisons)
+
+### Flags
+
+- `--today`: Process current day only
+- `--days N`: Process last N days
+- `--validate`: Validate configuration and exit
+- `--skip_download`: Skip RINEX download if files exist
 - `--skip_gnssir`: Skip GNSS-IR processing (use existing results)
 - `--skip_comparison`: Skip reference comparison
 - `--skip_viz`: Skip visualization
@@ -177,6 +210,7 @@ The system configures gnssrefl-required environment variables:
 ## Documentation
 
 - [Installation Guide](docs/INSTALL.md) - Detailed setup instructions
+- [Parameters Reference](docs/params_reference.md) - GNSS-IR parameter tuning guide
 - [Methodology](docs/METHODOLOGY.md) - Scientific background and processing details
 - [Architecture](docs/ARCHITECTURE.md) - Code structure and module dependencies
 - [Changelog](docs/CHANGELOG.md) - Version history

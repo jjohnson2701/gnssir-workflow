@@ -40,7 +40,6 @@ class TestProjectStructure:
             'scripts/usgs_comparison.py',
             'scripts/find_reference_stations.py',
             'scripts/process_station.py',
-            'scripts/run_gnssir_processing.py',
         ]
 
         for script in required_scripts:

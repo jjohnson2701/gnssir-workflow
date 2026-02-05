@@ -72,8 +72,7 @@ Tool paths are configured in `config/tool_paths.json`.
 - `scipy>=1.15.2` - Scientific computing
 
 **Data Acquisition:**
-- `boto3>=1.28.65` - AWS S3 access for RINEX data
-- `requests>=2.31.0` - HTTP requests for external APIs
+- `requests>=2.31.0` - HTTP requests for RINEX downloads and external APIs
 - `dataretrieval>=1.0.12` - USGS water data API
 
 **Visualization:**
@@ -112,8 +111,8 @@ GNSSIRWorkflow/
 │   └── {station}_params.json        # Additional station parameters
 │
 ├── scripts/                         # Processing scripts
-│   ├── run_gnssir_processing.py     # Main processing entry point
-│   ├── usgs_comparison.py  # USGS validation analysis
+│   ├── process_station.py           # Single entry point for full workflow
+│   ├── usgs_comparison.py           # USGS validation analysis
 │   ├── core_processing/             # Core processing modules
 │   │   ├── config_loader.py         # Configuration management
 │   │   ├── daily_gnssir_worker.py   # Single-day processing
@@ -126,7 +125,7 @@ GNSSIRWorkflow/
 │   │   ├── noaa_coops.py            # NOAA CO-OPS tide data
 │   │   └── ndbc_client.py           # NDBC buoy data
 │   ├── utils/                       # Utility modules
-│   │   ├── data_manager.py          # S3 download, file management
+│   │   ├── data_manager.py          # RINEX download, file management
 │   │   ├── logging_config.py        # Centralized logging
 │   │   └── segmented_analysis.py    # Monthly/seasonal analysis
 │   ├── visualizer/                  # Visualization modules
@@ -188,7 +187,7 @@ GNSSIRWorkflow/
 
 ### 4.1 Station Configuration (`config/stations_config.json`)
 
-Defines station metadata, coordinates, and data source paths:
+Defines station metadata, coordinates, and reference data sources. RINEX files are downloaded from the NPS GNSS archive at `https://gnss.nps.gov/doi-gnss` (configured in `scripts/utils/data_manager.py`).
 
 ```json
 {
@@ -198,8 +197,6 @@ Defines station metadata, coordinates, and data source paths:
     "latitude_deg": 35.9393968812,
     "longitude_deg": -75.7081602909,
     "gnssir_json_params_path": "config/fora_params.json",
-    "s3_bucket_name": "doi-gnss",
-    "s3_rinex_obs_path_template": "Rinex/{YEAR}/{DOY_PADDED}/FORA/FORA{DOY_PADDED}0.{YY}o",
     "usgs_comparison": {
       "target_usgs_site": "02043433",
       "usgs_parameter_code_to_use": "00065",
@@ -222,16 +219,18 @@ Defines station metadata, coordinates, and data source paths:
 
 ### 4.2 Tool Paths (`config/tool_paths.json`)
 
-Paths to external command-line tools:
+Paths to external command-line tools. Uses tool names (found via PATH) by default:
 
 ```json
 {
-  "gfzrnx_path": "/path/to/tools/gfzrnx",
-  "rinex2snr_path": "/path/to/conda/env/bin/rinex2snr",
-  "gnssir_path": "/path/to/conda/env/bin/gnssir",
-  "quicklook_path": "/path/to/conda/env/bin/quickLook"
+  "gfzrnx_path": "gfzrnx",
+  "rinex2snr_path": "rinex2snr",
+  "gnssir_path": "gnssir",
+  "quicklook_path": "quickLook"
 }
 ```
+
+When tools are installed in your conda environment, they're automatically in PATH.
 
 ### 4.3 GNSS-IR Parameters (`config/{station}_params.json`)
 
@@ -272,8 +271,8 @@ Key parameters:
 ```
 ┌─────────────────────┐
 │  Station Config     │
-│  (coordinates, S3   │
-│   paths, parameters)│
+│  (coordinates,      │
+│   parameters)       │
 └─────────┬───────────┘
           │
           ▼
@@ -284,8 +283,8 @@ Key parameters:
           │
           ▼
 ┌─────────────────────┐
-│  Download RINEX 3   │  Source: AWS S3 doi-gnss bucket
-│  from AWS S3        │  Tool: boto3/HTTP
+│  Download RINEX 3   │  Source: NPS GNSS archive
+│  from NPS archive   │  URL: gnss.nps.gov/doi-gnss
 └─────────┬───────────┘
           │
           ▼
@@ -358,9 +357,9 @@ from scripts.core_processing.config_loader import load_station_config
 station_config = load_station_config(stations_config_path, 'FORA', project_root)
 ```
 
-#### Step 2: Download RINEX 3 from AWS S3
-- Source: `s3://doi-gnss/Rinex/{YEAR}/{DOY}/...`
-- Uses boto3 for authenticated access or HTTP for public buckets
+#### Step 2: Download RINEX 3 from NPS Archive
+- Source: `https://gnss.nps.gov/doi-gnss/Rinex/{YEAR}/{DOY}/...`
+- Downloads via HTTP using requests library
 - Validates file size (minimum 500 KB)
 
 #### Step 3: Convert RINEX 3 → RINEX 2.11
@@ -620,26 +619,27 @@ chmod +x tools/gfzrnx
 
 1. Add station to `config/stations_config.json`
 2. Create station parameters file `config/{station}_params.json`
-3. Verify S3 path template for RINEX data
+3. Verify station exists in NPS GNSS archive at `https://gnss.nps.gov/doi-gnss`
 
 ### 10.3 Run Processing Pipeline
 
 ```bash
-# Full-year processing with 8 cores
-python scripts/run_gnssir_processing.py \
+# Full workflow: GNSS-IR processing, reference comparison, visualization
+python scripts/process_station.py \
     --station FORA \
     --year 2024 \
     --doy_start 1 \
     --doy_end 365 \
     --num_cores 8
 
-# Skip already-processed stages
-python scripts/run_gnssir_processing.py \
+# GNSS-IR processing only (skip comparison and visualization)
+python scripts/process_station.py \
     --station FORA \
     --year 2024 \
     --doy_start 1 \
     --doy_end 365 \
-    --skip_all
+    --skip_comparison \
+    --skip_viz
 ```
 
 ### 10.4 Run Validation Analysis
@@ -663,7 +663,7 @@ streamlit run dashboard.py
 
 ```bash
 # Process 7 days for testing
-python scripts/run_gnssir_processing.py \
+python scripts/process_station.py \
     --station FORA \
     --year 2024 \
     --doy_start 260 \
@@ -704,10 +704,11 @@ python scripts/run_gnssir_processing.py \
 | 1 | GPS | L1 C/A |
 | 5 | GPS | L5 |
 | 20 | GPS | L2C |
-| 101 | GLONASS | L1 |
-| 102 | GLONASS | L2 |
-| 201-208 | Galileo | E1, E5a, E5b, etc. |
-| 302, 306 | BeiDou | B1, B3 |
+| 101, 102 | GLONASS | L1, L2 |
+| 201, 205-208 | Galileo | E1, E5a/E6/E7/E8 |
+| 302, 306 | BeiDou | B2, B6 |
+
+*Source: gnssrefl/gps.py lines 1790-1830*
 
 ---
 

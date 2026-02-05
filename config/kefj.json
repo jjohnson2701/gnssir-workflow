@@ -1,0 +1,65 @@
+{
+    "station": "kefj",
+    "lat": 60.116227034,
+    "lon": -149.4396758829,
+    "ht": 26.488,
+    "minH": 5.0,
+    "maxH": 15.0,
+    "e1": 0.5,
+    "e2": 5.0,
+    "NReg": [
+        5.0,
+        15.0
+    ],
+    "PkNoise": 2.7,
+    "polyV": 4,
+    "pele": [
+        0.5,
+        30
+    ],
+    "ediff": 2.0,
+    "desiredP": 0.005,
+    "azval2": [
+        130.0,
+        155.0
+    ],
+    "freqs": [
+        1,
+        20,
+        5,
+        101,
+        102,
+        201,
+        205,
+        206,
+        207,
+        208,
+        302,
+        306
+    ],
+    "reqAmp": [
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
+    ],
+    "refraction": true,
+    "overwriteResults": true,
+    "seekRinex": false,
+    "wantCompression": false,
+    "plt_screen": false,
+    "onesat": null,
+    "screenstats": false,
+    "pltname": "kefj_lsp.png",
+    "delTmax": 75.0,
+    "gzip": false,
+    "ellist": []
+}

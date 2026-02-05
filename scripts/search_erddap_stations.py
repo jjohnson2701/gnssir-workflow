@@ -10,13 +10,13 @@ import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
-import math
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 from dashboard_components.station_metadata import get_station_config, get_all_station_ids
+from scripts.utils.geo_utils import haversine_distance
 
 
 # Regional ERDDAP servers
@@ -58,21 +58,6 @@ ERDDAP_SERVERS = {
         'coverage': {'lat': (15, 72), 'lon': (-180, -65)}
     }
 }
-
-
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate great-circle distance in km using Haversine formula."""
-    R = 6371  # Earth radius in km
-
-    lat1_rad = math.radians(lat1)
-    lat2_rad = math.radians(lat2)
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-
-    a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
-    c = 2 * math.asin(math.sqrt(a))
-
-    return R * c
 
 
 def get_relevant_erddap_servers(lat: float, lon: float) -> List[Tuple[str, Dict]]:

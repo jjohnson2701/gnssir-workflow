@@ -3,6 +3,7 @@
 
 import logging
 import shutil
+import sqlite3
 from pathlib import Path
 
 def setup_gnssrefl_workspace(station_id, year, refl_code_base, orbits_base, doy=None):
@@ -103,3 +104,54 @@ def copy_json_params(json_source_path, station_id, refl_code_base):
     except Exception as e:
         logging.error(f"Failed to copy JSON parameter file: {e}")
         return None
+
+
+def register_station_coordinates(station_id: str, lat: float, lon: float, ht: float,
+                                  refl_code_base: Path) -> bool:
+    """
+    Register station coordinates in the gnssrefl station database.
+
+    This adds the station to the station_pos_2024.db database so that gnssrefl's
+    quickLook tool can find the coordinates without showing a warning.
+
+    Args:
+        station_id: Station ID in 4-character lowercase
+        lat: Latitude in degrees
+        lon: Longitude in degrees
+        ht: Ellipsoidal height in meters
+        refl_code_base: Base directory for REFL_CODE
+
+    Returns:
+        True if successful, False otherwise
+    """
+    db_path = Path(refl_code_base) / "Files" / "station_pos_2024.db"
+
+    if not db_path.exists():
+        logging.warning(f"Station database not found at {db_path}")
+        return False
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+
+        # Check if station already exists
+        cursor.execute("SELECT lat, lon, ht FROM stations WHERE station = ?", (station_id.lower(),))
+        existing = cursor.fetchone()
+
+        if existing:
+            logging.debug(f"Station {station_id} already in database: lat={existing[0]}, lon={existing[1]}, ht={existing[2]}")
+        else:
+            # Insert the station
+            cursor.execute(
+                "INSERT INTO stations (station, lat, lon, ht) VALUES (?, ?, ?, ?)",
+                (station_id.lower(), lat, lon, ht)
+            )
+            conn.commit()
+            logging.info(f"Registered station {station_id} in gnssrefl database: lat={lat}, lon={lon}, ht={ht}")
+
+        conn.close()
+        return True
+
+    except sqlite3.Error as e:
+        logging.error(f"Database error registering station {station_id}: {e}")
+        return False

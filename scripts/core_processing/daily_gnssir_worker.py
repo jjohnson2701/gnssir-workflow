@@ -8,7 +8,7 @@ import glob
 from pathlib import Path
 
 # Import utilities from project modules using relative imports
-from ..utils.data_manager import download_s3_file, download_from_url, check_file_exists
+from ..utils.data_manager import download_rinex, check_file_exists
 from ..external_tools.preprocessor import convert_rinex3_to_rinex2
 from ..external_tools.gnssrefl_executor import execute_rinex2snr, execute_gnssir, execute_quicklook_threaded
 from ..utils.logging_config import setup_day_logger
@@ -53,29 +53,7 @@ def process_single_day(station_config, year, doy, tool_paths, project_root, refl
     # Format DOY with zero-padding
     doy_padded = f"{doy:03d}"
     yy = str(year)[-2:]  # Last 2 digits of year
-    
-    # Define paths - check for direct URL source first, fall back to S3
-    data_source_base_url = station_config.get("data_source_base_url")
-    rinex_path_template = station_config.get("rinex_path_template")
-    s3_bucket = station_config.get("s3_bucket_name")
-    s3_key_template = station_config.get("s3_rinex_obs_path_template")
 
-    # Determine download method and path
-    use_direct_url = data_source_base_url and rinex_path_template
-    if use_direct_url:
-        rinex_path = rinex_path_template.format(
-            YEAR=year,
-            DOY_PADDED=doy_padded,
-            YY=yy
-        )
-        download_url = f"{data_source_base_url}/{rinex_path}"
-    else:
-        s3_key = s3_key_template.format(
-            YEAR=year,
-            DOY_PADDED=doy_padded,
-            YY=yy
-        )
-    
     # Setup gnssrefl workspace
     gnssrefl_paths = setup_gnssrefl_workspace(station_id, year, refl_code_base, orbits_base, doy)
     
@@ -105,6 +83,7 @@ def process_single_day(station_config, year, doy, tool_paths, project_root, refl
         "doy": doy,
         "doy_padded": doy_padded,
         "rh_file_path": None,
+        "retrieval_count": 0,
         "errors": [],
         "skipped_steps": []
     }
@@ -162,47 +141,13 @@ def process_single_day(station_config, year, doy, tool_paths, project_root, refl
     day_logger.info(f"ORBITS_BASE: {orbits_base}")
     
     # Step 1: Download RINEX 3 file
-    download_success = True  # Default to True for skipping case
-    if skip_options.get('skip_download', False):
-        day_logger.info("Step 1: Download - SKIPPING as requested.")
-        if not check_file_exists(rinex3_file_path, min_size_bytes=MIN_RINEX3_SIZE_BYTES):
-            day_logger.error(f"Download skipped, but expected file {rinex3_file_path} is missing or too small.")
-            day_logger.warning("Attempting download despite skip flag...")
-            try:
-                if use_direct_url:
-                    download_success = download_from_url(download_url, rinex3_file_path)
-                else:
-                    download_success = download_s3_file(
-                        s3_bucket=s3_bucket,
-                        s3_key=s3_key,
-                        local_target_path=rinex3_file_path
-                    )
-
-                if not download_success:
-                    day_logger.error(f"Failed to download RINEX 3 file for {station_id.upper()} {year} {doy_padded}")
-                    result["errors"].append("Failed to download RINEX 3 file")
-                    return result
-            except Exception as e:
-                day_logger.error(f"Exception during download step: {e}")
-                result["errors"].append(f"Exception during download step: {e}")
-                return result
-        else:
-            day_logger.info(f"RINEX 3 file exists at {rinex3_file_path} with sufficient size")
-            result["skipped_steps"].append("download")
+    if skip_options.get('skip_download', False) and check_file_exists(rinex3_file_path, min_size_bytes=MIN_RINEX3_SIZE_BYTES):
+        day_logger.info(f"Step 1: Download - SKIPPING (file exists at {rinex3_file_path})")
+        result["skipped_steps"].append("download")
     else:
+        day_logger.info(f"Step 1: Downloading RINEX 3 file for {station_id.upper()} {year} DOY {doy}")
         try:
-            if use_direct_url:
-                day_logger.info(f"Step 1: Downloading RINEX 3 file from URL: {download_url}")
-                download_success = download_from_url(download_url, rinex3_file_path)
-            else:
-                day_logger.info("Step 1: Downloading RINEX 3 file from S3")
-                download_success = download_s3_file(
-                    s3_bucket=s3_bucket,
-                    s3_key=s3_key,
-                    local_target_path=rinex3_file_path
-                )
-
-            if not download_success:
+            if not download_rinex(station_id, year, doy, rinex3_file_path):
                 day_logger.error(f"Failed to download RINEX 3 file for {station_id.upper()} {year} {doy_padded}")
                 result["errors"].append("Failed to download RINEX 3 file")
                 return result
@@ -504,6 +449,16 @@ def process_single_day(station_config, year, doy, tool_paths, project_root, refl
     except Exception as e:
         day_logger.error(f"Exception copying result file: {e}")
         result["errors"].append(f"Exception copying result file: {e}")
+
+    # Count retrievals in result file
+    if result["rh_file_path"]:
+        try:
+            with open(result["rh_file_path"], 'r') as f:
+                # Count non-comment, non-empty lines (gnssir output has % for comments)
+                result["retrieval_count"] = sum(1 for line in f if line.strip() and not line.startswith('%'))
+            day_logger.info(f"Retrieval count for DOY {doy_padded}: {result['retrieval_count']}")
+        except Exception as e:
+            day_logger.warning(f"Could not count retrievals: {e}")
     
     # Check for gnssrefl log files and copy them if needed
     try:

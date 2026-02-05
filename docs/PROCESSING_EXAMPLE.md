@@ -17,13 +17,14 @@ This example demonstrates the complete GNSS-IR processing workflow using the GLB
 Process RINEX data to calculate reflector heights:
 
 ```bash
-python scripts/run_gnssir_processing.py \
+python scripts/process_station.py \
     --station GLBX \
     --year 2024 \
     --doy_start 32 \
     --doy_end 60 \
     --num_cores 8 \
-    --log_level INFO
+    --skip_comparison \
+    --skip_viz
 ```
 
 ### Actual Output
@@ -42,8 +43,7 @@ GNSS-IR workspace setup complete for station glbx, year 2024
 Starting parallel processing using 8 cores
 ...
 Processing GLBX for 2024 DOY 032
-Step 1: S3 Download - SKIPPING as requested
-RINEX 3 file exists at data/GLBX/2024/rinex3/GLBX0320.24o
+Step 1: Download - SKIPPING (file exists at data/GLBX/2024/rinex3/GLBX0320.24o)
 Step 2: Converting RINEX 3 to RINEX 2.11
 Step 3: Running rinex2snr
 Step 4: Running gnssir
@@ -141,9 +141,9 @@ streamlit run dashboard.py
 
 Access at http://localhost:8501
 
-## Alternative: Unified Workflow
+## Full Workflow (Recommended)
 
-For convenience, use `process_station.py` to run all steps automatically:
+Run all steps with a single command:
 
 ```bash
 python scripts/process_station.py \

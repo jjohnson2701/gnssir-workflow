@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core GNSS-IR processing pipeline with parallel orchestration
 - Multi-source reference data integration (USGS, NOAA CO-OPS, NDBC, ERDDAP)
 - Automated RINEX 3 to 2.11 conversion via gfzrnx
-- AWS S3 data retrieval with HTTP fallback
+- RINEX data retrieval from NPS GNSS archive
 - Time lag analysis and cross-correlation
 - Interactive Streamlit dashboard with multi-tab interface
 - Polar animation generation with satellite imagery overlay
