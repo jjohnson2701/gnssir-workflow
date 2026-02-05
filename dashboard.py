@@ -39,7 +39,7 @@ from dashboard_components.constants import (
     DEFAULT_STATION,
     DEFAULT_YEAR,
     DEFAULT_DOY_RANGE,
-    PUBLICATION_THEME_AVAILABLE
+    PUBLICATION_THEME_AVAILABLE,
 )
 
 from dashboard_components.tabs import (
@@ -54,17 +54,18 @@ from dashboard_components.tabs import (
 from dashboard_components.station_metadata import (
     get_station_display_info,
     get_reference_source_info,
-    get_antenna_height
+    get_antenna_height,
 )
 
 # Configure Streamlit page
 st.set_page_config(**PAGE_CONFIG)
 
 # Apply custom CSS
-publication_header_color = ENHANCED_COLORS['gnss'] if PUBLICATION_THEME_AVAILABLE else '#2E86AB'
-publication_bg_color = ENHANCED_COLORS['background'] if PUBLICATION_THEME_AVAILABLE else '#fafafa'
+publication_header_color = ENHANCED_COLORS["gnss"] if PUBLICATION_THEME_AVAILABLE else "#2E86AB"
+publication_bg_color = ENHANCED_COLORS["background"] if PUBLICATION_THEME_AVAILABLE else "#fafafa"
 
-st.markdown(f"""
+st.markdown(
+    f"""
 <style>
     .main-header {{
         font-size: 2.5rem;
@@ -117,15 +118,19 @@ st.markdown(f"""
         color: #1a1a1a !important;
     }}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 def main():
     """Main application logic."""
     # Header
     st.markdown('<h1 class="main-header">🛰️ GNSS-IR Dashboard</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Water Level Validation with Subdaily Comparison</p>',
-                unsafe_allow_html=True)
+    st.markdown(
+        '<p class="sub-header">Water Level Validation with Subdaily Comparison</p>',
+        unsafe_allow_html=True,
+    )
 
     # Sidebar configuration
     st.sidebar.title("Configuration")
@@ -135,7 +140,11 @@ def main():
     selected_station = st.sidebar.selectbox(
         "Select Station",
         available_stations,
-        index=available_stations.index(DEFAULT_STATION) if DEFAULT_STATION in available_stations else 0
+        index=(
+            available_stations.index(DEFAULT_STATION)
+            if DEFAULT_STATION in available_stations
+            else 0
+        ),
     )
 
     # Display station reference info
@@ -143,29 +152,35 @@ def main():
     antenna_height = get_antenna_height(selected_station)
 
     st.sidebar.markdown("### 📍 Station Info")
-    distance_text = f"<strong>Distance:</strong> {ref_info['distance_km']:.1f} km<br>" if ref_info.get('distance_km') else ""
-    st.sidebar.markdown(f"""
+    distance_text = (
+        f"<strong>Distance:</strong> {ref_info['distance_km']:.1f} km<br>"
+        if ref_info.get("distance_km")
+        else ""
+    )
+    st.sidebar.markdown(
+        f"""
     <div class="reference-info">
     <strong>Reference:</strong> {ref_info['primary_source']}<br>
     <strong>Station:</strong> {ref_info['station_name']}<br>
     {distance_text}<strong>Antenna Height:</strong> {antenna_height:.3f} m
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Year selection
     current_year = pd.Timestamp.now().year
     selected_year = st.sidebar.number_input(
-        "Select Year",
-        min_value=2015,
-        max_value=current_year,
-        value=DEFAULT_YEAR
+        "Select Year", min_value=2015, max_value=current_year, value=DEFAULT_YEAR
     )
 
     # DOY range selection
     st.sidebar.markdown("### Date Range (Day of Year)")
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        doy_start = st.number_input("Start DOY", min_value=1, max_value=366, value=DEFAULT_DOY_RANGE[0])
+        doy_start = st.number_input(
+            "Start DOY", min_value=1, max_value=366, value=DEFAULT_DOY_RANGE[0]
+        )
     with col2:
         doy_end = st.number_input("End DOY", min_value=1, max_value=366, value=DEFAULT_DOY_RANGE[1])
 
@@ -176,10 +191,10 @@ def main():
     st.sidebar.markdown("🛰️ **GNSS-IR** - Satellite reflectometry")
 
     # Show primary reference source based on station config
-    primary_source = ref_info['primary_source']
-    if primary_source == 'ERDDAP':
+    primary_source = ref_info["primary_source"]
+    if primary_source == "ERDDAP":
         st.sidebar.markdown(f"🌐 **ERDDAP** - {ref_info['station_name']} (primary)")
-    elif primary_source == 'CO-OPS':
+    elif primary_source == "CO-OPS":
         st.sidebar.markdown(f"🌀 **CO-OPS** - {ref_info['station_name']} (primary)")
     else:
         st.sidebar.markdown(f"🌊 **USGS** - {ref_info['station_name']} (primary)")
@@ -192,19 +207,25 @@ def main():
         st.session_state.current_year = selected_year
 
     # Main content area
-    if 'data_loaded' in st.session_state and st.session_state.data_loaded:
+    if "data_loaded" in st.session_state and st.session_state.data_loaded:
         with st.spinner("Loading GNSS-IR and comparison data..."):
             # Load station data
             try:
-                rh_data, comparison_data, usgs_data, coops_file_data, erddap_data = load_station_data(selected_station, selected_year)
+                rh_data, comparison_data, usgs_data, coops_file_data, erddap_data = (
+                    load_station_data(selected_station, selected_year)
+                )
             except ValueError:
                 # Fallback for older version (4 return values)
                 try:
-                    rh_data, comparison_data, usgs_data, coops_file_data = load_station_data(selected_station, selected_year)
+                    rh_data, comparison_data, usgs_data, coops_file_data = load_station_data(
+                        selected_station, selected_year
+                    )
                     erddap_data = None
                 except ValueError:
                     # Fallback for even older version (3 return values)
-                    rh_data, comparison_data, usgs_data = load_station_data(selected_station, selected_year)
+                    rh_data, comparison_data, usgs_data = load_station_data(
+                        selected_station, selected_year
+                    )
                     coops_file_data = None
                     erddap_data = None
 
@@ -225,19 +246,25 @@ def main():
 
         # Filter by DOY range if data exists
         if rh_data is not None and not rh_data.empty:
-            rh_data = rh_data[(rh_data['doy'] >= doy_range[0]) & (rh_data['doy'] <= doy_range[1])]
+            rh_data = rh_data[(rh_data["doy"] >= doy_range[0]) & (rh_data["doy"] <= doy_range[1])]
 
         # Also filter comparison_data by DOY range if it exists
         if comparison_data is not None and not comparison_data.empty:
-            comparison_data['doy'] = comparison_data['merge_date'].dt.dayofyear
-            comparison_data = comparison_data[(comparison_data['doy'] >= doy_range[0]) & (comparison_data['doy'] <= doy_range[1])]
+            comparison_data["doy"] = comparison_data["merge_date"].dt.dayofyear
+            comparison_data = comparison_data[
+                (comparison_data["doy"] >= doy_range[0]) & (comparison_data["doy"] <= doy_range[1])
+            ]
 
         # Initialize external data variables
         coops_data = None
         coops_station_id = None
 
         # Check if ERDDAP data was loaded (highest priority for ERDDAP-enabled stations)
-        if erddap_data is not None and not erddap_data.empty and ref_info['primary_source'] == 'ERDDAP':
+        if (
+            erddap_data is not None
+            and not erddap_data.empty
+            and ref_info["primary_source"] == "ERDDAP"
+        ):
             st.info(f"🌐 Using ERDDAP data from {ref_info['station_name']} (co-located sensor)")
 
         # Check if CO-OPS data was loaded from file
@@ -245,13 +272,16 @@ def main():
             coops_data = coops_file_data
             # Extract station ID from config instead of hardcoding
             station_config = get_station_display_info(selected_station)
-            if station_config.get('reference_station_id') and ref_info['primary_source'] == 'CO-OPS':
-                coops_station_id = station_config['reference_station_id']
-            elif 'station_id' in coops_data.columns:
-                coops_station_id = str(coops_data['station_id'].iloc[0])
+            if (
+                station_config.get("reference_station_id")
+                and ref_info["primary_source"] == "CO-OPS"
+            ):
+                coops_station_id = station_config["reference_station_id"]
+            elif "station_id" in coops_data.columns:
+                coops_station_id = str(coops_data["station_id"].iloc[0])
             else:
-                coops_station_id = ref_info.get('station_id', 'Unknown')
-            if ref_info['primary_source'] == 'CO-OPS':
+                coops_station_id = ref_info.get("station_id", "Unknown")
+            if ref_info["primary_source"] == "CO-OPS":
                 st.info(f"🌀 Using CO-OPS data from station {coops_station_id} (primary reference)")
 
         # Determine if CO-OPS data is available for tabs
@@ -263,16 +293,19 @@ def main():
         # Tab 1: Overview
         with tabs[0]:
             render_overview_tab(
-                rh_data, usgs_data, coops_data, erddap_data,
-                selected_station, selected_year,
-                coops_station_id
+                rh_data,
+                usgs_data,
+                coops_data,
+                erddap_data,
+                selected_station,
+                selected_year,
+                coops_station_id,
             )
 
         # Tab 2: Monthly Data (all visualizations)
         with tabs[1]:
             render_monthly_data_tab(
-                rh_data, usgs_data, coops_data,
-                selected_station, selected_year, include_coops
+                rh_data, usgs_data, coops_data, selected_station, selected_year, include_coops
             )
 
         # Tab 3: Subdaily Comparison
@@ -281,29 +314,30 @@ def main():
                 station_id=selected_station,
                 year=selected_year,
                 rh_data=rh_data,
-                comparison_data=comparison_data
+                comparison_data=comparison_data,
             )
 
         # Tab 4: Yearly Analysis (residual analysis)
         with tabs[3]:
             render_yearly_residual_tab(
-                rh_data, usgs_data, coops_data,
-                selected_station, selected_year,
-                erddap_data=erddap_data
+                rh_data,
+                usgs_data,
+                coops_data,
+                selected_station,
+                selected_year,
+                erddap_data=erddap_data,
             )
 
         # Tab 5: Daily Diagnostics (QuickLook plots)
         with tabs[4]:
             # Create data dictionary for consistency with new API
             data_dict = {
-                'rh_data': rh_data,
-                'comparison_data': comparison_data,
-                'usgs_data': usgs_data,
-                'coops_data': coops_data
+                "rh_data": rh_data,
+                "comparison_data": comparison_data,
+                "usgs_data": usgs_data,
+                "coops_data": coops_data,
             }
-            render_diagnostics_tab(
-                selected_station, selected_year, data_dict
-            )
+            render_diagnostics_tab(selected_station, selected_year, data_dict)
 
     else:
         st.info("👈 Please configure settings and click 'Load/Refresh Data' to begin analysis")
