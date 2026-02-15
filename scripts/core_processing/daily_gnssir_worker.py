@@ -315,6 +315,7 @@ def process_single_day(
                 logs_dir=logs_daily_dir,
                 snr_code="66",
                 archive=rinex2snr_archive,
+                orbit=rinex2snr_orbit,
             )
 
             if not rinex2snr_success:
