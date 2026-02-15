@@ -231,6 +231,46 @@ class TestRinex2snrArchiveFlag:
         assert "-nolook" not in cmd
 
 
+class TestRinex2snrOrbitFlag:
+    """Test that execute_rinex2snr passes the correct orbit type flag."""
+
+    @pytest.mark.unit
+    def test_no_orbit_flag_by_default(self, tmp_path):
+        """Without orbit param, command omits -orb flag (gnssrefl picks default)."""
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir()
+        with patch(
+            "scripts.external_tools.gnssrefl_executor.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
+            execute_rinex2snr(
+                "rinex2snr", "umnq", 2025, "100",
+                tmp_path, tmp_path, logs_dir,
+            )
+        cmd = mock_run.call_args[0][0]
+        assert "-orb" not in cmd
+
+    @pytest.mark.unit
+    def test_orbit_flag_passed_when_specified(self, tmp_path):
+        """With orbit='gnss3', command includes -orb gnss3."""
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir()
+        with patch(
+            "scripts.external_tools.gnssrefl_executor.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
+            execute_rinex2snr(
+                "rinex2snr", "umnq", 2025, "223",
+                tmp_path, tmp_path, logs_dir,
+                archive="unavco",
+                orbit="gnss3",
+            )
+        cmd = mock_run.call_args[0][0]
+        assert "-orb" in cmd
+        assert "gnss3" in cmd
+        assert "-archive" in cmd
+
+
 class TestDataSourceRouting:
     """Test that station config data_source field routes correctly."""
 

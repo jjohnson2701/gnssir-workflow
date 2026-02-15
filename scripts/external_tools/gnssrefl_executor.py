@@ -20,6 +20,7 @@ def execute_rinex2snr(
     snr_code="66",
     rinex2_filename_override=None,
     archive=None,
+    orbit=None,
 ):
     """
     Execute rinex2snr command to extract SNR data from RINEX 2 file.
@@ -65,6 +66,9 @@ def execute_rinex2snr(
             cmd.extend(["-archive", archive])
         else:
             cmd.extend(["-nolook", "T"])
+
+        if orbit:
+            cmd.extend(["-orb", orbit])
 
         # Add optional overrides
         if rinex2_filename_override:

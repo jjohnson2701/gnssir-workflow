@@ -260,7 +260,9 @@ def process_single_day(
                 return result
 
     # Step 3: Run rinex2snr
+    # EarthScope: use unavco archive with GFZ final orbits (highest quality, widely available)
     rinex2snr_archive = "unavco" if data_source == "earthscope" else None
+    rinex2snr_orbit = "gnss3" if data_source == "earthscope" else None
     rinex2snr_success = True  # Default for skipping case
     if skip_options.get("skip_snr", False):
         day_logger.info("Step 3: rinex2snr - SKIPPING as requested.")
@@ -286,6 +288,7 @@ def process_single_day(
                     logs_dir=logs_daily_dir,
                     snr_code="66",
                     archive=rinex2snr_archive,
+                    orbit=rinex2snr_orbit,
                 )
 
                 if not rinex2snr_success:
