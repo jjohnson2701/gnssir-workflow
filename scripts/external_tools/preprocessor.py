@@ -1,7 +1,8 @@
-# ABOUTME: RINEX format preprocessor using gfzrnx tool
-# ABOUTME: Converts RINEX 3 observation files to RINEX 2.11 format
+# ABOUTME: RINEX format preprocessor for format conversion and decompression
+# ABOUTME: Handles gfzrnx RINEX 3→2 conversion and Unix .Z decompression
 
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -107,4 +108,61 @@ def convert_rinex3_to_rinex2(
         return None
     except Exception as e:
         logging.error(f"Exception during RINEX conversion: {e}")
+        return None
+
+
+def decompress_unix_z(compressed_path, output_dir=None):
+    """
+    Decompress a Unix .Z compressed file using uncompress.
+
+    Args:
+        compressed_path: Path to .Z file
+        output_dir: If set, move decompressed file here. Otherwise decompress in place.
+
+    Returns:
+        Path to decompressed file, or None on failure
+    """
+    compressed_path = Path(compressed_path)
+
+    if not compressed_path.exists():
+        logging.error(f"Compressed file not found: {compressed_path}")
+        return None
+
+    # Output filename is the same without .Z extension
+    decompressed_name = compressed_path.stem  # removes .Z
+    in_place_path = compressed_path.parent / decompressed_name
+
+    if output_dir:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        decompressed_path = output_dir / decompressed_name
+    else:
+        decompressed_path = in_place_path
+
+    try:
+        logging.info(f"Decompressing {compressed_path}")
+        # Use gzip -d which handles both .Z (LZW) and .gz formats
+        result = subprocess.run(
+            ["gzip", "-d", "-f", str(compressed_path)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+        # gzip -d decompresses in-place, removing the compressed file
+        if result.returncode == 0 and in_place_path.exists():
+            if output_dir and in_place_path != decompressed_path:
+                shutil.move(str(in_place_path), str(decompressed_path))
+            logging.info(f"Decompressed to {decompressed_path}")
+            return decompressed_path
+        else:
+            logging.error(f"uncompress failed (rc={result.returncode}): {result.stderr}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        logging.error(f"uncompress timed out for {compressed_path}")
+        return None
+    except Exception as e:
+        logging.error(f"Error decompressing {compressed_path}: {e}")
         return None

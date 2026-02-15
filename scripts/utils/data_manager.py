@@ -1,12 +1,16 @@
-# ABOUTME: Data manager for RINEX file acquisition from NPS GNSS archive
-# ABOUTME: Handles downloads and file validation
+# ABOUTME: Data manager for RINEX file acquisition from NPS and EarthScope archives
+# ABOUTME: Handles downloads and file validation for multiple data sources
 
 import logging
+import os
 import requests
 from pathlib import Path
 
 GNSS_BASE_URL = "https://gnss.nps.gov/doi-gnss"
 RINEX_PATH_PATTERN = "Rinex/{year}/{doy:03d}/{station}/{station}{doy:03d}0.{yy}o"
+
+EARTHSCOPE_BASE_URL = "https://gage-data.earthscope.org/archive/gnss/rinex/obs"
+EARTHSCOPE_PATH_PATTERN = "{year}/{doy:03d}/{station_lower}{doy:03d}0.{yy}o.Z"
 
 
 def download_rinex(station: str, year: int, doy: int, target_path: Path) -> bool:
@@ -31,13 +35,46 @@ def download_rinex(station: str, year: int, doy: int, target_path: Path) -> bool
     return download_from_url(url, target_path)
 
 
-def download_from_url(url: str, target_path: Path) -> bool:
+def download_rinex_earthscope(station: str, year: int, doy: int, target_path: Path) -> bool:
+    """
+    Download RINEX 2.11 observation file from EarthScope GAGE archive.
+
+    Requires EARTHSCOPE_TOKEN environment variable to be set.
+    Downloads .o.Z file (RINEX 2.11 + Unix compress).
+
+    Args:
+        station: 4-character station ID (e.g., "UMNQ")
+        year: 4-digit year
+        doy: Day of year (1-366)
+        target_path: Local path to save the .o.Z file
+
+    Returns:
+        bool: True if download successful, False otherwise
+    """
+    token = os.environ.get("EARTHSCOPE_TOKEN")
+    if not token:
+        logging.error("EARTHSCOPE_TOKEN environment variable not set")
+        return False
+
+    station_lower = station.lower()
+    yy = str(year)[-2:]
+    path = EARTHSCOPE_PATH_PATTERN.format(
+        year=year, doy=doy, station_lower=station_lower, yy=yy
+    )
+    url = f"{EARTHSCOPE_BASE_URL}/{path}"
+
+    headers = {"Authorization": f"Bearer {token}"}
+    return download_from_url(url, target_path, headers=headers)
+
+
+def download_from_url(url: str, target_path: Path, headers: dict = None) -> bool:
     """
     Download a file from a URL to a local path.
 
     Args:
         url: Full URL to download from
         target_path: Local path to save the file
+        headers: Optional HTTP headers (e.g., for bearer token auth)
 
     Returns:
         bool: True if download successful, False otherwise
@@ -50,7 +87,7 @@ def download_from_url(url: str, target_path: Path) -> bool:
 
         logging.info(f"Downloading from URL: {url}")
 
-        response = requests.get(url, stream=True, timeout=120)
+        response = requests.get(url, stream=True, timeout=120, headers=headers)
 
         if response.status_code == 200:
             with open(target_path, "wb") as f:
