@@ -40,8 +40,8 @@ from scripts.utils.logging_config import setup_main_logger  # noqa: E402
 from scripts.core_processing.parallel_orchestrator import process_station_parallel  # noqa: E402
 import scripts.results_handler as results_handler  # noqa: E402
 
-# Default paths
-DEFAULT_GNSSREFL_WORKSPACE = project_root / "gnssrefl_data_workspace"
+# Default paths - use ~/gnssir_ws symlink to keep paths short for Fortran string limits
+DEFAULT_GNSSREFL_WORKSPACE = Path.home() / "gnssir_ws"
 DEFAULT_REFL_CODE_BASE = DEFAULT_GNSSREFL_WORKSPACE / "refl_code"
 DEFAULT_ORBITS_BASE = DEFAULT_GNSSREFL_WORKSPACE / "orbits"
 DEFAULT_STATIONS_CONFIG_PATH = project_root / "config" / "stations_config.json"

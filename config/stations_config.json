@@ -44,6 +44,7 @@
   },
   "UMNQ": {
     "station_id_4char_lower": "umnq",
+    "data_source": "earthscope",
     "ellipsoidal_height_m": 36.9963,
     "latitude_deg": 70.67755,
     "longitude_deg": -52.115436,
