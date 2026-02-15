@@ -1,5 +1,5 @@
-# ABOUTME: Tests for EarthScope GAGE archive download and decompression
-# ABOUTME: Covers download_rinex_earthscope(), decompress_unix_z(), and data source routing
+# ABOUTME: Tests for EarthScope GAGE archive integration
+# ABOUTME: Covers rinex2snr archive routing, download helpers, and data source config
 
 import gzip
 import pytest
@@ -18,6 +18,7 @@ from scripts.utils.data_manager import (
     EARTHSCOPE_PATH_PATTERN,
 )
 from scripts.external_tools.preprocessor import decompress_unix_z
+from scripts.external_tools.gnssrefl_executor import execute_rinex2snr
 
 
 class TestEarthScopeConstants:
@@ -187,6 +188,47 @@ class TestDecompressUnixZ:
         decompressed = decompress_unix_z(compressed)
 
         assert decompressed.read_text() == original_content
+
+
+class TestRinex2snrArchiveFlag:
+    """Test that execute_rinex2snr passes the correct archive flag."""
+
+    @pytest.mark.unit
+    def test_default_uses_nolook(self, tmp_path):
+        """Without archive param, command uses -nolook T."""
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir()
+        with patch(
+            "scripts.external_tools.gnssrefl_executor.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
+            execute_rinex2snr(
+                "rinex2snr", "umnq", 2025, "100",
+                tmp_path, tmp_path, logs_dir,
+            )
+        cmd = mock_run.call_args[0][0]
+        assert "-nolook" in cmd
+        assert "T" in cmd
+        assert "-archive" not in cmd
+
+    @pytest.mark.unit
+    def test_archive_unavco_replaces_nolook(self, tmp_path):
+        """With archive='unavco', command uses -archive unavco instead of -nolook T."""
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir()
+        with patch(
+            "scripts.external_tools.gnssrefl_executor.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
+            execute_rinex2snr(
+                "rinex2snr", "umnq", 2025, "100",
+                tmp_path, tmp_path, logs_dir,
+                archive="unavco",
+            )
+        cmd = mock_run.call_args[0][0]
+        assert "-archive" in cmd
+        assert "unavco" in cmd
+        assert "-nolook" not in cmd
 
 
 class TestDataSourceRouting:
