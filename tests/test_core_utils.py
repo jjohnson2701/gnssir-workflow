@@ -165,6 +165,72 @@ class TestSegmentedAnalysis:
         assert all(result.index.month == 3)
 
 
+class TestSplitIntoSeasons:
+    """Tests for DOY range splitting into seasonal chunks."""
+
+    @pytest.mark.unit
+    def test_short_range_no_split(self):
+        """A range shorter than one chunk stays as a single chunk."""
+        from scripts.create_polar_animation import split_into_seasons
+
+        chunks = split_into_seasons(100, 180)
+        assert chunks == [(100, 180)]
+
+    @pytest.mark.unit
+    def test_exact_chunk_size(self):
+        """A range exactly equal to chunk size stays as a single chunk."""
+        from scripts.create_polar_animation import split_into_seasons
+
+        chunks = split_into_seasons(1, 91)
+        assert chunks == [(1, 91)]
+
+    @pytest.mark.unit
+    def test_full_year_splits_into_three_or_four(self):
+        """A full year (DOY 1-365) splits into 4 chunks."""
+        from scripts.create_polar_animation import split_into_seasons
+
+        chunks = split_into_seasons(1, 365)
+        assert len(chunks) == 4
+        # First chunk starts at 1
+        assert chunks[0][0] == 1
+        # Last chunk ends at 365
+        assert chunks[-1][1] == 365
+        # Chunks are contiguous
+        for i in range(len(chunks) - 1):
+            assert chunks[i][1] + 1 == chunks[i + 1][0]
+
+    @pytest.mark.unit
+    def test_small_remainder_merged(self):
+        """A small remainder (<30 days) is merged into the previous chunk."""
+        from scripts.create_polar_animation import split_into_seasons
+
+        # 85 to 365 = 281 days. 3 chunks of 91 = 273, remainder = 8 days
+        # The 8-day remainder should merge into the third chunk
+        chunks = split_into_seasons(85, 365)
+        assert len(chunks) == 3
+        assert chunks[-1][1] == 365
+        # Last chunk should be > 91 days (got the remainder)
+        last_chunk_days = chunks[-1][1] - chunks[-1][0] + 1
+        assert last_chunk_days > 91
+
+    @pytest.mark.unit
+    def test_custom_chunk_size(self):
+        """Custom chunk_days parameter is respected."""
+        from scripts.create_polar_animation import split_into_seasons
+
+        chunks = split_into_seasons(1, 365, chunk_days=120)
+        assert len(chunks) == 3
+        assert chunks[0] == (1, 120)
+
+    @pytest.mark.unit
+    def test_single_day_range(self):
+        """A single-day range returns one chunk."""
+        from scripts.create_polar_animation import split_into_seasons
+
+        chunks = split_into_seasons(100, 100)
+        assert chunks == [(100, 100)]
+
+
 class TestColorScheme:
     """Tests for visualization color scheme."""
 

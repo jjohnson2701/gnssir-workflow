@@ -11,7 +11,6 @@ from pathlib import Path
 import argparse
 from datetime import timedelta
 import imageio.v2 as imageio
-import tempfile
 import json
 import contextily as ctx
 from pyproj import Transformer
@@ -19,6 +18,23 @@ from matplotlib.colors import LightSource
 
 # GPS L1 wavelength for Fresnel zone calculations
 GPS_L1_WAVELENGTH = 0.1903  # meters
+
+# Approximate number of days per season (quarter year)
+SEASONAL_CHUNK_DAYS = 91
+
+
+def split_into_seasons(doy_start, doy_end, chunk_days=SEASONAL_CHUNK_DAYS):
+    """Split a DOY range into seasonal chunks, merging small remainders."""
+    chunks = []
+    start = doy_start
+    while start <= doy_end:
+        end = min(start + chunk_days - 1, doy_end)
+        # Merge small remainder (<30 days) into this chunk
+        if end < doy_end and (doy_end - end) < 30:
+            end = doy_end
+        chunks.append((start, end))
+        start = end + 1
+    return chunks
 
 
 def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir):
@@ -64,7 +80,7 @@ def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir)
     # Water: dark blue
     water_colors = np.zeros((rows, cols, 4))
     water_colors[..., 0] = 0.15  # R
-    water_colors[..., 1] = 0.3   # G
+    water_colors[..., 1] = 0.3  # G
     water_colors[..., 2] = 0.55  # B
     water_colors[..., 3] = 1.0
 
@@ -98,7 +114,14 @@ def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir)
 
 
 def render_cached_basemaps(
-    metadata, transformer, station_x, station_y, gauge_x, gauge_y, region_bounds, cache_dir: Path,
+    metadata,
+    transformer,
+    station_x,
+    station_y,
+    gauge_x,
+    gauge_y,
+    region_bounds,
+    cache_dir: Path,
     local_dem=None,
 ) -> dict:
     """
@@ -1141,100 +1164,103 @@ def create_animation(
     total_frames = len(bin_times)
     print(f"Creating {total_frames} frames...")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir_path = Path(tmpdir)
+    frames_dir = (
+        results_dir / station / "animation_frames" / f"{station}_{year}_DOY{doy_start}-{doy_end}"
+    )
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Saving frames to {frames_dir}")
 
-        # Load local DEM if available (fallback when tile servers lack coverage)
-        local_dem = None
-        dem_path = results_dir / station / f"{station.lower()}_arcticdem_2m.tif"
-        if dem_path.exists():
-            try:
-                import rasterio
-                with rasterio.open(dem_path) as src:
-                    local_dem = (src.read(1).astype(float), src.res[0])
-                    print(f"Loaded local DEM: {dem_path.name} ({local_dem[0].shape})")
-            except ImportError:
-                print("rasterio not available, skipping local DEM")
-            except Exception as e:
-                print(f"Failed to load local DEM: {e}")
+    # Load local DEM if available (fallback when tile servers lack coverage)
+    local_dem = None
+    dem_path = results_dir / station / f"{station.lower()}_arcticdem_2m.tif"
+    if dem_path.exists():
+        try:
+            import rasterio
 
-        # Pre-render and cache basemaps (huge speedup - only fetch tiles once)
-        print("Pre-rendering basemaps (this happens once)...")
-        cached_basemaps = render_cached_basemaps(
+            with rasterio.open(dem_path) as src:
+                local_dem = (src.read(1).astype(float), src.res[0])
+                print(f"Loaded local DEM: {dem_path.name} ({local_dem[0].shape})")
+        except ImportError:
+            print("rasterio not available, skipping local DEM")
+        except Exception as e:
+            print(f"Failed to load local DEM: {e}")
+
+    # Pre-render and cache basemaps (huge speedup - only fetch tiles once)
+    print("Pre-rendering basemaps (this happens once)...")
+    cached_basemaps = render_cached_basemaps(
+        metadata,
+        transformer,
+        station_x,
+        station_y,
+        gauge_x,
+        gauge_y,
+        region_bounds,
+        frames_dir,
+        local_dem=local_dem,
+    )
+
+    frame_paths = []
+    df_accumulated = pd.DataFrame()
+
+    for i, bin_end in enumerate(bin_times):
+        bin_start = bin_end - timedelta(hours=bin_hours)
+
+        # Get quality-passed points for current bin (these accumulate)
+        df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
+
+        # Get filtered-out (low quality) points for current bin (shown but don't accumulate)
+        df_current_all = df_all_unfiltered[
+            (df_all_unfiltered["datetime"] >= bin_start) & (df_all_unfiltered["datetime"] < bin_end)
+        ]
+        df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
+
+        df_accumulated = pd.concat([df_accumulated, df_current], ignore_index=True)
+
+        frame_path = frames_dir / f"frame_{i:04d}.png"
+        create_frame(
+            df,
+            df_current,
+            df_accumulated,
+            df_filtered_out,
+            ref_df,
             metadata,
+            bin_end,
+            i + 1,
+            total_frames,
+            frame_path,
+            start_time,
+            end_time,
+            vmin_wl,
+            vmax_wl,
             transformer,
             station_x,
             station_y,
             gauge_x,
             gauge_y,
             region_bounds,
-            tmpdir_path,
-            local_dem=local_dem,
+            cached_basemaps=cached_basemaps,
         )
+        frame_paths.append(frame_path)
 
-        frame_paths = []
-        df_accumulated = pd.DataFrame()
+        if (i + 1) % 10 == 0:
+            print(f"  Created frame {i+1}/{total_frames}")
 
-        for i, bin_end in enumerate(bin_times):
-            bin_start = bin_end - timedelta(hours=bin_hours)
+    print(f"Compiling GIF at {fps} fps...")
+    images = [imageio.imread(str(fp)) for fp in frame_paths]
+    # Add pause frames at the end
+    for _ in range(fps * 2):
+        images.append(images[-1])
 
-            # Get quality-passed points for current bin (these accumulate)
-            df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
-
-            # Get filtered-out (low quality) points for current bin (shown but don't accumulate)
-            df_current_all = df_all_unfiltered[
-                (df_all_unfiltered["datetime"] >= bin_start)
-                & (df_all_unfiltered["datetime"] < bin_end)
-            ]
-            df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
-
-            df_accumulated = pd.concat([df_accumulated, df_current], ignore_index=True)
-
-            frame_path = tmpdir_path / f"frame_{i:04d}.png"
-            create_frame(
-                df,
-                df_current,
-                df_accumulated,
-                df_filtered_out,
-                ref_df,
-                metadata,
-                bin_end,
-                i + 1,
-                total_frames,
-                frame_path,
-                start_time,
-                end_time,
-                vmin_wl,
-                vmax_wl,
-                transformer,
-                station_x,
-                station_y,
-                gauge_x,
-                gauge_y,
-                region_bounds,
-                cached_basemaps=cached_basemaps,
-            )
-            frame_paths.append(frame_path)
-
-            if (i + 1) % 10 == 0:
-                print(f"  Created frame {i+1}/{total_frames}")
-
-        print(f"Compiling GIF at {fps} fps...")
-        images = [imageio.imread(str(fp)) for fp in frame_paths]
-        # Add pause frames at the end
-        for _ in range(fps * 2):
-            images.append(images[-1])
-
-        # Use pillow plugin with optimization for smaller file size
-        imageio.mimsave(
-            str(output_path),
-            images,
-            fps=fps,
-            loop=0,
-            plugin="pillow",
-            optimize=True,
-            quantizer="nq",
-        )
+    # Use pillow plugin with optimization for smaller file size
+    imageio.mimsave(
+        str(output_path),
+        images,
+        fps=fps,
+        loop=0,
+        plugin="pillow",
+        optimize=True,
+        quantizer="nq",
+    )
 
     print(f"Saved animation to {output_path}")
     return total_frames
@@ -1254,26 +1280,56 @@ def main():
         "--bin_hours", type=int, default=12, help="Time bin size in hours (default: 12)"
     )
     parser.add_argument("--no_quality_filter", action="store_true")
+    parser.add_argument(
+        "--no_split",
+        action="store_true",
+        help="Disable automatic seasonal splitting for large DOY ranges",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
-    output_path = (
-        results_dir
-        / args.station
-        / f"{args.station}_{args.year}_polar_animation_DOY{args.doy_start}-{args.doy_end}.gif"
-    )
+    quality_filter = not args.no_quality_filter
 
-    create_animation(
-        args.station,
-        args.year,
-        args.doy_start,
-        args.doy_end,
-        results_dir,
-        output_path,
-        quality_filter=not args.no_quality_filter,
-        fps=args.fps,
-        bin_hours=args.bin_hours,
-    )
+    doy_range = args.doy_end - args.doy_start + 1
+    if doy_range > SEASONAL_CHUNK_DAYS and not args.no_split:
+        chunks = split_into_seasons(args.doy_start, args.doy_end)
+        print(
+            f"Splitting {doy_range}-day range into {len(chunks)} seasonal animations: "
+            + ", ".join(f"DOY {s}-{e}" for s, e in chunks)
+        )
+        for doy_s, doy_e in chunks:
+            output_path = (
+                results_dir
+                / args.station
+                / f"{args.station}_{args.year}_polar_animation_DOY{doy_s}-{doy_e}.gif"
+            )
+            create_animation(
+                args.station,
+                args.year,
+                doy_s,
+                doy_e,
+                results_dir,
+                output_path,
+                quality_filter=quality_filter,
+                fps=args.fps,
+                bin_hours=args.bin_hours,
+            )
+    else:
+        output_path = (
+            results_dir / args.station / f"{args.station}_{args.year}_polar_animation_"
+            f"DOY{args.doy_start}-{args.doy_end}.gif"
+        )
+        create_animation(
+            args.station,
+            args.year,
+            args.doy_start,
+            args.doy_end,
+            results_dir,
+            output_path,
+            quality_filter=quality_filter,
+            fps=args.fps,
+            bin_hours=args.bin_hours,
+        )
 
 
 if __name__ == "__main__":
