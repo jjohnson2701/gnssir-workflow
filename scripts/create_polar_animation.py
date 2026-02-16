@@ -15,13 +15,91 @@ import tempfile
 import json
 import contextily as ctx
 from pyproj import Transformer
+from matplotlib.colors import LightSource
 
 # GPS L1 wavelength for Fresnel zone calculations
 GPS_L1_WAVELENGTH = 0.1903  # meters
 
 
+def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir):
+    """
+    Generate Fresnel zone basemap from a DEM array when tile servers are unavailable.
+
+    Creates a hillshaded terrain image with water bodies colored blue. The station
+    is assumed to be at the center of the DEM array.
+
+    Args:
+        dem_array: 2D numpy array of elevation values (station at center)
+        dem_resolution: DEM pixel size in meters
+        buffer_m: Buffer radius in meters around station
+        cache_dir: Directory to save the cached basemap PNG
+
+    Returns:
+        dict with 'path' (Path to PNG), 'extent' (local-meter extent), 'local_coords' (True)
+        or None if DEM is all nodata.
+    """
+    valid = dem_array[dem_array > -9999]
+    if len(valid) == 0:
+        return None
+
+    # Detect water: pixels within 1m of the minimum elevation (flat water surface)
+    water_threshold = valid.min() + 1.0
+    water_mask = dem_array < water_threshold
+
+    # Generate hillshade
+    ls = LightSource(azdeg=315, altdeg=45)
+    hs = ls.hillshade(dem_array, vert_exag=3, dx=dem_resolution, dy=dem_resolution)
+
+    # Build RGBA composite: terrain hillshade with blue water
+    rows, cols = dem_array.shape
+    rgba = np.zeros((rows, cols, 4))
+
+    # Land: brown/tan hillshade
+    land_cmap = plt.cm.YlOrBr
+    land_norm = (dem_array - valid.min()) / max(valid.max() - valid.min(), 1.0)
+    land_norm = np.clip(land_norm, 0, 1)
+    land_colors = land_cmap(land_norm)
+    land_colors[..., :3] = land_colors[..., :3] * 0.6 + hs[..., np.newaxis] * 0.4
+
+    # Water: dark blue
+    water_colors = np.zeros((rows, cols, 4))
+    water_colors[..., 0] = 0.15  # R
+    water_colors[..., 1] = 0.3   # G
+    water_colors[..., 2] = 0.55  # B
+    water_colors[..., 3] = 1.0
+
+    # Composite
+    rgba[~water_mask] = land_colors[~water_mask]
+    rgba[water_mask] = water_colors[water_mask]
+
+    # Clip to buffer around center
+    center_r, center_c = rows // 2, cols // 2
+    buf_px = int(buffer_m / dem_resolution)
+    r0 = max(0, center_r - buf_px)
+    r1 = min(rows, center_r + buf_px)
+    c0 = max(0, center_c - buf_px)
+    c1 = min(cols, center_c + buf_px)
+    clip = rgba[r0:r1, c0:c1]
+
+    # Save as PNG
+    fig, ax = plt.subplots(figsize=(10, 10))
+    extent = [-buffer_m, buffer_m, -buffer_m, buffer_m]
+    ax.imshow(clip, extent=extent, origin="upper")
+    ax.axis("off")
+    basemap_path = Path(cache_dir) / "basemap_fresnel_local.png"
+    fig.savefig(basemap_path, dpi=100, bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+
+    return {
+        "path": basemap_path,
+        "extent": extent,
+        "local_coords": True,
+    }
+
+
 def render_cached_basemaps(
-    metadata, transformer, station_x, station_y, gauge_x, gauge_y, region_bounds, cache_dir: Path
+    metadata, transformer, station_x, station_y, gauge_x, gauge_y, region_bounds, cache_dir: Path,
+    local_dem=None,
 ) -> dict:
     """
     Pre-render the three map basemaps once and cache them as images.
@@ -115,35 +193,53 @@ def render_cached_basemaps(
     cache_paths["center_x"] = center_x
     cache_paths["center_y"] = center_y
 
-    # === Render Fresnel Zone Close-up (Esri WorldImagery high zoom) ===
+    # === Render Fresnel Zone Close-up ===
+    # Prefer local DEM (2m resolution, no tile coverage gaps) when available
     print("  Caching Fresnel zone basemap...")
-    fig_sat, ax_sat = plt.subplots(figsize=(12, 12))
+    if local_dem is not None:
+        dem_array, dem_resolution = local_dem
+        print("  Using local DEM basemap (2m resolution)...")
+        local_result = render_local_fresnel_basemap(
+            dem_array=dem_array,
+            dem_resolution=dem_resolution,
+            buffer_m=buffer_close,
+            cache_dir=cache_dir,
+        )
+        if local_result is not None:
+            cache_paths["fresnel"] = local_result["path"]
+            cache_paths["fresnel_extent"] = local_result["extent"]
+            cache_paths["fresnel_local_coords"] = True
+        else:
+            print("  WARNING: Local DEM basemap generation failed")
+            cache_paths["fresnel_local_coords"] = False
+    else:
+        # Fall back to tile server imagery
+        fig_sat, ax_sat = plt.subplots(figsize=(12, 12))
+        ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
+        ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
 
-    ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
-    ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
-
-    try:
-        ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom="auto")
-    except Exception:
         try:
-            ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
+            ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom="auto")
         except Exception:
-            ax_sat.set_facecolor("lightblue")
+            try:
+                ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
+            except Exception:
+                ax_sat.set_facecolor("lightblue")
 
-    ax_sat.set_aspect("equal")
-    ax_sat.axis("off")
+        ax_sat.set_aspect("equal")
+        ax_sat.axis("off")
+        sat_path = cache_dir / "basemap_fresnel.png"
+        fig_sat.savefig(sat_path, dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close(fig_sat)
 
-    sat_path = cache_dir / "basemap_fresnel.png"
-    fig_sat.savefig(sat_path, dpi=100, bbox_inches="tight", pad_inches=0)
-    plt.close(fig_sat)
-
-    cache_paths["fresnel"] = sat_path
-    cache_paths["fresnel_extent"] = [
-        station_x - buffer_close,
-        station_x + buffer_close,
-        station_y - buffer_close,
-        station_y + buffer_close,
-    ]
+        cache_paths["fresnel"] = sat_path
+        cache_paths["fresnel_extent"] = [
+            station_x - buffer_close,
+            station_x + buffer_close,
+            station_y - buffer_close,
+            station_y + buffer_close,
+        ]
+        cache_paths["fresnel_local_coords"] = False
 
     print("  Basemap caching complete.")
     return cache_paths
@@ -529,13 +625,17 @@ def create_frame(
     ax_ts.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%m/%d %H:%M"))
 
     # Create appropriate title based on reference source type
-    if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
-        ref_label = f"{ref_source}"
+    if ref_df is not None:
+        if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
+            ref_label = f"{ref_source}"
+        else:
+            ref_label = f"{ref_source} Gauge {ref_site_id}"
+        title_line1 = f"{station_name} Water Level: GNSS-IR vs {ref_label}"
     else:
-        ref_label = f"{ref_source} Gauge {ref_site_id}"
+        title_line1 = f"{station_name} Water Level: GNSS-IR"
 
     ax_ts.set_title(
-        f"{station_name} Water Level: GNSS-IR vs {ref_label}\n"
+        f"{title_line1}\n"
         f'Frame {frame_num}/{total_frames} — {frame_time.strftime("%Y-%m-%d %H:%M")} UTC',
         fontsize=12,
         fontweight="bold",
@@ -774,8 +874,14 @@ def create_frame(
     # Buffer needs to encompass outer reflection zone plus some margin
     buffer_close = int(outer_refl_dist + outer_fresnel_r + 20)
 
-    ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
-    ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
+    # Local coords: origin at (0,0) in real meters from antenna
+    # Web Mercator coords: origin at (station_x, station_y)
+    use_local = cached_basemaps.get("fresnel_local_coords", False) if cached_basemaps else False
+    origin_x = 0 if use_local else station_x
+    origin_y = 0 if use_local else station_y
+
+    ax_sat.set_xlim(origin_x - buffer_close, origin_x + buffer_close)
+    ax_sat.set_ylim(origin_y - buffer_close, origin_y + buffer_close)
 
     # Use cached basemap if available, otherwise fetch
     if cached_basemaps and "fresnel" in cached_basemaps:
@@ -800,7 +906,7 @@ def create_frame(
 
         # Inner Fresnel zone (high elevation, close to antenna)
         inner_annulus_inner = Wedge(
-            (station_x, station_y),
+            (origin_x, origin_y),
             inner_refl_dist - inner_fresnel_r,
             theta1,
             theta2,
@@ -811,7 +917,7 @@ def create_frame(
             linestyle="--",
         )
         inner_annulus_outer = Wedge(
-            (station_x, station_y),
+            (origin_x, origin_y),
             inner_refl_dist + inner_fresnel_r,
             theta1,
             theta2,
@@ -826,7 +932,7 @@ def create_frame(
 
         # Outer Fresnel zone (low elevation, far from antenna)
         outer_annulus_inner = Wedge(
-            (station_x, station_y),
+            (origin_x, origin_y),
             outer_refl_dist - outer_fresnel_r,
             theta1,
             theta2,
@@ -837,7 +943,7 @@ def create_frame(
             linestyle="-",
         )
         outer_annulus_outer = Wedge(
-            (station_x, station_y),
+            (origin_x, origin_y),
             outer_refl_dist + outer_fresnel_r,
             theta1,
             theta2,
@@ -852,8 +958,8 @@ def create_frame(
 
     # Station marker
     ax_sat.plot(
-        station_x,
-        station_y,
+        origin_x,
+        origin_y,
         "r^",
         markersize=12,
         markeredgecolor="white",
@@ -869,12 +975,8 @@ def create_frame(
     if len(df_accumulated) > 0:
         for _, row in df_accumulated.iterrows():
             az_rad = np.radians(row["Azim"])
-            # Calculate elevation angle (average of min and max observed)
             elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
             elev_rad = np.radians(elev_deg)
-
-            # Calculate reflection distance using actual RH for this retrieval
-            # As water level changes, the reflection point moves horizontally
             reflection_dist = row["RH"] / np.tan(elev_rad)
 
             # Convert to Cartesian (N=up, E=right)
@@ -883,8 +985,8 @@ def create_frame(
 
             color = cmap(norm(row["WSE_dm"] * 100))
             ax_sat.plot(
-                station_x + dx,
-                station_y + dy,
+                origin_x + dx,
+                origin_y + dy,
                 "o",
                 markersize=4,
                 color=color,
@@ -896,11 +998,8 @@ def create_frame(
     if len(df_current) > 0:
         for _, row in df_current.iterrows():
             az_rad = np.radians(row["Azim"])
-            # Calculate elevation angle (average of min and max observed)
             elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
             elev_rad = np.radians(elev_deg)
-
-            # Calculate reflection distance using actual RH for this retrieval
             reflection_dist = row["RH"] / np.tan(elev_rad)
 
             dx = reflection_dist * np.sin(az_rad)
@@ -908,8 +1007,8 @@ def create_frame(
 
             color = cmap(norm(row["WSE_dm"] * 100))
             ax_sat.plot(
-                station_x + dx,
-                station_y + dy,
+                origin_x + dx,
+                origin_y + dy,
                 "o",
                 markersize=12,
                 color=color,
@@ -926,10 +1025,10 @@ def create_frame(
     cbar.set_label("Water Level (cm)", fontsize=9)
 
     # Compass and labels (positioned for larger view extent)
-    compass_offset = buffer_close * 0.8  # Position near edge of view
+    compass_offset = buffer_close * 0.8
     ax_sat.annotate(
         "N",
-        (station_x, station_y + compass_offset),
+        (origin_x, origin_y + compass_offset),
         ha="center",
         fontsize=11,
         fontweight="bold",
@@ -937,7 +1036,7 @@ def create_frame(
     )
     ax_sat.annotate(
         "E",
-        (station_x + compass_offset, station_y),
+        (origin_x + compass_offset, origin_y),
         ha="center",
         fontsize=11,
         fontweight="bold",
@@ -1045,6 +1144,20 @@ def create_animation(
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
+        # Load local DEM if available (fallback when tile servers lack coverage)
+        local_dem = None
+        dem_path = results_dir / station / f"{station.lower()}_arcticdem_2m.tif"
+        if dem_path.exists():
+            try:
+                import rasterio
+                with rasterio.open(dem_path) as src:
+                    local_dem = (src.read(1).astype(float), src.res[0])
+                    print(f"Loaded local DEM: {dem_path.name} ({local_dem[0].shape})")
+            except ImportError:
+                print("rasterio not available, skipping local DEM")
+            except Exception as e:
+                print(f"Failed to load local DEM: {e}")
+
         # Pre-render and cache basemaps (huge speedup - only fetch tiles once)
         print("Pre-rendering basemaps (this happens once)...")
         cached_basemaps = render_cached_basemaps(
@@ -1056,6 +1169,7 @@ def create_animation(
             gauge_y,
             region_bounds,
             tmpdir_path,
+            local_dem=local_dem,
         )
 
         frame_paths = []
