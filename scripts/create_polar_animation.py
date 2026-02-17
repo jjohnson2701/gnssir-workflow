@@ -59,9 +59,9 @@ def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir)
     if len(valid) == 0:
         return None
 
-    # Detect water: pixels within 1m of the minimum elevation (flat water surface)
-    water_threshold = valid.min() + 1.0
-    water_mask = dem_array < water_threshold
+    # Detect water: pixels near or below sea level (coastal GNSS-IR stations)
+    # Stereo DEMs produce noisy low/negative elevations over featureless water
+    water_mask = (dem_array < 2.0) & (dem_array > -9999)
 
     # Generate hillshade
     ls = LightSource(azdeg=315, altdeg=45)
