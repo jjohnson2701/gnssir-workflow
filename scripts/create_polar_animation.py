@@ -12,6 +12,7 @@ import argparse
 from datetime import timedelta
 import imageio.v2 as imageio
 import json
+import multiprocessing as mp
 import contextily as ctx
 from pyproj import Transformer
 from matplotlib.colors import LightSource
@@ -1078,6 +1079,70 @@ def create_frame(
     plt.close()
 
 
+# Module-level state for multiprocessing workers
+_worker_shared = {}
+
+
+def _init_frame_worker(shared_data):
+    """Initialize each worker process with shared data."""
+    global _worker_shared
+    _worker_shared = shared_data
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+
+def _render_frame_task(frame_args):
+    """Render a single animation frame (called in worker process)."""
+    i, bin_start, bin_end, frame_path_str = frame_args
+    d = _worker_shared
+    frame_path = Path(frame_path_str)
+
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
+    df = d["df"]
+    df_all_unfiltered = d["df_all_unfiltered"]
+
+    df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
+
+    df_current_all = df_all_unfiltered[
+        (df_all_unfiltered["datetime"] >= bin_start) & (df_all_unfiltered["datetime"] < bin_end)
+    ]
+    df_filtered_out = df_current_all[df_current_all["PkNoise"] <= d["pknoise_median"]].copy()
+
+    # All quality-filtered data up to this bin
+    df_accumulated = df[df["datetime"] < bin_end].copy()
+
+    create_frame(
+        df,
+        df_current,
+        df_accumulated,
+        df_filtered_out,
+        d["ref_df"],
+        d["metadata"],
+        bin_end,
+        i + 1,
+        d["total_frames"],
+        frame_path,
+        d["start_time"],
+        d["end_time"],
+        d["vmin_wl"],
+        d["vmax_wl"],
+        transformer,
+        d["station_x"],
+        d["station_y"],
+        d["gauge_x"],
+        d["gauge_y"],
+        d["region_bounds"],
+        cached_basemaps=d["cached_basemaps"],
+    )
+
+    if (i + 1) % 10 == 0:
+        print(f"  Created frame {i + 1}/{d['total_frames']}")
+
+    return frame_path_str
+
+
 def create_animation(
     station: str,
     year: int,
@@ -1088,8 +1153,9 @@ def create_animation(
     quality_filter: bool = True,
     fps: int = 4,
     bin_hours: int = 12,
+    n_workers: int = 0,
 ):
-    """Create the full animation."""
+    """Create the full animation. Uses multiprocessing when n_workers > 1."""
 
     df, ref_df, metadata = load_data(station, year, results_dir)
 
@@ -1199,51 +1265,78 @@ def create_animation(
         local_dem=local_dem,
     )
 
-    frame_paths = []
-    df_accumulated = pd.DataFrame()
-
+    # Build frame arguments
+    frame_args = []
     for i, bin_end in enumerate(bin_times):
         bin_start = bin_end - timedelta(hours=bin_hours)
-
-        # Get quality-passed points for current bin (these accumulate)
-        df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
-
-        # Get filtered-out (low quality) points for current bin (shown but don't accumulate)
-        df_current_all = df_all_unfiltered[
-            (df_all_unfiltered["datetime"] >= bin_start) & (df_all_unfiltered["datetime"] < bin_end)
-        ]
-        df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
-
-        df_accumulated = pd.concat([df_accumulated, df_current], ignore_index=True)
-
         frame_path = frames_dir / f"frame_{i:04d}.png"
-        create_frame(
-            df,
-            df_current,
-            df_accumulated,
-            df_filtered_out,
-            ref_df,
-            metadata,
-            bin_end,
-            i + 1,
-            total_frames,
-            frame_path,
-            start_time,
-            end_time,
-            vmin_wl,
-            vmax_wl,
-            transformer,
-            station_x,
-            station_y,
-            gauge_x,
-            gauge_y,
-            region_bounds,
-            cached_basemaps=cached_basemaps,
-        )
-        frame_paths.append(frame_path)
+        frame_args.append((i, bin_start, bin_end, str(frame_path)))
 
-        if (i + 1) % 10 == 0:
-            print(f"  Created frame {i+1}/{total_frames}")
+    if n_workers == 0:
+        n_workers = min(mp.cpu_count(), 8)
+
+    if n_workers > 1:
+        shared_data = {
+            "df": df,
+            "df_all_unfiltered": df_all_unfiltered,
+            "pknoise_median": pknoise_median,
+            "ref_df": ref_df,
+            "metadata": metadata,
+            "total_frames": total_frames,
+            "start_time": start_time,
+            "end_time": end_time,
+            "vmin_wl": vmin_wl,
+            "vmax_wl": vmax_wl,
+            "station_x": station_x,
+            "station_y": station_y,
+            "gauge_x": gauge_x,
+            "gauge_y": gauge_y,
+            "region_bounds": region_bounds,
+            "cached_basemaps": cached_basemaps,
+        }
+        print(f"Rendering {total_frames} frames using {n_workers} workers...")
+        with mp.Pool(n_workers, initializer=_init_frame_worker, initargs=(shared_data,)) as pool:
+            results = pool.map(_render_frame_task, frame_args)
+        frame_paths = [Path(p) for p in results]
+    else:
+        # Serial fallback
+        frame_paths = []
+        df_accumulated = pd.DataFrame()
+        for i, bin_start, bin_end, frame_path_str in frame_args:
+            frame_path = Path(frame_path_str)
+            df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
+            df_current_all = df_all_unfiltered[
+                (df_all_unfiltered["datetime"] >= bin_start)
+                & (df_all_unfiltered["datetime"] < bin_end)
+            ]
+            df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
+            df_accumulated = pd.concat([df_accumulated, df_current], ignore_index=True)
+            create_frame(
+                df,
+                df_current,
+                df_accumulated,
+                df_filtered_out,
+                ref_df,
+                metadata,
+                bin_end,
+                i + 1,
+                total_frames,
+                frame_path,
+                start_time,
+                end_time,
+                vmin_wl,
+                vmax_wl,
+                transformer,
+                station_x,
+                station_y,
+                gauge_x,
+                gauge_y,
+                region_bounds,
+                cached_basemaps=cached_basemaps,
+            )
+            frame_paths.append(frame_path)
+            if (i + 1) % 10 == 0:
+                print(f"  Created frame {i+1}/{total_frames}")
 
     print(f"Compiling GIF at {fps} fps...")
     images = [imageio.imread(str(fp)) for fp in frame_paths]
@@ -1285,6 +1378,12 @@ def main():
         action="store_true",
         help="Disable automatic seasonal splitting for large DOY ranges",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Number of parallel workers for frame rendering (0=auto, 1=serial)",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
@@ -1313,6 +1412,7 @@ def main():
                 quality_filter=quality_filter,
                 fps=args.fps,
                 bin_hours=args.bin_hours,
+                n_workers=args.workers,
             )
     else:
         output_path = (
@@ -1329,6 +1429,7 @@ def main():
             quality_filter=quality_filter,
             fps=args.fps,
             bin_hours=args.bin_hours,
+            n_workers=args.workers,
         )
 
 
