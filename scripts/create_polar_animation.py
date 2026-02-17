@@ -1321,7 +1321,7 @@ def create_animation(
     dem_path = results_dir / station / f"{station.lower()}_arcticdem_2m.tif"
 
     if sat_path.exists():
-        local_satellite = (str(sat_path), metadata["latitude"], metadata["longitude"])
+        local_satellite = (str(sat_path), metadata["station_lat"], metadata["station_lon"])
         print(f"Loaded satellite imagery: {sat_path.name}")
     elif dem_path.exists():
         try:
