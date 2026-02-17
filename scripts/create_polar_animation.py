@@ -38,6 +38,66 @@ def split_into_seasons(doy_start, doy_end, chunk_days=SEASONAL_CHUNK_DAYS):
     return chunks
 
 
+def render_satellite_fresnel_basemap(sat_path, station_lat, station_lon, buffer_m, cache_dir):
+    """
+    Generate Fresnel zone basemap from a satellite image GeoTIFF.
+
+    Clips the image to a buffer around the station and renders it in
+    local-meter coordinates (origin at station).
+
+    Args:
+        sat_path: Path to satellite GeoTIFF (e.g., Sentinel-2 TCI)
+        station_lat: Station latitude in degrees
+        station_lon: Station longitude in degrees
+        buffer_m: Buffer radius in meters around station
+        cache_dir: Directory to save the cached basemap PNG
+
+    Returns:
+        dict with 'path', 'extent', 'local_coords' or None on failure.
+    """
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    try:
+        with rasterio.open(sat_path) as src:
+            sat_crs = src.crs
+            t = Transformer.from_crs("EPSG:4326", str(sat_crs), always_xy=True)
+            sx, sy = t.transform(station_lon, station_lat)
+
+            # Clip to buffer around station in the image's native CRS
+            window = from_bounds(
+                sx - buffer_m,
+                sy - buffer_m,
+                sx + buffer_m,
+                sy + buffer_m,
+                transform=src.transform,
+            )
+            rgb = src.read(window=window)
+
+        if rgb.size == 0:
+            return None
+
+        # Transpose to (rows, cols, bands) for imshow
+        img = np.moveaxis(rgb, 0, -1)
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        extent = [-buffer_m, buffer_m, -buffer_m, buffer_m]
+        ax.imshow(img, extent=extent, origin="upper")
+        ax.axis("off")
+        basemap_path = Path(cache_dir) / "basemap_fresnel_local.png"
+        fig.savefig(basemap_path, dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
+
+        return {
+            "path": basemap_path,
+            "extent": extent,
+            "local_coords": True,
+        }
+    except Exception as e:
+        print(f"  WARNING: Satellite basemap failed: {e}")
+        return None
+
+
 def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir):
     """
     Generate Fresnel zone basemap from a DEM array when tile servers are unavailable.
@@ -124,6 +184,7 @@ def render_cached_basemaps(
     region_bounds,
     cache_dir: Path,
     local_dem=None,
+    local_satellite=None,
 ) -> dict:
     """
     Pre-render the three map basemaps once and cache them as images.
@@ -218,9 +279,27 @@ def render_cached_basemaps(
     cache_paths["center_y"] = center_y
 
     # === Render Fresnel Zone Close-up ===
-    # Prefer local DEM (2m resolution, no tile coverage gaps) when available
+    # Priority: satellite imagery > DEM > tile server
     print("  Caching Fresnel zone basemap...")
-    if local_dem is not None:
+    fresnel_rendered = False
+
+    if local_satellite is not None:
+        sat_path, station_lat, station_lon = local_satellite
+        print(f"  Using satellite imagery basemap ({Path(sat_path).name})...")
+        sat_result = render_satellite_fresnel_basemap(
+            sat_path=sat_path,
+            station_lat=station_lat,
+            station_lon=station_lon,
+            buffer_m=buffer_close,
+            cache_dir=cache_dir,
+        )
+        if sat_result is not None:
+            cache_paths["fresnel"] = sat_result["path"]
+            cache_paths["fresnel_extent"] = sat_result["extent"]
+            cache_paths["fresnel_local_coords"] = True
+            fresnel_rendered = True
+
+    if not fresnel_rendered and local_dem is not None:
         dem_array, dem_resolution = local_dem
         print("  Using local DEM basemap (2m resolution)...")
         local_result = render_local_fresnel_basemap(
@@ -233,10 +312,9 @@ def render_cached_basemaps(
             cache_paths["fresnel"] = local_result["path"]
             cache_paths["fresnel_extent"] = local_result["extent"]
             cache_paths["fresnel_local_coords"] = True
-        else:
-            print("  WARNING: Local DEM basemap generation failed")
-            cache_paths["fresnel_local_coords"] = False
-    else:
+            fresnel_rendered = True
+
+    if not fresnel_rendered:
         # Fall back to tile server imagery
         fig_sat, ax_sat = plt.subplots(figsize=(12, 12))
         ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
@@ -1236,10 +1314,16 @@ def create_animation(
     frames_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving frames to {frames_dir}")
 
-    # Load local DEM if available (fallback when tile servers lack coverage)
+    # Load local satellite imagery or DEM for Fresnel basemap
+    local_satellite = None
     local_dem = None
+    sat_path = results_dir / station / f"{station.lower()}_sentinel2_10m.tif"
     dem_path = results_dir / station / f"{station.lower()}_arcticdem_2m.tif"
-    if dem_path.exists():
+
+    if sat_path.exists():
+        local_satellite = (str(sat_path), metadata["latitude"], metadata["longitude"])
+        print(f"Loaded satellite imagery: {sat_path.name}")
+    elif dem_path.exists():
         try:
             import rasterio
 
@@ -1263,6 +1347,7 @@ def create_animation(
         region_bounds,
         frames_dir,
         local_dem=local_dem,
+        local_satellite=local_satellite,
     )
 
     # Build frame arguments
