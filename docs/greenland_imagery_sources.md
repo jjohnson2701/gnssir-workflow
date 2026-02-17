@@ -51,7 +51,7 @@ gdalwarp -te <xmin> <ymin> <xmax> <ymax> -tr 10 10 -r bilinear -co COMPRESS=LZW 
   results_annual/{STATION}/{station}_sentinel2_10m.tif
 ```
 
-Bounds are in the tile's UTM CRS. Clip to 3km x 3km centered on station.
+Bounds are in the tile's UTM CRS. Clip to 5km x 5km centered on station.
 
 ### Current Downloads
 
