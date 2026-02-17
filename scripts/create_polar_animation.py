@@ -214,8 +214,7 @@ def render_cached_basemaps(
     outer_fresnel_r = metadata.get("outer_fresnel_radius", 5)
     buffer_close = int(outer_refl_dist + outer_fresnel_r + 20)
 
-    # Store geometry info
-    cache_paths["buffer_wide"] = buffer_wide
+    # Store geometry info (buffer_wide may be updated by satellite imagery below)
     cache_paths["buffer_close"] = buffer_close
     cache_paths["zoom_level"] = zoom_level
 
@@ -246,35 +245,66 @@ def render_cached_basemaps(
     cache_paths["coast"] = coast_path
     cache_paths["coast_extent"] = [ec_x_min, ec_x_max, ec_y_min, ec_y_max]
 
-    # === Render Regional Context (Esri WorldImagery) ===
+    # === Render Regional Context (Esri WorldImagery or local satellite) ===
     print("  Caching regional context basemap...")
-    fig_map, ax_map = plt.subplots(figsize=(10, 10))
 
     center_x = (station_x + gauge_x) / 2
     center_y = (station_y + gauge_y) / 2
+    regional_rendered = False
 
-    ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
-    ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
+    if local_satellite is not None:
+        sat_path_str, station_lat, station_lon = local_satellite
+        import rasterio as _rio
 
-    try:
-        ctx.add_basemap(ax_map, source=ctx.providers.Esri.WorldImagery, zoom=zoom_level)
-    except Exception:
-        ax_map.set_facecolor("lightblue")
+        with _rio.open(sat_path_str) as _src:
+            sat_half = (
+                min(_src.bounds.right - _src.bounds.left, _src.bounds.top - _src.bounds.bottom) / 2
+            )
+        sat_result = render_satellite_fresnel_basemap(
+            sat_path=sat_path_str,
+            station_lat=station_lat,
+            station_lon=station_lon,
+            buffer_m=int(sat_half),
+            cache_dir=cache_dir,
+        )
+        if sat_result is not None:
+            # Rename to regional basemap path
+            regional_path = Path(cache_dir) / "basemap_regional.png"
+            Path(sat_result["path"]).rename(regional_path)
+            cache_paths["regional"] = regional_path
+            buffer_wide = int(sat_half)
+            cache_paths["regional_extent"] = sat_result["extent"]
+            cache_paths["regional_local_coords"] = True
+            regional_rendered = True
 
-    ax_map.set_aspect("equal")
-    ax_map.axis("off")
+    if not regional_rendered:
+        fig_map, ax_map = plt.subplots(figsize=(10, 10))
 
-    map_path = cache_dir / "basemap_regional.png"
-    fig_map.savefig(map_path, dpi=100, bbox_inches="tight", pad_inches=0)
-    plt.close(fig_map)
+        ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
+        ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
 
-    cache_paths["regional"] = map_path
-    cache_paths["regional_extent"] = [
-        center_x - buffer_wide,
-        center_x + buffer_wide,
-        center_y - buffer_wide,
-        center_y + buffer_wide,
-    ]
+        try:
+            ctx.add_basemap(ax_map, source=ctx.providers.Esri.WorldImagery, zoom=zoom_level)
+        except Exception:
+            ax_map.set_facecolor("lightblue")
+
+        ax_map.set_aspect("equal")
+        ax_map.axis("off")
+
+        map_path = cache_dir / "basemap_regional.png"
+        fig_map.savefig(map_path, dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close(fig_map)
+
+        cache_paths["regional"] = map_path
+        cache_paths["regional_extent"] = [
+            center_x - buffer_wide,
+            center_x + buffer_wide,
+            center_y - buffer_wide,
+            center_y + buffer_wide,
+        ]
+        cache_paths["regional_local_coords"] = False
+
+    cache_paths["buffer_wide"] = buffer_wide
     cache_paths["center_x"] = center_x
     cache_paths["center_y"] = center_y
 
@@ -873,12 +903,23 @@ def create_frame(
     # === Bottom middle: Regional context (variable scale) ===
     ax_map = fig.add_subplot(gs[1, 1])
 
-    # Center the map between station and gauge for better view
-    center_x = (station_x + gauge_x) / 2
-    center_y = (station_y + gauge_y) / 2
+    # Determine coordinate origin for regional panel
+    use_regional_local = (
+        cached_basemaps.get("regional_local_coords", False) if cached_basemaps else False
+    )
+    if use_regional_local:
+        reg_sx, reg_sy = 0, 0
+        reg_gx = gauge_x - station_x
+        reg_gy = gauge_y - station_y
+        reg_cx, reg_cy = reg_sx, reg_sy
+    else:
+        reg_sx, reg_sy = station_x, station_y
+        reg_gx, reg_gy = gauge_x, gauge_y
+        reg_cx = (station_x + gauge_x) / 2
+        reg_cy = (station_y + gauge_y) / 2
 
-    ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
-    ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
+    ax_map.set_xlim(reg_cx - buffer_wide, reg_cx + buffer_wide)
+    ax_map.set_ylim(reg_cy - buffer_wide, reg_cy + buffer_wide)
 
     # Use cached basemap if available, otherwise fetch
     if cached_basemaps and "regional" in cached_basemaps:
@@ -896,7 +937,7 @@ def create_frame(
     for az_start, az_end in az_ranges:
         theta1, theta2 = 90 - az_end, 90 - az_start
         wedge = Wedge(
-            (station_x, station_y),
+            (reg_sx, reg_sy),
             fresnel_indicator_radius,
             theta1,
             theta2,
@@ -909,8 +950,8 @@ def create_frame(
 
     # Station and gauge markers
     ax_map.plot(
-        station_x,
-        station_y,
+        reg_sx,
+        reg_sy,
         "r^",
         markersize=12,
         markeredgecolor="white",
@@ -926,8 +967,8 @@ def create_frame(
     else:
         gauge_label = f"{ref_source} {ref_site_id}"
     ax_map.plot(
-        gauge_x,
-        gauge_y,
+        reg_gx,
+        reg_gy,
         "bs",
         markersize=10,
         markeredgecolor="white",
@@ -936,29 +977,29 @@ def create_frame(
         zorder=10,
         label=gauge_label,
     )
-    ax_map.plot([station_x, gauge_x], [station_y, gauge_y], "w-", linewidth=1.5, alpha=0.5)
+    ax_map.plot([reg_sx, reg_gx], [reg_sy, reg_gy], "w-", linewidth=1.5, alpha=0.5)
 
     # Draw box showing Fresnel zone extent
     buffer_close = 60
     box_x2 = [
-        station_x - buffer_close,
-        station_x + buffer_close,
-        station_x + buffer_close,
-        station_x - buffer_close,
-        station_x - buffer_close,
+        reg_sx - buffer_close,
+        reg_sx + buffer_close,
+        reg_sx + buffer_close,
+        reg_sx - buffer_close,
+        reg_sx - buffer_close,
     ]
     box_y2 = [
-        station_y - buffer_close,
-        station_y - buffer_close,
-        station_y + buffer_close,
-        station_y + buffer_close,
-        station_y - buffer_close,
+        reg_sy - buffer_close,
+        reg_sy - buffer_close,
+        reg_sy + buffer_close,
+        reg_sy + buffer_close,
+        reg_sy - buffer_close,
     ]
     ax_map.plot(box_x2, box_y2, "cyan", linewidth=2, zorder=9)
 
     ax_map.annotate(
         "N",
-        (center_x, center_y + buffer_wide * 0.85),
+        (reg_cx, reg_cy + buffer_wide * 0.85),
         ha="center",
         fontsize=12,
         fontweight="bold",
