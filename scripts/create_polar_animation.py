@@ -450,12 +450,14 @@ def load_data(station: str, year: int, results_dir: Path):
     # Determine reference type and coordinates
     ref_source = "Unknown"
     ref_site_id = "Unknown"
+    has_reference = False
     gauge_lat, gauge_lon = station_lat, station_lon  # Default to station location
 
     # Check ERDDAP first if configured and file exists
     if erddap_file and erddap_file.exists():
         ref_source = f"{erddap_station_name} ERDDAP" if erddap_station_name else "ERDDAP"
         ref_site_id = erddap_station_name or "ERDDAP Station"
+        has_reference = True
         if "latitude" in erddap_config and "longitude" in erddap_config:
             gauge_lat = erddap_config["latitude"]
             gauge_lon = erddap_config["longitude"]
@@ -465,6 +467,7 @@ def load_data(station: str, year: int, results_dir: Path):
         ref_source = "CO-OPS"
         nearest = noaa_coops["nearest_station"]
         ref_site_id = nearest.get("id", "Unknown")
+        has_reference = True
         if "latitude" in nearest and "longitude" in nearest:
             gauge_lat = nearest["latitude"]
             gauge_lon = nearest["longitude"]
@@ -472,6 +475,7 @@ def load_data(station: str, year: int, results_dir: Path):
     elif usgs_info and usgs_info.get("target_usgs_site"):
         ref_source = "USGS"
         ref_site_id = usgs_info.get("target_usgs_site", "Unknown")
+        has_reference = True
         if "usgs_latitude" in usgs_info and "usgs_longitude" in usgs_info:
             gauge_lat = usgs_info["usgs_latitude"]
             gauge_lon = usgs_info["usgs_longitude"]
@@ -479,6 +483,7 @@ def load_data(station: str, year: int, results_dir: Path):
     elif coops_info and coops_info.get("target_station"):
         ref_source = "CO-OPS"
         ref_site_id = coops_info.get("target_station", "Unknown")
+        has_reference = True
         if "station_latitude" in coops_info and "station_longitude" in coops_info:
             gauge_lat = coops_info["station_latitude"]
             gauge_lon = coops_info["station_longitude"]
@@ -533,6 +538,7 @@ def load_data(station: str, year: int, results_dir: Path):
     metadata = {
         "ref_source": ref_source,
         "ref_site_id": ref_site_id,
+        "has_reference": has_reference,
         "az_ranges": az_ranges,
         "station_lat": station_lat,
         "station_lon": station_lon,
@@ -660,6 +666,7 @@ def create_frame(
 
     ref_source = metadata.get("ref_source", "Unknown")
     ref_site_id = metadata.get("ref_site_id", "Unknown")
+    has_reference = metadata.get("has_reference", False)
     station_name = metadata.get("station_name", "Unknown")
     az_ranges = metadata.get("az_ranges", [[0, 80], [330, 360]])
 
@@ -837,33 +844,36 @@ def create_frame(
         zorder=10,
         label="GNSS Station",
     )
-    ax_coast.plot(
-        gauge_x,
-        gauge_y,
-        "bs",
-        markersize=12,
-        markeredgecolor="white",
-        markeredgewidth=2,
-        zorder=10,
-        label="Reference",
-    )
+    if has_reference:
+        ax_coast.plot(
+            gauge_x,
+            gauge_y,
+            "bs",
+            markersize=12,
+            markeredgecolor="white",
+            markeredgewidth=2,
+            zorder=10,
+            label="Reference",
+        )
 
-    # Draw connection line between station and gauge
-    ax_coast.plot(
-        [station_x, gauge_x],
-        [station_y, gauge_y],
-        "gray",
-        linestyle="--",
-        linewidth=1.5,
-        alpha=0.6,
-        zorder=9,
-    )
+        # Draw connection line between station and gauge
+        ax_coast.plot(
+            [station_x, gauge_x],
+            [station_y, gauge_y],
+            "gray",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.6,
+            zorder=9,
+        )
 
     # Calculate appropriate buffer size based on station and gauge separation
-    # Distance in Web Mercator meters
     from math import sqrt
 
-    gauge_distance_m = sqrt((gauge_x - station_x) ** 2 + (gauge_y - station_y) ** 2)
+    if has_reference:
+        gauge_distance_m = sqrt((gauge_x - station_x) ** 2 + (gauge_y - station_y) ** 2)
+    else:
+        gauge_distance_m = 0
 
     # Set buffer to show both stations with comfortable margins
     if gauge_distance_m < 1000:  # Very close (<1km) - like GLBX/Bartlett Cove
@@ -961,23 +971,24 @@ def create_frame(
         label="GNSS Station",
     )
 
-    # Use appropriate label based on reference source
-    if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
-        gauge_label = ref_source
-    else:
-        gauge_label = f"{ref_source} {ref_site_id}"
-    ax_map.plot(
-        reg_gx,
-        reg_gy,
-        "bs",
-        markersize=10,
-        markeredgecolor="white",
-        markeredgewidth=1.5,
-        alpha=0.8,
-        zorder=10,
-        label=gauge_label,
-    )
-    ax_map.plot([reg_sx, reg_gx], [reg_sy, reg_gy], "w-", linewidth=1.5, alpha=0.5)
+    if has_reference:
+        # Use appropriate label based on reference source
+        if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
+            gauge_label = ref_source
+        else:
+            gauge_label = f"{ref_source} {ref_site_id}"
+        ax_map.plot(
+            reg_gx,
+            reg_gy,
+            "bs",
+            markersize=10,
+            markeredgecolor="white",
+            markeredgewidth=1.5,
+            alpha=0.8,
+            zorder=10,
+            label=gauge_label,
+        )
+        ax_map.plot([reg_sx, reg_gx], [reg_sy, reg_gy], "w-", linewidth=1.5, alpha=0.5)
 
     # Draw box showing Fresnel zone extent
     buffer_close = 60
