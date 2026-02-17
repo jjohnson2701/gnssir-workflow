@@ -1,0 +1,65 @@
+{
+    "station": "nkar",
+    "lat": 64.177355,
+    "lon": -51.746608,
+    "ht": 40.8208,
+    "minH": 5.0,
+    "maxH": 25.0,
+    "e1": 5.0,
+    "e2": 25.0,
+    "NReg": [
+        5.0,
+        25.0
+    ],
+    "PkNoise": 2.7,
+    "polyV": 4,
+    "pele": [
+        5,
+        30
+    ],
+    "ediff": 200.0,
+    "desiredP": 0.005,
+    "azval2": [
+        210.0,
+        360.0
+    ],
+    "freqs": [
+        1,
+        20,
+        5,
+        101,
+        102,
+        201,
+        205,
+        206,
+        207,
+        208,
+        302,
+        306
+    ],
+    "reqAmp": [
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
+    ],
+    "refraction": true,
+    "overwriteResults": true,
+    "seekRinex": false,
+    "wantCompression": false,
+    "plt_screen": false,
+    "onesat": null,
+    "screenstats": false,
+    "pltname": "nkar_lsp.png",
+    "delTmax": 75.0,
+    "gzip": false,
+    "ellist": []
+}

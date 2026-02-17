@@ -63,6 +63,27 @@
       "usgs_gauge_stated_datum": "Unknown"
     }
   },
+  "NKAR": {
+    "station_id_4char_lower": "nkar",
+    "data_source": "earthscope",
+    "ellipsoidal_height_m": 40.8208,
+    "latitude_deg": 64.177355,
+    "longitude_deg": -51.746608,
+    "gnssir_json_params_path": "config/nkar.json",
+    "reference_gauge_id": null,
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
   "GLBX": {
     "station_id_4char_lower": "glbx",
     "ellipsoidal_height_m": -12.535,
