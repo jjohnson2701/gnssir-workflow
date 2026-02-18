@@ -89,6 +89,7 @@ def load_erddap_data(erddap_file: Path, erddap_config: dict) -> pd.DataFrame:
         possible_cols = [
             "water_surface_above_navd88",
             "sea_surface_height_above_geopotential_datum",
+            "sea_level",
             "water_level",
             "wl",
         ]
@@ -100,9 +101,13 @@ def load_erddap_data(erddap_file: Path, erddap_config: dict) -> pd.DataFrame:
     if wl_col is None or wl_col not in df.columns:
         raise ValueError(f"Could not find water level column. Available: {df.columns.tolist()}")
 
-    df["wl"] = df[wl_col]
+    # Apply unit conversion if configured (e.g., mm to m: units_scale=0.001)
+    units_scale = erddap_config.get("variables", {}).get("units_scale", 1.0)
+    df["wl"] = df[wl_col] * units_scale
 
     logger.info(f"  Using water level column: {wl_col}")
+    if units_scale != 1.0:
+        logger.info(f"  Applied units_scale={units_scale}")
     logger.info(f"  Date range: {df['datetime'].min()} to {df['datetime'].max()}")
     logger.info(f"  Water level range: {df['wl'].min():.2f} to {df['wl'].max():.2f} m")
 

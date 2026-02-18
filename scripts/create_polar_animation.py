@@ -582,9 +582,22 @@ def load_data(station: str, year: int, results_dir: Path):
         ref_df = pd.read_csv(erddap_file, skiprows=[1])  # Skip units row
         # ERDDAP files have 'time' and water level columns
         ref_df["datetime"] = pd.to_datetime(ref_df["time"], utc=True).dt.tz_convert(None)
-        # Use NAVD88 datum for consistency
-        if "water_surface_above_navd88" in ref_df.columns:
-            ref_df["wl"] = ref_df["water_surface_above_navd88"]
+        # Find water level column from config or common names
+        wl_col = erddap_config.get("variables", {}).get("water_level", None)
+        if wl_col is None or wl_col not in ref_df.columns:
+            for col in [
+                "water_surface_above_navd88",
+                "sea_surface_height_above_geopotential_datum",
+                "sea_level",
+                "water_level",
+                "wl",
+            ]:
+                if col in ref_df.columns:
+                    wl_col = col
+                    break
+        if wl_col and wl_col in ref_df.columns:
+            units_scale = erddap_config.get("variables", {}).get("units_scale", 1.0)
+            ref_df["wl"] = ref_df[wl_col] * units_scale
             ref_df["wl_dm"] = ref_df["wl"] - ref_df["wl"].mean()
     elif usgs_file.exists():
         ref_df = pd.read_csv(usgs_file)

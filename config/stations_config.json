@@ -82,6 +82,27 @@
       "target_usgs_site": null,
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
+    },
+    "external_data_sources": {
+      "erddap": {
+        "enabled": true,
+        "primary_reference": true,
+        "server": "UHSLC",
+        "base_url": "https://uhslc.soest.hawaii.edu/erddap",
+        "dataset_id": "global_hourly_fast",
+        "station_name": "Nuuk, Godthaab",
+        "uhslc_id": 820,
+        "distance_km": 1.5,
+        "latitude": 64.172,
+        "longitude": -51.72,
+        "variables": {
+          "water_level": "sea_level",
+          "time": "time",
+          "units_scale": 0.001
+        },
+        "datum": "Relative (pressure gauge)",
+        "notes": "UHSLC station 820, Nuuk harbour. Fast delivery hourly data, 2014-07 to present. Sea level in mm, converted to m via units_scale."
+      }
     }
   },
   "GLBX": {
