@@ -9,6 +9,7 @@ This script runs the complete processing workflow for a station based on
 configuration in stations_config.json:
 
 1. Core GNSS-IR Processing (RINEX download, conversion, SNR extraction, RH retrieval)
+1.5. Subdaily Spline Analysis (RHdot correction, IF bias removal, spline fitting)
 2. Reference Data Matching (auto-selects USGS, ERDDAP, or CO-OPS based on config)
 3. Visualization (resolution comparison, polar animation)
 
@@ -38,6 +39,7 @@ sys.path.insert(0, str(project_root))
 from scripts.core_processing.config_loader import load_tool_paths, load_station_config  # noqa: E402
 from scripts.utils.logging_config import setup_main_logger  # noqa: E402
 from scripts.core_processing.parallel_orchestrator import process_station_parallel  # noqa: E402
+from scripts.utils.subdaily_runner import run_subdaily_command, process_subdaily_output  # noqa: E402
 import scripts.results_handler as results_handler  # noqa: E402
 
 # Default paths - use ~/gnssir_ws symlink to keep paths short for Fortran string limits
@@ -255,6 +257,9 @@ Examples:
     parser.add_argument(
         "--skip_gnssir", action="store_true", help="Skip GNSS-IR processing (use existing results)"
     )
+    parser.add_argument(
+        "--skip_subdaily", action="store_true", help="Skip subdaily spline analysis"
+    )
     parser.add_argument("--skip_comparison", action="store_true", help="Skip reference comparison")
     parser.add_argument("--skip_viz", action="store_true", help="Skip visualization scripts")
     parser.add_argument("--config", type=str, default=None, help="Path to stations_config.json")
@@ -444,7 +449,58 @@ Examples:
         results["gnssir"] = True
 
     # =========================================================================
-    # Step 8: Reference Data Matching
+    # Phase 1.5: Subdaily Spline Analysis
+    # =========================================================================
+    if not args.skip_subdaily:
+        print("-" * 70)
+        print("PHASE 1.5: Subdaily Spline Analysis")
+        print("-" * 70)
+
+        try:
+            station_lower = args.station.lower()
+            refl_code_base = Path(
+                os.environ.get(
+                    "REFL_CODE",
+                    str(project_root / "gnssrefl_data_workspace" / "refl_code"),
+                )
+            )
+
+            # Run gnssrefl subdaily
+            subdaily_ok = run_subdaily_command(
+                station=station_lower,
+                year=args.year,
+                doy_start=args.doy_start,
+                doy_end=args.doy_end,
+            )
+
+            if subdaily_ok:
+                # Process output into annotated CSV
+                results_dir = project_root / "results_annual" / args.station
+                subdaily_csv = process_subdaily_output(
+                    station=station_lower,
+                    year=args.year,
+                    refl_code_base=refl_code_base,
+                    output_dir=results_dir,
+                )
+                if subdaily_csv:
+                    logger.info(f"  Subdaily output saved to {subdaily_csv}")
+                    results["subdaily"] = True
+                else:
+                    logger.warning("  Subdaily ran but no spline output found")
+                    results["subdaily"] = False
+            else:
+                logger.error("  Subdaily command failed")
+                results["subdaily"] = False
+        except Exception as e:
+            logger.error(f"  ✗ Subdaily analysis failed: {e}")
+            results["subdaily"] = False
+        print()
+    else:
+        logger.info("Skipping subdaily analysis (--skip_subdaily)")
+        results["subdaily"] = True
+
+    # =========================================================================
+    # Phase 2: Reference Data Matching
     # =========================================================================
     if not args.skip_comparison:
         print("-" * 70)
@@ -490,7 +546,7 @@ Examples:
         results["comparison"] = True
 
     # =========================================================================
-    # Step 9: Visualization
+    # Phase 3: Visualization
     # =========================================================================
     if not args.skip_viz:
         print("-" * 70)
