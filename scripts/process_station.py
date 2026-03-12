@@ -458,11 +458,11 @@ Examples:
 
         try:
             station_lower = args.station.lower()
-            refl_code_base = Path(
-                os.environ.get(
-                    "REFL_CODE",
-                    str(project_root / "gnssrefl_data_workspace" / "refl_code"),
-                )
+
+            # Check local workspace first, then REFL_CODE env var
+            local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
+            refl_code_base = local_refl if local_refl.exists() else Path(
+                os.environ.get("REFL_CODE", str(local_refl))
             )
 
             # Run gnssrefl subdaily
