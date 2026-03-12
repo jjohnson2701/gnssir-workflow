@@ -5,7 +5,7 @@
 Greenland GNSS-IR stations (NKAR, UMNQ, NIAQ, LRSK) lack coverage from
 the tile servers (Esri WorldImagery, CartoDB) used by mid-latitude stations
 for basemap rendering. Remote Arctic locations need alternative imagery
-or elevation data for Fresnel zone visualization.
+or elevation data for reflection point visualization.
 
 ## Sentinel-2 L2A (Recommended)
 

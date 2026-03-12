@@ -1,10 +1,9 @@
-# ABOUTME: Creates animated GIF showing water level on satellite imagery with regional context
-# ABOUTME: Overlays GNSS-IR data directly on Fresnel zone satellite view
+# ABOUTME: Creates animated GIF showing water level on satellite imagery with regional context.
+# ABOUTME: Overlays GNSS-IR reflection points on satellite basemap with time series.
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge
 import matplotlib.colors as mcolors
 from matplotlib.cm import ScalarMappable
 from pathlib import Path
@@ -16,9 +15,6 @@ import multiprocessing as mp
 import contextily as ctx
 from pyproj import Transformer
 from matplotlib.colors import LightSource
-
-# GPS L1 wavelength for Fresnel zone calculations
-GPS_L1_WAVELENGTH = 0.1903  # meters
 
 # Approximate number of days per season (quarter year)
 SEASONAL_CHUNK_DAYS = 91
@@ -40,7 +36,7 @@ def split_into_seasons(doy_start, doy_end, chunk_days=SEASONAL_CHUNK_DAYS):
 
 def render_satellite_fresnel_basemap(sat_path, station_lat, station_lon, buffer_m, cache_dir):
     """
-    Generate Fresnel zone basemap from a satellite image GeoTIFF.
+    Generate reflection point basemap from a satellite image GeoTIFF.
 
     Clips the image to a buffer around the station and renders it in
     local-meter coordinates (origin at station).
@@ -100,7 +96,7 @@ def render_satellite_fresnel_basemap(sat_path, station_lat, station_lon, buffer_
 
 def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir):
     """
-    Generate Fresnel zone basemap from a DEM array when tile servers are unavailable.
+    Generate reflection point basemap from a DEM array when tile servers are unavailable.
 
     Creates a hillshaded terrain image with water bodies colored blue. The station
     is assumed to be at the center of the DEM array.
@@ -211,8 +207,7 @@ def render_cached_basemaps(
         zoom_level = 9
 
     outer_refl_dist = metadata.get("outer_reflection_dist", 230)
-    outer_fresnel_r = metadata.get("outer_fresnel_radius", 5)
-    buffer_close = int(outer_refl_dist + outer_fresnel_r + 20)
+    buffer_close = int(outer_refl_dist + 20)
 
     # Store geometry info (buffer_wide may be updated by satellite imagery below)
     cache_paths["buffer_close"] = buffer_close
@@ -308,9 +303,9 @@ def render_cached_basemaps(
     cache_paths["center_x"] = center_x
     cache_paths["center_y"] = center_y
 
-    # === Render Fresnel Zone Close-up ===
+    # === Render reflection point close-up basemap ===
     # Priority: satellite imagery > DEM > tile server
-    print("  Caching Fresnel zone basemap...")
+    print("  Caching reflection point basemap...")
     fresnel_rendered = False
 
     if local_satellite is not None:
@@ -375,23 +370,6 @@ def render_cached_basemaps(
 
     print("  Basemap caching complete.")
     return cache_paths
-
-
-def calculate_fresnel_radius(reflector_height: float, elevation_deg: float) -> float:
-    """
-    Calculate first Fresnel zone radius on reflecting surface.
-
-    Args:
-        reflector_height: Distance from antenna to reflecting surface (meters)
-        elevation_deg: Satellite elevation angle (degrees)
-
-    Returns:
-        First Fresnel zone radius (meters)
-    """
-    elev_rad = np.radians(elevation_deg)
-    slant_distance = reflector_height / np.sin(elev_rad)
-    fresnel_radius = np.sqrt((GPS_L1_WAVELENGTH * slant_distance) / 2)
-    return fresnel_radius
 
 
 def load_data(station: str, year: int, results_dir: Path):
@@ -489,69 +467,32 @@ def load_data(station: str, year: int, results_dir: Path):
             gauge_lon = coops_info["station_longitude"]
             print(f"Using CO-OPS station {ref_site_id} at ({gauge_lat}, {gauge_lon})")
 
-    # Get azimuth mask and elevation angles from GNSS-IR config
-    gnssir_config_path = project_root / station_config.get("gnssir_json_params_path", "")
-    az_ranges = [[0, 80], [330, 360]]
-    e1, e2 = 5.0, 15.0  # Default elevation angles
-    if gnssir_config_path.exists():
-        with open(gnssir_config_path) as f:
-            gnssir_config = json.load(f)
-            azval = gnssir_config.get("azval2", [])
-            if len(azval) >= 2:
-                az_ranges = [
-                    [azval[i], azval[i + 1]] for i in range(0, len(azval), 2) if i + 1 < len(azval)
-                ]
-            e1 = gnssir_config.get("e1", e1)  # Min elevation (outer Fresnel zone)
-            e2 = gnssir_config.get("e2", e2)  # Max elevation (inner Fresnel zone)
-
-    # Calculate actual RH and elevation ranges from data
+    # Calculate reflection distance range from data (for view extent)
     mean_rh = df["RH"].mean()
-    min_rh = df["RH"].min()
     max_rh = df["RH"].max()
 
     df["elev_avg"] = (df["eminO"] + df["emaxO"]) / 2.0
     actual_elev_min = df["elev_avg"].min()
-    actual_elev_max = df["elev_avg"].max()
 
-    # Calculate Fresnel zone boundaries using min/max RH and elevation
-    # Inner zone: closest reflections (low RH, high elevation)
-    inner_fresnel_radius = calculate_fresnel_radius(min_rh, actual_elev_max)
-    inner_reflection_dist = min_rh / np.tan(np.radians(actual_elev_max))
-
-    # Outer zone: farthest reflections (high RH, low elevation)
-    outer_fresnel_radius = calculate_fresnel_radius(max_rh, actual_elev_min)
+    # Farthest reflection distance (high RH, low elevation) sets the view extent
     outer_reflection_dist = max_rh / np.tan(np.radians(actual_elev_min))
 
     print(f"Station {station}:")
-    print(f"  RH range: {min_rh:.2f}m to {max_rh:.2f}m (mean: {mean_rh:.2f}m)")
-    print(f"  Config elevation range: {e1}°-{e2}°")
-    print(f"  Actual elevation range: {actual_elev_min:.2f}°-{actual_elev_max:.2f}°")
-    print(
-        f"  Inner reflection: {inner_reflection_dist:.1f}m from antenna, "
-        f"Fresnel radius: {inner_fresnel_radius:.1f}m"
-    )
-    print(
-        f"  Outer reflection: {outer_reflection_dist:.1f}m from antenna, "
-        f"Fresnel radius: {outer_fresnel_radius:.1f}m"
-    )
+    print(f"  RH range: {df['RH'].min():.2f}m to {max_rh:.2f}m (mean: {mean_rh:.2f}m)")
+    print(f"  Actual elevation range: {actual_elev_min:.2f}°-{df['elev_avg'].max():.2f}°")
+    print(f"  Max reflection distance: {outer_reflection_dist:.1f}m from antenna")
 
     metadata = {
         "ref_source": ref_source,
         "ref_site_id": ref_site_id,
         "has_reference": has_reference,
-        "az_ranges": az_ranges,
         "station_lat": station_lat,
         "station_lon": station_lon,
         "gauge_lat": gauge_lat,
         "gauge_lon": gauge_lon,
         "station_name": station,
-        "inner_fresnel_radius": inner_fresnel_radius,
-        "outer_fresnel_radius": outer_fresnel_radius,
-        "inner_reflection_dist": inner_reflection_dist,
         "outer_reflection_dist": outer_reflection_dist,
         "mean_rh": mean_rh,
-        "elev_min": e1,
-        "elev_max": e2,
     }
 
     df["WSE"] = antenna_height - df["RH"]
@@ -661,7 +602,7 @@ def create_frame(
 ):
     """Create a single frame with regional context + satellite overlay."""
 
-    # Three-panel bottom layout: Regional Overview | Regional | Fresnel Zone
+    # Three-panel bottom layout: Regional Overview | Regional | Reflection Points
     # Reduced from 22x10 to 18x8 for smaller GIF size
     fig = plt.figure(figsize=(18, 8))
     gs = fig.add_gridspec(
@@ -681,14 +622,8 @@ def create_frame(
     ref_site_id = metadata.get("ref_site_id", "Unknown")
     has_reference = metadata.get("has_reference", False)
     station_name = metadata.get("station_name", "Unknown")
-    az_ranges = metadata.get("az_ranges", [[0, 80], [330, 360]])
 
-    # Get Fresnel zone geometry
-    inner_fresnel_r = metadata.get("inner_fresnel_radius", 3)
-    outer_fresnel_r = metadata.get("outer_fresnel_radius", 5)
-    inner_refl_dist = metadata.get("inner_reflection_dist", 90)
     outer_refl_dist = metadata.get("outer_reflection_dist", 230)
-    # mean_rh for distance calculations is computed internally
 
     # === Top panel: Time series (spans both columns) ===
     ax_ts = fig.add_subplot(gs[0, :])
@@ -955,22 +890,6 @@ def create_frame(
         except Exception:
             ax_map.set_facecolor("lightblue")
 
-    # Scaled Fresnel zone indicator (scale with buffer size)
-    fresnel_indicator_radius = min(200, buffer_wide * 0.08)  # Scale with map size
-    for az_start, az_end in az_ranges:
-        theta1, theta2 = 90 - az_end, 90 - az_start
-        wedge = Wedge(
-            (reg_sx, reg_sy),
-            fresnel_indicator_radius,
-            theta1,
-            theta2,
-            facecolor="cyan",
-            edgecolor="blue",
-            alpha=0.35,
-            linewidth=1.5,
-        )
-        ax_map.add_patch(wedge)
-
     # Station and gauge markers
     ax_map.plot(
         reg_sx,
@@ -1003,7 +922,7 @@ def create_frame(
         )
         ax_map.plot([reg_sx, reg_gx], [reg_sy, reg_gy], "w-", linewidth=1.5, alpha=0.5)
 
-    # Draw box showing Fresnel zone extent
+    # Draw box showing reflection point view extent
     buffer_close = 60
     box_x2 = [
         reg_sx - buffer_close,
@@ -1036,10 +955,10 @@ def create_frame(
     map_scale_km = (buffer_wide * 2) / 1000  # Total width in km
     ax_map.set_title(f"Regional ({map_scale_km:.0f} km)", fontsize=11, fontweight="bold")
 
-    # === Bottom right: Fresnel zone close-up with data ===
+    # === Bottom right: Reflection point close-up with data ===
     ax_sat = fig.add_subplot(gs[1, 2])
     # Buffer needs to encompass outer reflection zone plus some margin
-    buffer_close = int(outer_refl_dist + outer_fresnel_r + 20)
+    buffer_close = int(outer_refl_dist + 20)
 
     # Local coords: origin at (0,0) in real meters from antenna
     # Web Mercator coords: origin at (station_x, station_y)
@@ -1059,69 +978,13 @@ def create_frame(
         try:
             ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom="auto")
         except Exception as e:
-            print(f"Warning: Could not load Fresnel zone basemap at zoom 18: {e}")
+            print(f"Warning: Could not load basemap at zoom 18: {e}")
             try:
                 ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
                 print("  Loaded with zoom=17 instead")
             except Exception as e2:
                 print(f"  Fallback to zoom 17 also failed: {e2}")
                 ax_sat.set_facecolor("lightblue")
-
-    # Draw Fresnel zone boundaries as annular rings at reflection distances
-    for az_start, az_end in az_ranges:
-        theta1, theta2 = 90 - az_end, 90 - az_start
-
-        # Inner Fresnel zone (high elevation, close to antenna)
-        inner_annulus_inner = Wedge(
-            (origin_x, origin_y),
-            inner_refl_dist - inner_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="yellow",
-            alpha=0.6,
-            linewidth=1.5,
-            linestyle="--",
-        )
-        inner_annulus_outer = Wedge(
-            (origin_x, origin_y),
-            inner_refl_dist + inner_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="yellow",
-            alpha=0.6,
-            linewidth=1.5,
-            linestyle="--",
-        )
-        ax_sat.add_patch(inner_annulus_inner)
-        ax_sat.add_patch(inner_annulus_outer)
-
-        # Outer Fresnel zone (low elevation, far from antenna)
-        outer_annulus_inner = Wedge(
-            (origin_x, origin_y),
-            outer_refl_dist - outer_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="cyan",
-            alpha=0.6,
-            linewidth=2,
-            linestyle="-",
-        )
-        outer_annulus_outer = Wedge(
-            (origin_x, origin_y),
-            outer_refl_dist + outer_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="cyan",
-            alpha=0.6,
-            linewidth=2,
-            linestyle="-",
-        )
-        ax_sat.add_patch(outer_annulus_inner)
-        ax_sat.add_patch(outer_annulus_outer)
 
     # Station marker
     ax_sat.plot(
@@ -1213,7 +1076,7 @@ def create_frame(
     ax_sat.set_aspect("equal")
     ax_sat.axis("off")
     ax_sat.set_title(
-        f"Reflection Distances ({inner_refl_dist:.0f}-{outer_refl_dist:.0f}m) | "
+        f"Reflection Points (max {outer_refl_dist:.0f}m) | "
         f"Current: {len(df_current)} pts",
         fontsize=10,
     )
@@ -1379,7 +1242,7 @@ def create_animation(
     frames_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving frames to {frames_dir}")
 
-    # Load local satellite imagery or DEM for Fresnel basemap
+    # Load local satellite imagery or DEM for reflection point basemap
     local_satellite = None
     local_dem = None
     sat_path = results_dir / station / f"{station.lower()}_sentinel2_10m.tif"

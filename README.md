@@ -22,7 +22,7 @@ Was created in hopes of creating more user friendly visualizations, and allowing
 
 ### Polar Visualization Animation
 ![Polar Animation](docs/images/GLBX_2024_polar_animation_DOY1-31.gif)
-*Weekly polar animation showing GNSS-IR retrievals with Fresnel zone reflections overlaid on water level time series.*
+*Polar animation showing GNSS-IR reflection points on satellite imagery alongside water level time series.*
 
 ## Reference Data Sources
 

@@ -1,5 +1,5 @@
-# ABOUTME: Unit tests for core utility functions
-# ABOUTME: Tests Fresnel zone calculations, distance functions, and data transformations
+# ABOUTME: Unit tests for core utility functions.
+# ABOUTME: Tests distance functions and data transformations.
 
 import pytest
 import numpy as np
@@ -10,53 +10,6 @@ from pathlib import Path
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-
-class TestFresnelZoneCalculations:
-    """Tests for Fresnel zone calculations in create_polar_animation.py"""
-
-    @pytest.mark.unit
-    def test_calculate_fresnel_radius_basic(self):
-        """Test Fresnel radius calculation with known values."""
-        from scripts.create_polar_animation import calculate_fresnel_radius
-
-        # At 10m reflector height and 10 degrees elevation
-        # Slant distance = 10 / sin(10°) = 57.6m
-        # Fresnel radius = sqrt(wavelength * slant_distance / 2)
-        reflector_height = 10.0
-        elevation = 10.0
-
-        radius = calculate_fresnel_radius(reflector_height, elevation)
-
-        # Expected: sqrt(0.1903 * 57.6 / 2) ≈ 2.34m
-        assert radius > 2.0
-        assert radius < 3.0
-
-    @pytest.mark.unit
-    def test_calculate_fresnel_radius_higher_elevation(self):
-        """Test that higher elevation produces smaller Fresnel radius."""
-        from scripts.create_polar_animation import calculate_fresnel_radius
-
-        reflector_height = 10.0
-
-        radius_low_elev = calculate_fresnel_radius(reflector_height, 5.0)
-        radius_high_elev = calculate_fresnel_radius(reflector_height, 15.0)
-
-        # Higher elevation = closer slant distance = smaller Fresnel zone
-        assert radius_high_elev < radius_low_elev
-
-    @pytest.mark.unit
-    def test_calculate_fresnel_radius_higher_rh(self):
-        """Test that higher reflector height produces larger Fresnel radius."""
-        from scripts.create_polar_animation import calculate_fresnel_radius
-
-        elevation = 10.0
-
-        radius_low_rh = calculate_fresnel_radius(5.0, elevation)
-        radius_high_rh = calculate_fresnel_radius(15.0, elevation)
-
-        # Higher RH = larger slant distance = larger Fresnel zone
-        assert radius_high_rh > radius_low_rh
 
 
 class TestHaversineDistance:
