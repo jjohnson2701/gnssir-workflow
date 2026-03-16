@@ -38,11 +38,7 @@ from .dashboard_plots import (
     create_calendar_heatmap,
     create_monthly_box_plots,
     create_multi_parameter_timeline,
-    create_tidal_stage_performance,
     create_multi_scale_performance,
-    create_water_level_change_response,
-    calculate_water_level_change_rate,
-    classify_tidal_stage,
 )
 
 __all__ = [
@@ -78,9 +74,5 @@ __all__ = [
     "create_calendar_heatmap",
     "create_monthly_box_plots",
     "create_multi_parameter_timeline",
-    "create_tidal_stage_performance",
     "create_multi_scale_performance",
-    "create_water_level_change_response",
-    "calculate_water_level_change_rate",
-    "classify_tidal_stage",
 ]
