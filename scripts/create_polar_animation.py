@@ -1275,6 +1275,8 @@ def create_animation(
     bin_hours: int = 6,
     window_hours: int = 6,
     n_workers: int = 0,
+    mode: str = "presentation",
+    output_format: str = "gif",
 ):
     """Create the full animation. Uses multiprocessing when n_workers > 1."""
 
@@ -1545,11 +1547,25 @@ def main():
         default=0,
         help="Number of parallel workers for frame rendering (0=auto, 1=serial)",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["presentation", "analysis"],
+        default="presentation",
+        help="Animation mode: presentation (NPS, fixed bins, 14-day rolling TS) "
+        "or analysis (EarthScope, tidal-synced, 3-day rolling TS) (default: presentation)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["gif", "mp4"],
+        default="gif",
+        help="Output format (default: gif)",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
     quality_filter = not args.no_quality_filter
 
+    ext = args.format
     doy_range = args.doy_end - args.doy_start + 1
     if doy_range > SEASONAL_CHUNK_DAYS and not args.no_split:
         chunks = split_into_seasons(args.doy_start, args.doy_end)
@@ -1561,7 +1577,7 @@ def main():
             output_path = (
                 results_dir
                 / args.station
-                / f"{args.station}_{args.year}_polar_animation_DOY{doy_s}-{doy_e}.gif"
+                / f"{args.station}_{args.year}_polar_animation_DOY{doy_s}-{doy_e}.{ext}"
             )
             create_animation(
                 args.station,
@@ -1575,11 +1591,13 @@ def main():
                 bin_hours=args.bin_hours,
                 window_hours=args.window_hours,
                 n_workers=args.workers,
+                mode=args.mode,
+                output_format=args.format,
             )
     else:
         output_path = (
             results_dir / args.station / f"{args.station}_{args.year}_polar_animation_"
-            f"DOY{args.doy_start}-{args.doy_end}.gif"
+            f"DOY{args.doy_start}-{args.doy_end}.{ext}"
         )
         create_animation(
             args.station,
@@ -1593,6 +1611,8 @@ def main():
             bin_hours=args.bin_hours,
             window_hours=args.window_hours,
             n_workers=args.workers,
+            mode=args.mode,
+            output_format=args.format,
         )
 
 
