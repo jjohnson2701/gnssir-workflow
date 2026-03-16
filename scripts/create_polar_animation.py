@@ -34,6 +34,87 @@ def split_into_seasons(doy_start, doy_end, chunk_days=SEASONAL_CHUNK_DAYS):
     return chunks
 
 
+def detect_tidal_extremes(ref_df, wl_col="wl_dm", min_separation_hours=4):
+    """
+    Detect high and low tide times from regularly-sampled reference data.
+
+    Uses scipy peak detection on the water level signal to find alternating
+    highs (peaks) and lows (troughs).
+
+    Args:
+        ref_df: DataFrame with 'datetime' and water level column
+        wl_col: Name of the water level column
+        min_separation_hours: Minimum hours between consecutive extremes
+
+    Returns:
+        numpy array of datetime64 values at each tidal extreme
+    """
+    from scipy.signal import find_peaks
+
+    df = ref_df.dropna(subset=[wl_col]).sort_values("datetime").reset_index(drop=True)
+    if len(df) < 3:
+        return np.array([], dtype="datetime64[ns]")
+
+    wl = df[wl_col].values
+    times = df["datetime"].values
+
+    # Compute minimum distance in samples from the median time step
+    dt_median = np.median(np.diff(times) / np.timedelta64(1, "h"))
+    min_distance = max(1, int(min_separation_hours / dt_median))
+
+    highs, _ = find_peaks(wl, distance=min_distance)
+    lows, _ = find_peaks(-wl, distance=min_distance)
+
+    extreme_indices = np.sort(np.concatenate([highs, lows]))
+    return times[extreme_indices]
+
+
+def detect_tidal_extremes_from_gnssir(df, wl_col="WSE_dm", min_separation_hours=4):
+    """
+    Detect tidal extremes from irregularly-sampled GNSS-IR water surface data.
+
+    Resamples the noisy signal to a regular 30-minute grid using a rolling
+    median, then applies peak detection.
+
+    Args:
+        df: DataFrame with 'datetime' and water level column
+        wl_col: Name of the water level column
+        min_separation_hours: Minimum hours between consecutive extremes
+
+    Returns:
+        numpy array of datetime64 values at each tidal extreme
+    """
+    from scipy.signal import find_peaks
+
+    df_sorted = df.dropna(subset=[wl_col]).sort_values("datetime").copy()
+    if len(df_sorted) < 10:
+        return np.array([], dtype="datetime64[ns]")
+
+    # Resample to regular 30-min grid
+    df_sorted = df_sorted.set_index("datetime")
+    resampled = df_sorted[wl_col].resample("30min").median().dropna()
+
+    if len(resampled) < 6:
+        return np.array([], dtype="datetime64[ns]")
+
+    # Smooth with 3h rolling window to suppress noise
+    smoothed = resampled.rolling(6, center=True, min_periods=3).mean().dropna()
+
+    if len(smoothed) < 6:
+        return np.array([], dtype="datetime64[ns]")
+
+    wl = smoothed.values
+    times = smoothed.index.values
+
+    min_distance = max(1, int(min_separation_hours / 0.5))  # 0.5h sample interval
+
+    highs, _ = find_peaks(wl, distance=min_distance)
+    lows, _ = find_peaks(-wl, distance=min_distance)
+
+    extreme_indices = np.sort(np.concatenate([highs, lows]))
+    return times[extreme_indices]
+
+
 def render_satellite_fresnel_basemap(sat_path, station_lat, station_lon, buffer_m, cache_dir):
     """
     Generate reflection point basemap from a satellite image GeoTIFF.
@@ -385,9 +466,35 @@ def load_data(station: str, year: int, results_dir: Path):
     df = pd.read_csv(raw_file)
     df["datetime"] = pd.to_datetime(df["date"]) + pd.to_timedelta(df["UTCtime"], unit="h")
 
-    # Get station config (relative to script location)
+    # Apply RHdot + IF bias corrections if available
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
+    station_lower = station.lower()
+    local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
+    if_corrected_path = (
+        local_refl / "Files" / station_lower
+        / f"{station_lower}_{year}_subdaily_edit.txt.withrhdotIF"
+    )
+    if if_corrected_path.exists():
+        from scripts.utils.subdaily_loader import load_corrected_retrievals
+
+        corrected = load_corrected_retrievals(if_corrected_path)
+        # Match on MJD+sat+freq (unique per retrieval) and replace RH
+        if len(corrected) > 0 and "MJD" in df.columns:
+            merge_keys = ["MJD", "sat", "freq"]
+            available_keys = [k for k in merge_keys if k in df.columns and k in corrected.columns]
+            merged = df.merge(
+                corrected[available_keys + ["rh_if_corrected"]],
+                on=available_keys, how="left",
+            )
+            n_matched = merged["rh_if_corrected"].notna().sum()
+            if n_matched > 0:
+                df.loc[merged["rh_if_corrected"].notna(), "RH"] = (
+                    merged.loc[merged["rh_if_corrected"].notna(), "rh_if_corrected"].values
+                )
+                print(f"Applied RHdot+IF corrections to {n_matched}/{len(df)} retrievals")
+
+    # Get station config
     config_file = project_root / "config" / "stations_config.json"
     with open(config_file) as f:
         config = json.load(f)
@@ -698,9 +805,16 @@ def create_frame(
             label="Current (filtered)",
         )
 
-    window_start = frame_time - timedelta(hours=3)
-    ax_ts.axvspan(window_start, frame_time, alpha=0.15, color="gold", zorder=0)
-    ax_ts.axvline(frame_time, color="darkorange", linestyle="-", alpha=0.7, linewidth=2)
+    # Highlight the current window on the time series
+    if len(df_current) > 0:
+        window_start = df_current["datetime"].min()
+        window_end = df_current["datetime"].max()
+    else:
+        window_start = frame_time - timedelta(hours=3)
+        window_end = frame_time
+    ax_ts.axvspan(window_start, window_end, alpha=0.15, color="gold", zorder=0)
+    window_center = window_start + (window_end - window_start) / 2
+    ax_ts.axvline(window_center, color="darkorange", linestyle="-", alpha=0.7, linewidth=2)
 
     ax_ts.set_xlim(start_time - timedelta(hours=2), end_time + timedelta(hours=2))
     # Calculate y-limits based on actual data range (with 10% padding, asymmetric)
@@ -1116,8 +1230,8 @@ def _render_frame_task(frame_args):
     ]
     df_filtered_out = df_current_all[df_current_all["PkNoise"] <= d["pknoise_median"]].copy()
 
-    # All quality-filtered data up to this bin
-    df_accumulated = df[df["datetime"] < bin_end].copy()
+    # Windowed data (same as current bin for tide-synced frames)
+    df_accumulated = df_current.copy()
 
     create_frame(
         df,
@@ -1158,7 +1272,8 @@ def create_animation(
     output_path: Path,
     quality_filter: bool = True,
     fps: int = 4,
-    bin_hours: int = 12,
+    bin_hours: int = 6,
+    window_hours: int = 6,
     n_workers: int = 0,
 ):
     """Create the full animation. Uses multiprocessing when n_workers > 1."""
@@ -1227,13 +1342,40 @@ def create_animation(
             & (ref_df["datetime"] <= end_time + timedelta(days=1))
         ].copy()
 
-    bin_times = pd.date_range(
-        start=start_time.floor(f"{bin_hours}h") + timedelta(hours=bin_hours),
-        end=end_time.ceil(f"{bin_hours}h"),
-        freq=f"{bin_hours}h",
-    )
+    # Sync frames to tidal extremes (high/low tide) when possible
+    frame_center_times = None
+    if ref_df is not None and "wl_dm" in ref_df.columns and len(ref_df) > 10:
+        extremes = detect_tidal_extremes(ref_df)
+        # Filter to data range
+        extremes = extremes[
+            (extremes >= np.datetime64(start_time))
+            & (extremes <= np.datetime64(end_time))
+        ]
+        if len(extremes) >= 2:
+            frame_center_times = pd.DatetimeIndex(extremes)
+            print(f"Synced {len(frame_center_times)} frames to tidal extremes from reference data")
 
-    total_frames = len(bin_times)
+    if frame_center_times is None:
+        # Fallback: detect from GNSS-IR data
+        extremes = detect_tidal_extremes_from_gnssir(df)
+        extremes = extremes[
+            (extremes >= np.datetime64(start_time))
+            & (extremes <= np.datetime64(end_time))
+        ]
+        if len(extremes) >= 2:
+            frame_center_times = pd.DatetimeIndex(extremes)
+            print(f"Synced {len(frame_center_times)} frames to tidal extremes from GNSS-IR data")
+
+    if frame_center_times is None:
+        # Last resort: regular bins
+        frame_center_times = pd.date_range(
+            start=start_time.floor(f"{bin_hours}h") + timedelta(hours=bin_hours),
+            end=end_time.ceil(f"{bin_hours}h"),
+            freq=f"{bin_hours}h",
+        )
+        print(f"No tidal signal detected, using regular {bin_hours}h bins")
+
+    total_frames = len(frame_center_times)
     print(f"Creating {total_frames} frames...")
 
     frames_dir = (
@@ -1278,10 +1420,12 @@ def create_animation(
         local_satellite=local_satellite,
     )
 
-    # Build frame arguments
+    # Build frame arguments using window_hours centered on each frame time
+    half_window = timedelta(hours=window_hours / 2)
     frame_args = []
-    for i, bin_end in enumerate(bin_times):
-        bin_start = bin_end - timedelta(hours=bin_hours)
+    for i, center_time in enumerate(frame_center_times):
+        bin_start = center_time - half_window
+        bin_end = center_time + half_window
         frame_path = frames_dir / f"frame_{i:04d}.png"
         frame_args.append((i, bin_start, bin_end, str(frame_path)))
 
@@ -1314,7 +1458,6 @@ def create_animation(
     else:
         # Serial fallback
         frame_paths = []
-        df_accumulated = pd.DataFrame()
         for i, bin_start, bin_end, frame_path_str in frame_args:
             frame_path = Path(frame_path_str)
             df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
@@ -1323,7 +1466,7 @@ def create_animation(
                 & (df_all_unfiltered["datetime"] < bin_end)
             ]
             df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
-            df_accumulated = pd.concat([df_accumulated, df_current], ignore_index=True)
+            df_accumulated = df_current.copy()
             create_frame(
                 df,
                 df_current,
@@ -1383,7 +1526,12 @@ def main():
     )
     parser.add_argument("--fps", type=int, default=4)
     parser.add_argument(
-        "--bin_hours", type=int, default=12, help="Time bin size in hours (default: 12)"
+        "--bin_hours", type=int, default=6,
+        help="Fallback time bin size in hours when no tidal signal detected (default: 6)",
+    )
+    parser.add_argument(
+        "--window_hours", type=int, default=6,
+        help="Plotting window size in hours centered on each frame (default: 6)",
     )
     parser.add_argument("--no_quality_filter", action="store_true")
     parser.add_argument(
@@ -1425,6 +1573,7 @@ def main():
                 quality_filter=quality_filter,
                 fps=args.fps,
                 bin_hours=args.bin_hours,
+                window_hours=args.window_hours,
                 n_workers=args.workers,
             )
     else:
@@ -1442,6 +1591,7 @@ def main():
             quality_filter=quality_filter,
             fps=args.fps,
             bin_hours=args.bin_hours,
+            window_hours=args.window_hours,
             n_workers=args.workers,
         )
 

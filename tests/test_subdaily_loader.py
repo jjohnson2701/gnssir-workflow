@@ -128,6 +128,55 @@ class TestConfidenceAnnotation:
         assert mid_points["is_interpolated"].all()
 
 
+class TestLoadCorrectedRetrievals:
+    """Tests for loading RHdot+IF corrected retrievals from .withrhdotIF file."""
+
+    @pytest.mark.unit
+    def test_corrected_retrievals_have_required_columns(self):
+        """Corrected retrieval output should have all raw columns plus corrections."""
+        from scripts.utils.subdaily_loader import load_corrected_retrievals
+
+        if_path = GLBX_FILES_DIR / "glbx_2024_subdaily_edit.txt.withrhdotIF"
+        if not if_path.exists():
+            pytest.skip("GLBX withrhdotIF file not available")
+
+        df = load_corrected_retrievals(if_path)
+        required = [
+            "year", "doy", "RH", "sat", "UTCtime", "Azim", "Amp",
+            "eminO", "emaxO", "NumbOf", "freq", "rise", "EdotF",
+            "PkNoise", "DelT", "MJD", "rh_rhdot_corrected",
+            "rhdot_correction", "rh_if_corrected",
+        ]
+        for col in required:
+            assert col in df.columns, f"Missing column: {col}"
+
+    @pytest.mark.unit
+    def test_corrected_rh_differs_from_raw(self):
+        """IF-corrected RH should differ from raw RH for most retrievals."""
+        from scripts.utils.subdaily_loader import load_corrected_retrievals
+
+        if_path = GLBX_FILES_DIR / "glbx_2024_subdaily_edit.txt.withrhdotIF"
+        if not if_path.exists():
+            pytest.skip("GLBX withrhdotIF file not available")
+
+        df = load_corrected_retrievals(if_path)
+        # At least some rows should have different raw vs corrected RH
+        diff = (df["RH"] - df["rh_if_corrected"]).abs()
+        assert (diff > 0.001).any(), "Expected corrected RH to differ from raw"
+
+    @pytest.mark.unit
+    def test_rhdot_correction_is_small(self):
+        """RHdot corrections should be small (typically < 0.2m)."""
+        from scripts.utils.subdaily_loader import load_corrected_retrievals
+
+        if_path = GLBX_FILES_DIR / "glbx_2024_subdaily_edit.txt.withrhdotIF"
+        if not if_path.exists():
+            pytest.skip("GLBX withrhdotIF file not available")
+
+        df = load_corrected_retrievals(if_path)
+        assert df["rhdot_correction"].abs().max() < 0.5, "RHdot corrections unexpectedly large"
+
+
 class TestGapDetection:
     """Tests for gap detection in observation time series."""
 
