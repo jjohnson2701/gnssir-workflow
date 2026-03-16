@@ -1745,8 +1745,11 @@ def _render_frame_task(frame_args):
     df_current_all = df_all_unfiltered[
         (df_all_unfiltered["datetime"] >= bin_start) & (df_all_unfiltered["datetime"] < bin_end)
     ]
-    df_filtered_out = df_current_all[df_current_all["PkNoise"] <= d["pknoise_median"]].copy()
-    df_accumulated = df_current.copy()
+    df_filtered_out = df_all_unfiltered[
+        (df_all_unfiltered["datetime"] < bin_end)
+        & (df_all_unfiltered["PkNoise"] <= d["pknoise_median"])
+    ].copy()
+    df_accumulated = df[df["datetime"] < bin_end].copy()
 
     create_frame(
         df,
@@ -1961,12 +1964,11 @@ def create_animation(
         for i, bin_start, bin_end, frame_path_str in frame_args:
             frame_path = Path(frame_path_str)
             df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
-            df_current_all = df_all_unfiltered[
-                (df_all_unfiltered["datetime"] >= bin_start)
-                & (df_all_unfiltered["datetime"] < bin_end)
-            ]
-            df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
-            df_accumulated = df_current.copy()
+            df_filtered_out = df_all_unfiltered[
+                (df_all_unfiltered["datetime"] < bin_end)
+                & (df_all_unfiltered["PkNoise"] <= pknoise_median)
+            ].copy()
+            df_accumulated = df[df["datetime"] < bin_end].copy()
             create_frame(
                 df,
                 df_current,
