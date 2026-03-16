@@ -1749,6 +1749,8 @@ def _render_frame_task(frame_args):
     d = _worker_shared
     frame_path = Path(frame_path_str)
 
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
     df = d["df"]
     df_all_unfiltered = d["df_all_unfiltered"]
 
@@ -1760,21 +1762,28 @@ def _render_frame_task(frame_args):
     df_filtered_out = df_current_all[df_current_all["PkNoise"] <= d["pknoise_median"]].copy()
     df_accumulated = df_current.copy()
 
-    frame_time = bin_start + (bin_end - bin_start) / 2
-    render_animation_frame(
-        df_all=df,
-        df_current=df_current,
-        df_accumulated=df_accumulated,
-        df_filtered_out=df_filtered_out,
-        ref_df=d["ref_df"],
-        metadata=d["metadata"],
-        frame_time=frame_time,
-        frame_num=i + 1,
-        total_frames=d["total_frames"],
-        output_path=frame_path,
-        frame_config=d["frame_config"],
-        bin_start=bin_start,
-        bin_end=bin_end,
+    create_frame(
+        df,
+        df_current,
+        df_accumulated,
+        df_filtered_out,
+        d["ref_df"],
+        d["metadata"],
+        bin_end,
+        i + 1,
+        d["total_frames"],
+        frame_path,
+        d["start_time"],
+        d["end_time"],
+        d["vmin_wl"],
+        d["vmax_wl"],
+        transformer,
+        d["station_x"],
+        d["station_y"],
+        d["gauge_x"],
+        d["gauge_y"],
+        d["region_bounds"],
+        cached_basemaps=d["cached_basemaps"],
     )
 
     if (i + 1) % 10 == 0:
@@ -1928,25 +1937,6 @@ def create_animation(
     )
 
     # Build frame_config dict shared across all frames
-    frame_config = {
-        "mode": mode,
-        "start_time": start_time,
-        "end_time": end_time,
-        "vmin_wl": vmin_wl,
-        "vmax_wl": vmax_wl,
-        "figsize": (10, 10),
-        "dpi": 100,
-        "cached_basemaps": cached_basemaps,
-        "doy_start": doy_start,
-        "doy_end": doy_end,
-        "year": year,
-    }
-
-    # Render cover frame
-    cover_path = frames_dir / "cover_frame.png"
-    print("Rendering cover frame...")
-    render_cover_frame(metadata, frame_config, cover_path)
-
     # Build frame arguments from windows
     frame_args = []
     for i, (bin_start, bin_end, center_time) in enumerate(frame_windows):
@@ -1974,7 +1964,6 @@ def create_animation(
             "gauge_y": gauge_y,
             "region_bounds": region_bounds,
             "cached_basemaps": cached_basemaps,
-            "frame_config": frame_config,
         }
         print(f"Rendering {total_frames} frames using {n_workers} workers...")
         with mp.Pool(n_workers, initializer=_init_frame_worker, initargs=(shared_data,)) as pool:
@@ -1992,31 +1981,39 @@ def create_animation(
             ]
             df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
             df_accumulated = df_current.copy()
-            frame_time = bin_start + (bin_end - bin_start) / 2
-            render_animation_frame(
-                df_all=df,
-                df_current=df_current,
-                df_accumulated=df_accumulated,
-                df_filtered_out=df_filtered_out,
-                ref_df=ref_df,
-                metadata=metadata,
-                frame_time=frame_time,
-                frame_num=i + 1,
-                total_frames=total_frames,
-                output_path=frame_path,
-                frame_config=frame_config,
-                bin_start=bin_start,
-                bin_end=bin_end,
+            create_frame(
+                df,
+                df_current,
+                df_accumulated,
+                df_filtered_out,
+                ref_df,
+                metadata,
+                bin_end,
+                i + 1,
+                total_frames,
+                frame_path,
+                start_time,
+                end_time,
+                vmin_wl,
+                vmax_wl,
+                transformer,
+                station_x,
+                station_y,
+                gauge_x,
+                gauge_y,
+                region_bounds,
+                cached_basemaps=cached_basemaps,
             )
             frame_paths.append(frame_path)
             if (i + 1) % 10 == 0:
                 print(f"  Created frame {i+1}/{total_frames}")
 
-    # Assemble animation with ffmpeg
+    # Assemble animation with ffmpeg (no cover frame — original layout has context in every frame)
+    # Use first frame as stand-in for cover since all frames have the map panels
     print(f"Compiling {output_format.upper()} at {fps} fps...")
     assemble_with_ffmpeg(
         frames_dir=frames_dir,
-        cover_frame_path=cover_path,
+        cover_frame_path=frame_paths[0],
         output_path=output_path,
         fps=fps,
         output_format=output_format,
