@@ -1632,7 +1632,12 @@ def create_frame(
     cmap = plt.cm.coolwarm
     norm = mcolors.Normalize(vmin=vmin_wl, vmax=vmax_wl)
 
-    # Plot accumulated data with varying reflection distances
+    # Plot accumulated data with age-based fading. Points stay bright for 1/4
+    # of the total duration, then linearly fade to a minimum alpha.
+    total_duration_s = (end_time - start_time).total_seconds()
+    fade_start_s = total_duration_s / 4  # bright for first quarter
+    fade_alpha_min = 0.12
+
     if len(df_accumulated) > 0:
         for _, row in df_accumulated.iterrows():
             az_rad = np.radians(row["Azim"])
@@ -1644,6 +1649,16 @@ def create_frame(
             dx = reflection_dist * np.sin(az_rad)
             dy = reflection_dist * np.cos(az_rad)
 
+            # Age-based alpha: bright for 1/4 of duration, then fade
+            age_s = (frame_time - row["datetime"]).total_seconds()
+            if age_s <= fade_start_s:
+                pt_alpha = 0.8
+            elif total_duration_s > fade_start_s:
+                fade_frac = (age_s - fade_start_s) / (total_duration_s - fade_start_s)
+                pt_alpha = max(fade_alpha_min, 0.8 - fade_frac * (0.8 - fade_alpha_min))
+            else:
+                pt_alpha = 0.8
+
             color = cmap(norm(row["WSE_dm"] * 100))
             ax_sat.plot(
                 origin_x + dx,
@@ -1651,7 +1666,7 @@ def create_frame(
                 "o",
                 markersize=4,
                 color=color,
-                alpha=0.8,
+                alpha=pt_alpha,
                 markeredgecolor="none",
                 zorder=3,
             )
