@@ -131,6 +131,63 @@ def detect_tidal_extremes_from_gnssir(df, wl_col="WSE_dm", min_separation_hours=
     return times[extreme_indices]
 
 
+def build_frame_windows(mode, ref_df, df, start_time, end_time, bin_hours, window_hours):
+    """
+    Build list of (bin_start, bin_end, center_time) tuples for animation frames.
+
+    In analysis mode, windows span from one tidal extreme to the next (variable
+    width, one tidal phase per frame). In presentation mode, windows use fixed
+    bin_hours centered on detected extremes or regular intervals.
+
+    Returns:
+        List of (bin_start, bin_end, center_time) as pd.Timestamp tuples.
+    """
+    # Detect tidal extremes
+    extremes = np.array([], dtype="datetime64[ns]")
+    if ref_df is not None and "wl_dm" in ref_df.columns and len(ref_df) > 10:
+        extremes = detect_tidal_extremes(ref_df)
+        extremes = extremes[
+            (extremes >= np.datetime64(start_time))
+            & (extremes <= np.datetime64(end_time))
+        ]
+
+    if len(extremes) < 2 and df is not None:
+        extremes = detect_tidal_extremes_from_gnssir(df)
+        extremes = extremes[
+            (extremes >= np.datetime64(start_time))
+            & (extremes <= np.datetime64(end_time))
+        ]
+
+    if mode == "analysis" and len(extremes) >= 2:
+        # Variable windows: each frame spans one tidal phase (extreme to extreme)
+        windows = []
+        for i in range(len(extremes) - 1):
+            win_start = pd.Timestamp(extremes[i])
+            win_end = pd.Timestamp(extremes[i + 1])
+            center = win_start + (win_end - win_start) / 2
+            windows.append((win_start, win_end, center))
+        return windows
+
+    # Presentation mode or fallback: fixed-width bins
+    if len(extremes) >= 2:
+        # Center bins on detected extremes
+        half_window = timedelta(hours=window_hours / 2)
+        windows = []
+        for ext in extremes:
+            center = pd.Timestamp(ext)
+            windows.append((center - half_window, center + half_window, center))
+        return windows
+
+    # No tidal signal: regular bins
+    frame_centers = pd.date_range(
+        start=start_time.floor(f"{bin_hours}h") + timedelta(hours=bin_hours),
+        end=end_time.ceil(f"{bin_hours}h"),
+        freq=f"{bin_hours}h",
+    )
+    half_window = timedelta(hours=window_hours / 2)
+    return [(ct - half_window, ct + half_window, ct) for ct in frame_centers]
+
+
 def render_satellite_fresnel_basemap(sat_path, station_lat, station_lon, buffer_m, cache_dir):
     """
     Generate reflection point basemap from a satellite image GeoTIFF.
@@ -1818,40 +1875,25 @@ def create_animation(
             & (ref_df["datetime"] <= end_time + timedelta(days=1))
         ].copy()
 
-    # Sync frames to tidal extremes (high/low tide) when possible
-    frame_center_times = None
-    if ref_df is not None and "wl_dm" in ref_df.columns and len(ref_df) > 10:
-        extremes = detect_tidal_extremes(ref_df)
-        # Filter to data range
-        extremes = extremes[
-            (extremes >= np.datetime64(start_time))
-            & (extremes <= np.datetime64(end_time))
-        ]
-        if len(extremes) >= 2:
-            frame_center_times = pd.DatetimeIndex(extremes)
-            print(f"Synced {len(frame_center_times)} frames to tidal extremes from reference data")
-
-    if frame_center_times is None:
-        # Fallback: detect from GNSS-IR data
-        extremes = detect_tidal_extremes_from_gnssir(df)
-        extremes = extremes[
-            (extremes >= np.datetime64(start_time))
-            & (extremes <= np.datetime64(end_time))
-        ]
-        if len(extremes) >= 2:
-            frame_center_times = pd.DatetimeIndex(extremes)
-            print(f"Synced {len(frame_center_times)} frames to tidal extremes from GNSS-IR data")
-
-    if frame_center_times is None:
-        # Last resort: regular bins
-        frame_center_times = pd.date_range(
-            start=start_time.floor(f"{bin_hours}h") + timedelta(hours=bin_hours),
-            end=end_time.ceil(f"{bin_hours}h"),
-            freq=f"{bin_hours}h",
-        )
-        print(f"No tidal signal detected, using regular {bin_hours}h bins")
-
-    total_frames = len(frame_center_times)
+    # Build frame windows (mode-dependent: variable tidal windows in analysis,
+    # fixed bins in presentation)
+    frame_windows = build_frame_windows(
+        mode=mode,
+        ref_df=ref_df,
+        df=df,
+        start_time=start_time,
+        end_time=end_time,
+        bin_hours=bin_hours,
+        window_hours=window_hours,
+    )
+    total_frames = len(frame_windows)
+    if mode == "analysis":
+        spans = [(w[1] - w[0]).total_seconds() / 3600 for w in frame_windows]
+        if spans:
+            print(f"Analysis mode: {total_frames} tidal-phase frames "
+                  f"(avg {np.mean(spans):.1f}h, range {min(spans):.1f}-{max(spans):.1f}h)")
+    else:
+        print(f"Presentation mode: {total_frames} frames")
     print(f"Creating {total_frames} frames...")
 
     frames_dir = (
@@ -1916,12 +1958,9 @@ def create_animation(
     print("Rendering cover frame...")
     render_cover_frame(metadata, frame_config, cover_path)
 
-    # Build frame arguments using window_hours centered on each frame time
-    half_window = timedelta(hours=window_hours / 2)
+    # Build frame arguments from windows
     frame_args = []
-    for i, center_time in enumerate(frame_center_times):
-        bin_start = center_time - half_window
-        bin_end = center_time + half_window
+    for i, (bin_start, bin_end, center_time) in enumerate(frame_windows):
         frame_path = frames_dir / f"frame_{i:04d}.png"
         frame_args.append((i, bin_start, bin_end, str(frame_path)))
 
