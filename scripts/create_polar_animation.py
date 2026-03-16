@@ -684,6 +684,119 @@ def load_data(station: str, year: int, results_dir: Path):
     return df, ref_df, metadata
 
 
+def render_cover_frame(metadata, frame_config, output_path):
+    """
+    Render a single cover frame with map context panels and station metadata.
+
+    Shown for ~3 seconds at animation start. Contains all 3 basemap panels
+    (regional overview, regional context, reflection point basemap) plus
+    station info text. Dimensions match animation frames for ffmpeg concat.
+    """
+    figsize = frame_config.get("figsize", (10, 10))
+    dpi = frame_config.get("dpi", 100)
+    cached_basemaps = frame_config["cached_basemaps"]
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(
+        2, 2,
+        hspace=0.15,
+        wspace=0.1,
+        top=0.93,
+        bottom=0.03,
+        left=0.03,
+        right=0.97,
+    )
+
+    station_name = metadata.get("station_name", "Unknown")
+    ref_source = metadata.get("ref_source", "Unknown")
+    ref_site_id = metadata.get("ref_site_id", "")
+    year = frame_config.get("year", "")
+    doy_start = frame_config.get("doy_start", "")
+    doy_end = frame_config.get("doy_end", "")
+
+    # Top-left: Regional overview
+    ax_coast = fig.add_subplot(gs[0, 0])
+    if cached_basemaps and "coast" in cached_basemaps:
+        coast_img = plt.imread(cached_basemaps["coast"])
+        ext = cached_basemaps["coast_extent"]
+        ax_coast.imshow(coast_img, extent=ext, aspect="auto")
+    ax_coast.set_aspect("equal")
+    ax_coast.axis("off")
+    ax_coast.set_title("Regional Overview", fontsize=11, fontweight="bold")
+
+    # Top-right: Regional context
+    ax_regional = fig.add_subplot(gs[0, 1])
+    if cached_basemaps and "regional" in cached_basemaps:
+        regional_img = plt.imread(cached_basemaps["regional"])
+        ext = cached_basemaps["regional_extent"]
+        ax_regional.imshow(regional_img, extent=ext, aspect="auto")
+    ax_regional.set_aspect("equal")
+    ax_regional.axis("off")
+    buffer_wide = cached_basemaps.get("buffer_wide", 5000)
+    map_scale_km = (buffer_wide * 2) / 1000
+    ax_regional.set_title(
+        f"Regional ({map_scale_km:.0f} km)", fontsize=11, fontweight="bold"
+    )
+
+    # Bottom-left: Reflection point basemap
+    ax_fresnel = fig.add_subplot(gs[1, 0])
+    if cached_basemaps and "fresnel" in cached_basemaps:
+        fresnel_img = plt.imread(cached_basemaps["fresnel"])
+        ext = cached_basemaps["fresnel_extent"]
+        ax_fresnel.imshow(fresnel_img, extent=ext, aspect="auto")
+    ax_fresnel.set_aspect("equal")
+    ax_fresnel.axis("off")
+    outer_dist = metadata.get("outer_reflection_dist", 0)
+    ax_fresnel.set_title(
+        f"Reflection Zone ({outer_dist:.0f}m)", fontsize=11, fontweight="bold"
+    )
+
+    # Bottom-right: Station metadata text
+    ax_text = fig.add_subplot(gs[1, 1])
+    ax_text.axis("off")
+
+    lat = metadata.get("station_lat", 0)
+    lon = metadata.get("station_lon", 0)
+    has_ref = metadata.get("has_reference", False)
+
+    info_lines = [
+        f"Station: {station_name}",
+        f"Year: {year}",
+        f"DOY: {doy_start} – {doy_end}",
+        f"Lat: {lat:.4f}°  Lon: {lon:.4f}°",
+        "",
+    ]
+    if has_ref:
+        ref_label = ref_source
+        if ref_site_id and ref_site_id != "Unknown":
+            ref_label += f" ({ref_site_id})"
+        info_lines.append(f"Reference: {ref_label}")
+        gauge_lat = metadata.get("gauge_lat", 0)
+        gauge_lon = metadata.get("gauge_lon", 0)
+        info_lines.append(f"Gauge: {gauge_lat:.4f}°, {gauge_lon:.4f}°")
+    else:
+        info_lines.append("Reference: None")
+
+    ax_text.text(
+        0.1, 0.85,
+        "\n".join(info_lines),
+        transform=ax_text.transAxes,
+        fontsize=13,
+        verticalalignment="top",
+        fontfamily="monospace",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8),
+    )
+
+    fig.suptitle(
+        f"{station_name} — GNSS-IR Polar Animation",
+        fontsize=16, fontweight="bold",
+    )
+
+    plt.savefig(output_path, dpi=dpi, facecolor="white")
+    plt.close(fig)
+    return output_path
+
+
 def create_frame(
     df_all,
     df_current,
