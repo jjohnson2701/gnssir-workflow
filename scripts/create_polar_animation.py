@@ -12,12 +12,28 @@ from datetime import timedelta
 import imageio.v2 as imageio
 import json
 import multiprocessing as mp
+import subprocess
+import shutil
 import contextily as ctx
 from pyproj import Transformer
 from matplotlib.colors import LightSource
 
 # Approximate number of days per season (quarter year)
 SEASONAL_CHUNK_DAYS = 91
+
+def _find_ffmpeg():
+    """Locate ffmpeg binary, checking conda base env if not on PATH."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    # Common conda location
+    conda_ffmpeg = Path.home() / "miniconda3" / "bin" / "ffmpeg"
+    if conda_ffmpeg.exists():
+        return str(conda_ffmpeg)
+    return "ffmpeg"
+
+
+FFMPEG_PATH = _find_ffmpeg()
 
 
 def split_into_seasons(doy_start, doy_end, chunk_days=SEASONAL_CHUNK_DAYS):
@@ -1046,6 +1062,100 @@ def render_animation_frame(
 
     plt.savefig(output_path, dpi=dpi, facecolor="white")
     plt.close(fig)
+
+
+def assemble_with_ffmpeg(
+    frames_dir,
+    cover_frame_path,
+    output_path,
+    fps=4,
+    cover_duration_s=3.0,
+    end_pause_s=2.0,
+    output_format="gif",
+):
+    """
+    Assemble animation frames into GIF or MP4 using ffmpeg concat demuxer.
+
+    Streams frames from disk — no need to load all into RAM. The cover frame
+    is held for cover_duration_s at the start, and the last frame is held
+    for end_pause_s at the end.
+    """
+    frames_dir = Path(frames_dir)
+    cover_frame_path = Path(cover_frame_path)
+    output_path = Path(output_path)
+
+    if not Path(FFMPEG_PATH).exists() and not shutil.which("ffmpeg"):
+        raise FileNotFoundError(f"ffmpeg not found at {FFMPEG_PATH}")
+
+    frame_files = sorted(frames_dir.glob("frame_*.png"))
+    if not frame_files:
+        raise RuntimeError("No frame_*.png files found in frames directory")
+
+    frame_duration = 1.0 / fps
+
+    # Write concat demuxer framelist
+    framelist_path = frames_dir / "framelist.txt"
+    with open(framelist_path, "w") as f:
+        f.write("ffconcat version 1.0\n")
+        # Cover frame
+        f.write(f"file '{cover_frame_path.resolve()}'\n")
+        f.write(f"duration {cover_duration_s}\n")
+        # Animation frames
+        for frame_file in frame_files[:-1]:
+            f.write(f"file '{frame_file.resolve()}'\n")
+            f.write(f"duration {frame_duration}\n")
+        # Last frame with end pause
+        f.write(f"file '{frame_files[-1].resolve()}'\n")
+        f.write(f"duration {end_pause_s}\n")
+        # Concat demuxer needs trailing file entry for last duration
+        f.write(f"file '{frame_files[-1].resolve()}'\n")
+
+    ffmpeg = FFMPEG_PATH if Path(FFMPEG_PATH).exists() else "ffmpeg"
+
+    if output_format == "gif":
+        # Two-pass GIF: generate palette, then encode with it
+        palette_path = frames_dir / "palette.png"
+
+        # Pass 1: palette
+        cmd_palette = [
+            ffmpeg, "-y", "-f", "concat", "-safe", "0",
+            "-i", str(framelist_path),
+            "-vf", "palettegen=stats_mode=diff",
+            str(palette_path),
+        ]
+        result = subprocess.run(cmd_palette, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg palette generation failed: {result.stderr}")
+
+        # Pass 2: encode with palette
+        cmd_gif = [
+            ffmpeg, "-y", "-f", "concat", "-safe", "0",
+            "-i", str(framelist_path),
+            "-i", str(palette_path),
+            "-lavfi", "paletteuse=dither=bayer:bayer_scale=5",
+            "-loop", "0",
+            str(output_path),
+        ]
+        result = subprocess.run(cmd_gif, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg GIF encoding failed: {result.stderr}")
+
+    elif output_format == "mp4":
+        # Use mpeg4 encoder (available in this ffmpeg build)
+        cmd_mp4 = [
+            ffmpeg, "-y", "-f", "concat", "-safe", "0",
+            "-i", str(framelist_path),
+            "-vcodec", "mpeg4",
+            "-pix_fmt", "yuv420p",
+            "-q:v", "5",
+            str(output_path),
+        ]
+        result = subprocess.run(cmd_mp4, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg MP4 encoding failed: {result.stderr}")
+
+    print(f"Saved {output_format.upper()} to {output_path}")
+    return output_path
 
 
 def create_frame(
