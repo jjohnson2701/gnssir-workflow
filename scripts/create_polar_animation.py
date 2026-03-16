@@ -1749,8 +1749,6 @@ def _render_frame_task(frame_args):
     d = _worker_shared
     frame_path = Path(frame_path_str)
 
-    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-
     df = d["df"]
     df_all_unfiltered = d["df_all_unfiltered"]
 
@@ -1760,32 +1758,23 @@ def _render_frame_task(frame_args):
         (df_all_unfiltered["datetime"] >= bin_start) & (df_all_unfiltered["datetime"] < bin_end)
     ]
     df_filtered_out = df_current_all[df_current_all["PkNoise"] <= d["pknoise_median"]].copy()
-
-    # Windowed data (same as current bin for tide-synced frames)
     df_accumulated = df_current.copy()
 
-    create_frame(
-        df,
-        df_current,
-        df_accumulated,
-        df_filtered_out,
-        d["ref_df"],
-        d["metadata"],
-        bin_end,
-        i + 1,
-        d["total_frames"],
-        frame_path,
-        d["start_time"],
-        d["end_time"],
-        d["vmin_wl"],
-        d["vmax_wl"],
-        transformer,
-        d["station_x"],
-        d["station_y"],
-        d["gauge_x"],
-        d["gauge_y"],
-        d["region_bounds"],
-        cached_basemaps=d["cached_basemaps"],
+    frame_time = bin_start + (bin_end - bin_start) / 2
+    render_animation_frame(
+        df_all=df,
+        df_current=df_current,
+        df_accumulated=df_accumulated,
+        df_filtered_out=df_filtered_out,
+        ref_df=d["ref_df"],
+        metadata=d["metadata"],
+        frame_time=frame_time,
+        frame_num=i + 1,
+        total_frames=d["total_frames"],
+        output_path=frame_path,
+        frame_config=d["frame_config"],
+        bin_start=bin_start,
+        bin_end=bin_end,
     )
 
     if (i + 1) % 10 == 0:
