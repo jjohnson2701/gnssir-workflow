@@ -8,7 +8,7 @@ from .data_loader import (
     fetch_coops_data,
 )
 
-from .cache_manager import get_preloader, CACHE_DIR
+from .cache_manager import CACHE_DIR
 
 from .station_metadata import (
     get_station_config,
@@ -25,7 +25,6 @@ __all__ = [
     "get_station_coordinates",
     "fetch_coops_data",
     # Cache management
-    "get_preloader",
     "CACHE_DIR",
     # Station metadata
     "get_station_config",
