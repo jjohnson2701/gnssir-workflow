@@ -1170,26 +1170,12 @@ def assemble_with_ffmpeg(
     ffmpeg = FFMPEG_PATH if Path(FFMPEG_PATH).exists() else "ffmpeg"
 
     if output_format == "gif":
-        # Two-pass GIF: generate palette, then encode with it
-        palette_path = frames_dir / "palette.png"
-
-        # Pass 1: palette
-        cmd_palette = [
-            ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", str(framelist_path),
-            "-vf", "palettegen=stats_mode=diff",
-            str(palette_path),
-        ]
-        result = subprocess.run(cmd_palette, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg palette generation failed: {result.stderr}")
-
-        # Pass 2: encode with palette
+        # Single-pass GIF with inline palette generation (ffmpeg 3.4 compatible)
         cmd_gif = [
             ffmpeg, "-y", "-f", "concat", "-safe", "0",
             "-i", str(framelist_path),
-            "-i", str(palette_path),
-            "-lavfi", "paletteuse=dither=bayer:bayer_scale=5",
+            "-filter_complex",
+            "split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5",
             "-loop", "0",
             str(output_path),
         ]
