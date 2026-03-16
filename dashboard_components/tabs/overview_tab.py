@@ -461,12 +461,16 @@ def render_overview_tab(
     with viz_col2:
         st.markdown("#### 🌊 Weekly Polar Animation")
         if gif_files:
-            # Use the first GIF found (sorted to be consistent)
-            gif_path = sorted(gif_files)[0]
-            st.image(str(gif_path), width="stretch")
-            # Extract DOY range from filename
             import re
 
+            # Pick the GIF with the widest DOY span (most data coverage)
+            def _doy_span(path):
+                m = re.search(r"DOY(\d+)-(\d+)", path.name)
+                return int(m.group(2)) - int(m.group(1)) if m else 0
+
+            gif_path = max(gif_files, key=_doy_span)
+            st.image(str(gif_path), width="stretch")
+            # Extract DOY range from filename
             doy_match = re.search(r"DOY(\d+)-(\d+)", gif_path.name)
             if doy_match:
                 doy_start, doy_end = doy_match.groups()
