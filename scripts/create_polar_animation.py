@@ -1308,18 +1308,18 @@ def create_frame(
             zorder=5,
         )
 
-    # Show filtered-out (low quality) points in current bin with X markers
+    # Show filtered-out (low quality) points with muted X markers
     if len(df_filtered_out) > 0:
         ax_ts.scatter(
             df_filtered_out["datetime"],
             df_filtered_out["WSE_dm"] * 100,
-            c="red",
-            s=60,
-            alpha=0.7,
+            c="salmon",
+            s=30,
+            alpha=0.35,
             marker="x",
-            linewidths=1.5,
-            zorder=4,
-            label="Current (filtered)",
+            linewidths=1,
+            zorder=2,
+            label="Filtered out",
         )
 
     # Highlight the current window on the time series
@@ -1651,8 +1651,9 @@ def create_frame(
                 "o",
                 markersize=4,
                 color=color,
-                alpha=0.5,
+                alpha=0.8,
                 markeredgecolor="none",
+                zorder=3,
             )
 
     # Plot current bin data larger
