@@ -797,6 +797,257 @@ def render_cover_frame(metadata, frame_config, output_path):
     return output_path
 
 
+def render_animation_frame(
+    df_all,
+    df_current,
+    df_accumulated,
+    df_filtered_out,
+    ref_df,
+    metadata,
+    frame_time,
+    frame_num,
+    total_frames,
+    output_path,
+    frame_config,
+    bin_start,
+    bin_end,
+):
+    """
+    Render a single animation frame with stacked layout: progress bar,
+    time series, and reflection points.
+
+    The progress bar shows position within the full animation period.
+    The time series uses a rolling window (14 days for presentation, 3 days
+    for analysis). The reflection point panel shows the cached basemap with
+    colored scatter points.
+    """
+    mode = frame_config.get("mode", "presentation")
+    start_time = frame_config["start_time"]
+    end_time = frame_config["end_time"]
+    vmin_wl = frame_config["vmin_wl"]
+    vmax_wl = frame_config["vmax_wl"]
+    figsize = frame_config.get("figsize", (10, 10))
+    dpi = frame_config.get("dpi", 100)
+    cached_basemaps = frame_config.get("cached_basemaps", {})
+
+    ref_source = metadata.get("ref_source", "Unknown")
+    ref_site_id = metadata.get("ref_site_id", "Unknown")
+    has_reference = metadata.get("has_reference", False)
+    station_name = metadata.get("station_name", "Unknown")
+    outer_refl_dist = metadata.get("outer_reflection_dist", 230)
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(
+        3, 1,
+        height_ratios=[0.03, 0.30, 0.67],
+        hspace=0.08,
+        top=0.95,
+        bottom=0.03,
+        left=0.08,
+        right=0.92,
+    )
+
+    # === Progress bar ===
+    ax_progress = fig.add_subplot(gs[0])
+    total_seconds = (end_time - start_time).total_seconds()
+    if total_seconds > 0:
+        frac_start = (bin_start - start_time).total_seconds() / total_seconds
+        frac_end = (bin_end - start_time).total_seconds() / total_seconds
+        frac_start = max(0, min(1, frac_start))
+        frac_end = max(0, min(1, frac_end))
+    else:
+        frac_start, frac_end = 0, 1
+
+    ax_progress.axhspan(0, 1, xmin=0, xmax=1, color="#e0e0e0")
+    ax_progress.axhspan(0, 1, xmin=frac_start, xmax=frac_end, color="darkorange", alpha=0.9)
+    ax_progress.set_xlim(0, 1)
+    ax_progress.set_ylim(0, 1)
+    ax_progress.set_yticks([])
+
+    # DOY labels at edges
+    from matplotlib.dates import date2num
+    start_doy = start_time.timetuple().tm_yday
+    end_doy = end_time.timetuple().tm_yday
+    ax_progress.text(0.01, 0.5, f"DOY {start_doy}", transform=ax_progress.transAxes,
+                     fontsize=8, va="center", ha="left")
+    ax_progress.text(0.99, 0.5, f"DOY {end_doy}", transform=ax_progress.transAxes,
+                     fontsize=8, va="center", ha="right")
+    ax_progress.set_xticks([])
+    for spine in ax_progress.spines.values():
+        spine.set_visible(False)
+
+    # === Time series ===
+    ax_ts = fig.add_subplot(gs[1])
+
+    # Rolling window: 14 days for presentation, 3 days for analysis
+    if mode == "analysis":
+        ts_half_window = timedelta(days=1.5)
+    else:
+        ts_half_window = timedelta(days=7)
+
+    ts_left = frame_time - ts_half_window
+    ts_right = frame_time + ts_half_window
+    # Clamp to data range
+    ts_left = max(ts_left, start_time - timedelta(hours=2))
+    ts_right = min(ts_right, end_time + timedelta(hours=2))
+
+    # Reference label
+    if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
+        ref_legend_label = ref_source
+    else:
+        ref_legend_label = f"{ref_source} {ref_site_id}"
+
+    # Plot reference data
+    if ref_df is not None:
+        ref_window = ref_df[
+            (ref_df["datetime"] >= ts_left - timedelta(hours=6))
+            & (ref_df["datetime"] <= ts_right + timedelta(hours=6))
+        ]
+        if len(ref_window) > 0 and "wl_dm" in ref_window.columns:
+            ax_ts.plot(
+                ref_window["datetime"],
+                ref_window["wl_dm"] * 100,
+                "r-", linewidth=2, alpha=0.9,
+                label=ref_legend_label, zorder=2,
+            )
+
+    # All GNSS-IR data (background)
+    ax_ts.scatter(
+        df_all["datetime"], df_all["WSE_dm"] * 100,
+        c="lightgray", s=8, alpha=0.3, label="GNSS-IR (all)", zorder=1,
+    )
+
+    # Current window data
+    if len(df_current) > 0:
+        ax_ts.scatter(
+            df_current["datetime"], df_current["WSE_dm"] * 100,
+            c="gold", s=30, edgecolors="darkorange", linewidths=1.5,
+            alpha=0.95, label="Current", zorder=4,
+        )
+
+    # Filtered-out points
+    if len(df_filtered_out) > 0:
+        ax_ts.scatter(
+            df_filtered_out["datetime"], df_filtered_out["WSE_dm"] * 100,
+            c="red", s=20, marker="x", alpha=0.5,
+            label="Filtered out", zorder=3,
+        )
+
+    # Highlight current window
+    if len(df_current) > 0:
+        window_start = df_current["datetime"].min()
+        window_end = df_current["datetime"].max()
+    else:
+        window_start = bin_start
+        window_end = bin_end
+    ax_ts.axvspan(window_start, window_end, alpha=0.15, color="gold", zorder=0)
+    window_center = window_start + (window_end - window_start) / 2
+    ax_ts.axvline(window_center, color="darkorange", linestyle="-", alpha=0.7, linewidth=2)
+
+    ax_ts.set_xlim(ts_left, ts_right)
+    # Y limits from data range with padding
+    all_wse = df_all["WSE_dm"] * 100
+    if len(all_wse) > 0:
+        ymin = all_wse.quantile(0.02) - 2
+        ymax = all_wse.quantile(0.98) + 2
+        ax_ts.set_ylim(ymin, ymax)
+
+    ax_ts.set_ylabel("Water Level (cm)", fontsize=10)
+    ax_ts.legend(loc="upper right", fontsize=7, ncol=2, framealpha=0.8)
+    ax_ts.grid(True, alpha=0.3)
+
+    import matplotlib.dates as mdates
+    ax_ts.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
+    ax_ts.xaxis.set_major_locator(mdates.AutoDateLocator())
+    plt.setp(ax_ts.xaxis.get_majorticklabels(), rotation=30, ha="right", fontsize=8)
+
+    ax_ts.set_title(
+        f"{station_name} — Frame {frame_num}/{total_frames}",
+        fontsize=11, fontweight="bold",
+    )
+
+    # === Reflection points ===
+    ax_refl = fig.add_subplot(gs[2])
+    buffer_close = int(outer_refl_dist + 20)
+
+    use_local = cached_basemaps.get("fresnel_local_coords", False) if cached_basemaps else False
+    origin_x = 0 if use_local else cached_basemaps.get("center_x", 0)
+    origin_y = 0 if use_local else cached_basemaps.get("center_y", 0)
+
+    ax_refl.set_xlim(origin_x - buffer_close, origin_x + buffer_close)
+    ax_refl.set_ylim(origin_y - buffer_close, origin_y + buffer_close)
+
+    # Cached fresnel basemap
+    if cached_basemaps and "fresnel" in cached_basemaps:
+        fresnel_img = plt.imread(cached_basemaps["fresnel"])
+        ext = cached_basemaps["fresnel_extent"]
+        ax_refl.imshow(fresnel_img, extent=ext, aspect="auto", zorder=0)
+
+    # Station marker
+    ax_refl.plot(
+        origin_x, origin_y, "r^",
+        markersize=12, markeredgecolor="white", markeredgewidth=2, zorder=10,
+    )
+
+    # Colormap for water level
+    cmap = plt.cm.coolwarm
+    norm = mcolors.Normalize(vmin=vmin_wl, vmax=vmax_wl)
+
+    # Plot accumulated data (faded)
+    if len(df_accumulated) > 0:
+        for _, row in df_accumulated.iterrows():
+            az_rad = np.radians(row["Azim"])
+            elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
+            elev_rad = np.radians(elev_deg)
+            reflection_dist = row["RH"] / np.tan(elev_rad)
+            dx = reflection_dist * np.sin(az_rad)
+            dy = reflection_dist * np.cos(az_rad)
+            color = cmap(norm(row["WSE_dm"] * 100))
+            ax_refl.plot(
+                origin_x + dx, origin_y + dy, "o",
+                markersize=4, color=color, alpha=0.5, markeredgecolor="none",
+            )
+
+    # Plot current data (prominent)
+    if len(df_current) > 0:
+        for _, row in df_current.iterrows():
+            az_rad = np.radians(row["Azim"])
+            elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
+            elev_rad = np.radians(elev_deg)
+            reflection_dist = row["RH"] / np.tan(elev_rad)
+            dx = reflection_dist * np.sin(az_rad)
+            dy = reflection_dist * np.cos(az_rad)
+            color = cmap(norm(row["WSE_dm"] * 100))
+            ax_refl.plot(
+                origin_x + dx, origin_y + dy, "o",
+                markersize=12, color=color, alpha=0.95,
+                markeredgecolor="darkorange", markeredgewidth=2, zorder=5,
+            )
+
+    # Colorbar
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax_refl, pad=0.02, shrink=0.7, aspect=20)
+    cbar.set_label("Water Level (cm)", fontsize=9)
+
+    # Compass
+    compass_offset = buffer_close * 0.8
+    ax_refl.annotate("N", (origin_x, origin_y + compass_offset),
+                     ha="center", fontsize=11, fontweight="bold", color="white")
+    ax_refl.annotate("E", (origin_x + compass_offset, origin_y),
+                     ha="center", fontsize=11, fontweight="bold", color="white")
+
+    ax_refl.set_aspect("equal")
+    ax_refl.axis("off")
+    ax_refl.set_title(
+        f"Reflection Points ({outer_refl_dist:.0f}m) | Current: {len(df_current)} pts",
+        fontsize=10,
+    )
+
+    plt.savefig(output_path, dpi=dpi, facecolor="white")
+    plt.close(fig)
+
+
 def create_frame(
     df_all,
     df_current,
