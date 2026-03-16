@@ -1896,6 +1896,26 @@ def create_animation(
         local_satellite=local_satellite,
     )
 
+    # Build frame_config dict shared across all frames
+    frame_config = {
+        "mode": mode,
+        "start_time": start_time,
+        "end_time": end_time,
+        "vmin_wl": vmin_wl,
+        "vmax_wl": vmax_wl,
+        "figsize": (10, 10),
+        "dpi": 100,
+        "cached_basemaps": cached_basemaps,
+        "doy_start": doy_start,
+        "doy_end": doy_end,
+        "year": year,
+    }
+
+    # Render cover frame
+    cover_path = frames_dir / "cover_frame.png"
+    print("Rendering cover frame...")
+    render_cover_frame(metadata, frame_config, cover_path)
+
     # Build frame arguments using window_hours centered on each frame time
     half_window = timedelta(hours=window_hours / 2)
     frame_args = []
@@ -1926,6 +1946,7 @@ def create_animation(
             "gauge_y": gauge_y,
             "region_bounds": region_bounds,
             "cached_basemaps": cached_basemaps,
+            "frame_config": frame_config,
         }
         print(f"Rendering {total_frames} frames using {n_workers} workers...")
         with mp.Pool(n_workers, initializer=_init_frame_worker, initargs=(shared_data,)) as pool:
@@ -1943,51 +1964,36 @@ def create_animation(
             ]
             df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
             df_accumulated = df_current.copy()
-            create_frame(
-                df,
-                df_current,
-                df_accumulated,
-                df_filtered_out,
-                ref_df,
-                metadata,
-                bin_end,
-                i + 1,
-                total_frames,
-                frame_path,
-                start_time,
-                end_time,
-                vmin_wl,
-                vmax_wl,
-                transformer,
-                station_x,
-                station_y,
-                gauge_x,
-                gauge_y,
-                region_bounds,
-                cached_basemaps=cached_basemaps,
+            frame_time = bin_start + (bin_end - bin_start) / 2
+            render_animation_frame(
+                df_all=df,
+                df_current=df_current,
+                df_accumulated=df_accumulated,
+                df_filtered_out=df_filtered_out,
+                ref_df=ref_df,
+                metadata=metadata,
+                frame_time=frame_time,
+                frame_num=i + 1,
+                total_frames=total_frames,
+                output_path=frame_path,
+                frame_config=frame_config,
+                bin_start=bin_start,
+                bin_end=bin_end,
             )
             frame_paths.append(frame_path)
             if (i + 1) % 10 == 0:
                 print(f"  Created frame {i+1}/{total_frames}")
 
-    print(f"Compiling GIF at {fps} fps...")
-    images = [imageio.imread(str(fp)) for fp in frame_paths]
-    # Add pause frames at the end
-    for _ in range(fps * 2):
-        images.append(images[-1])
-
-    # Use pillow plugin with optimization for smaller file size
-    imageio.mimsave(
-        str(output_path),
-        images,
+    # Assemble animation with ffmpeg
+    print(f"Compiling {output_format.upper()} at {fps} fps...")
+    assemble_with_ffmpeg(
+        frames_dir=frames_dir,
+        cover_frame_path=cover_path,
+        output_path=output_path,
         fps=fps,
-        loop=0,
-        plugin="pillow",
-        optimize=True,
-        quantizer="nq",
+        output_format=output_format,
     )
 
-    print(f"Saved animation to {output_path}")
     return total_frames
 
 
