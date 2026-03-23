@@ -24,11 +24,17 @@ import argparse
 import json
 import logging
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.signal import lombscargle, find_peaks, hilbert, cwt, morlet2
+
+# scipy.signal.cwt is deprecated in 1.12, removed in 1.15. We're on 1.13.
+# When upgrading scipy, migrate to pywt.cwt.
+warnings.filterwarnings("ignore", message="scipy.signal.cwt is deprecated",
+                        category=DeprecationWarning)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -606,6 +612,13 @@ def extract_features_for_day(station, year, doy, per_arc_day, config):
 # Station-year processing
 # ---------------------------------------------------------------------------
 
+def _process_day_worker(args):
+    """Multiprocessing worker for extract_features. Must be module-level for pickle."""
+    station, year, doy, day_arcs_records, config = args
+    day_arcs = pd.DataFrame.from_records(day_arcs_records)
+    return extract_features_for_day(station, year, doy, day_arcs, config)
+
+
 def extract_features(station, year, num_cores=1):
     """Extract SNR features for a full station-year.
 
@@ -629,14 +642,15 @@ def extract_features(station, year, num_cores=1):
 
     if num_cores > 1:
         from multiprocessing import Pool
-        from functools import partial
 
-        def _process_day(doy):
+        # Build serializable args per day (list of dicts, not DataFrame)
+        day_args = []
+        for doy in doys:
             day_arcs = per_arc[per_arc["doy"] == doy]
-            return extract_features_for_day(station, year, doy, day_arcs, config)
+            day_args.append((station, year, doy, day_arcs.to_dict("records"), config))
 
         with Pool(num_cores) as pool:
-            day_results = pool.map(_process_day, doys)
+            day_results = pool.map(_process_day_worker, day_args)
         all_results = [r for day in day_results for r in day]
     else:
         all_results = []
