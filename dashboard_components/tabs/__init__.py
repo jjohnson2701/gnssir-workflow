@@ -6,6 +6,9 @@ from .monthly_data_tab import render_monthly_data_tab
 from .yearly_residual_tab import render_yearly_residual_tab
 from .diagnostics_tab import render_diagnostics_tab
 from .subdaily_tab import render_subdaily_tab
+from .per_arc_tab import render_per_arc_tab
+from .ice_comparison_tab import render_ice_comparison_tab
+from .validation_tab import render_validation_tab, has_validation_data
 
 __all__ = [
     "render_overview_tab",
@@ -13,4 +16,8 @@ __all__ = [
     "render_subdaily_tab",
     "render_yearly_residual_tab",
     "render_diagnostics_tab",
+    "render_per_arc_tab",
+    "render_ice_comparison_tab",
+    "render_validation_tab",
+    "has_validation_data",
 ]

@@ -48,6 +48,10 @@ from dashboard_components.tabs import (
     render_subdaily_tab,
     render_yearly_residual_tab,
     render_diagnostics_tab,
+    render_per_arc_tab,
+    render_ice_comparison_tab,
+    render_validation_tab,
+    has_validation_data,
 )
 
 # Import station metadata helper
@@ -287,11 +291,17 @@ def main():
         # Determine if CO-OPS data is available for tabs
         include_coops = coops_data is not None and not coops_data.empty
 
-        # Create five-tab structure
-        tabs = st.tabs(TABS)
+        # Build tab list — conditionally include Validation tab
+        tab_names = list(TABS)
+        show_validation = has_validation_data(selected_station, selected_year)
+        if show_validation:
+            # Insert after Yearly Analysis (index 4)
+            tab_names.insert(4, "✅ Validation")
 
-        # Tab 1: Overview
-        with tabs[0]:
+        tab_widgets = st.tabs(tab_names)
+        tab_map = dict(zip(tab_names, tab_widgets))
+
+        with tab_map["🏠 Overview"]:
             render_overview_tab(
                 rh_data,
                 usgs_data,
@@ -302,14 +312,12 @@ def main():
                 coops_station_id,
             )
 
-        # Tab 2: Monthly Data (all visualizations)
-        with tabs[1]:
+        with tab_map["📊 Monthly Data"]:
             render_monthly_data_tab(
                 rh_data, usgs_data, coops_data, selected_station, selected_year, include_coops
             )
 
-        # Tab 3: Subdaily Comparison
-        with tabs[2]:
+        with tab_map["🌊 Subdaily Comparison"]:
             render_subdaily_tab(
                 station_id=selected_station,
                 year=selected_year,
@@ -317,8 +325,7 @@ def main():
                 comparison_data=comparison_data,
             )
 
-        # Tab 4: Yearly Analysis (residual analysis)
-        with tabs[3]:
+        with tab_map["📈 Yearly Analysis"]:
             render_yearly_residual_tab(
                 rh_data,
                 usgs_data,
@@ -328,9 +335,11 @@ def main():
                 erddap_data=erddap_data,
             )
 
-        # Tab 5: Daily Diagnostics (QuickLook plots)
-        with tabs[4]:
-            # Create data dictionary for consistency with new API
+        if show_validation:
+            with tab_map["✅ Validation"]:
+                render_validation_tab(selected_station, selected_year)
+
+        with tab_map["🔍 Daily Diagnostics"]:
             data_dict = {
                 "rh_data": rh_data,
                 "comparison_data": comparison_data,
@@ -338,6 +347,12 @@ def main():
                 "coops_data": coops_data,
             }
             render_diagnostics_tab(selected_station, selected_year, data_dict)
+
+        with tab_map["🛰️ Arc-Level Analysis"]:
+            render_per_arc_tab(selected_station, selected_year)
+
+        with tab_map["🧊 Ice Classification"]:
+            render_ice_comparison_tab(selected_station, selected_year)
 
     else:
         st.info("👈 Please configure settings and click 'Load/Refresh Data' to begin analysis")
