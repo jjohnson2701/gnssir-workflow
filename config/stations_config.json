@@ -54,6 +54,7 @@
       "50-60": "land_contamination",
       "notes": "No seasonal amplitude change (ratio 0.98x). Likely exposed rock or coastline, not water. Data preserved but excluded from water/ice analysis."
     },
+    "ice_free_months": [7, 8],
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
@@ -75,6 +76,7 @@
     "longitude_deg": -51.746608,
     "gnssir_json_params_path": "config/nkar.json",
     "reference_gauge_id": null,
+    "ice_free_months": [7, 8],
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
