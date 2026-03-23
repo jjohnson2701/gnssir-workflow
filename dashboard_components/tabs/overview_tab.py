@@ -2,6 +2,12 @@
 # ABOUTME: Displays station info, data counts, and reference source details
 
 import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from pathlib import Path
 import sys
 
@@ -11,6 +17,163 @@ sys.path.append(str(project_root))
 
 # Import station metadata helper
 from dashboard_components.station_metadata import get_reference_source_info  # noqa: E402
+
+AZ_BIN_LABELS = {0: "0-90 (N-E)", 1: "90-180 (E-S)", 2: "180-270 (S-W)", 3: "270-360 (W-N)"}
+
+
+def _render_quality_summary(station_id, year):
+    """Signal quality overview from enriched and per-arc data.
+
+    Shows azimuth coverage, per-sector quality, and frequency band performance
+    at a glance. Works for any station — not ice-specific.
+    """
+    enriched_path = project_root / "results_annual" / station_id / f"{station_id}_{year}_daily_enriched.parquet"
+    per_arc_path = project_root / "results_annual" / station_id / f"{station_id}_{year}_per_arc.parquet"
+
+    if not enriched_path.exists() and not per_arc_path.exists():
+        st.caption("Run `python scripts/backfill_enriched.py` to enable signal quality analysis.")
+        return
+
+    enriched = pd.read_parquet(enriched_path) if enriched_path.exists() else None
+    per_arc = pd.read_parquet(per_arc_path) if per_arc_path.exists() else None
+
+    # --- Per-azimuth quality summary ---
+    if enriched is not None:
+        pooled = enriched[
+            (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
+        ]
+
+        has_per_arc = per_arc is not None and not per_arc.empty
+
+        if has_per_arc or not pooled.empty:
+            fig = plt.figure(figsize=(14, 5))
+            ax_polar = fig.add_subplot(131, projection="polar")
+            ax_freq = fig.add_subplot(132)
+            ax_timeline = fig.add_subplot(133)
+
+            # -- Left: Polar azimuth quality at 10-degree resolution --
+            ax_polar.set_theta_zero_location("N")
+            ax_polar.set_theta_direction(-1)
+
+            if has_per_arc:
+                az_step = 10
+                pa = per_arc.copy()
+                pa["az_10"] = (pa["Azim"] // az_step * az_step).astype(int)
+
+                az_stats = []
+                for az in sorted(pa["az_10"].unique()):
+                    ad = pa[pa["az_10"] == az]
+                    if len(ad) >= 20:
+                        daily_rh_std = ad.groupby("date")["RH"].std().mean()
+                        az_stats.append({
+                            "az": az,
+                            "n_arcs": len(ad),
+                            "amp_mean": ad["Amp"].mean(),
+                            "rh_std": daily_rh_std,
+                        })
+
+                if az_stats:
+                    az_df = pd.DataFrame(az_stats)
+                    az_rad = np.radians(az_df["az"] + az_step / 2)
+
+                    # Color by daily RH std (green=precise, red=noisy)
+                    rh_std_vals = az_df["rh_std"].values
+                    vmin_s = np.percentile(rh_std_vals, 10)
+                    vmax_s = np.percentile(rh_std_vals, 90)
+                    norm = mcolors.Normalize(vmin=vmin_s, vmax=vmax_s)
+
+                    # Size by arc count
+                    sizes = 30 + 150 * (az_df["n_arcs"] / az_df["n_arcs"].max())
+
+                    sc = ax_polar.scatter(az_rad, az_df["amp_mean"], c=rh_std_vals,
+                                          cmap="RdYlGn_r", norm=norm, s=sizes,
+                                          alpha=0.8, edgecolors="white", linewidths=0.5)
+                    fig.colorbar(sc, ax=ax_polar, label="Daily RH std (m)",
+                                 shrink=0.6, pad=0.08)
+
+                    # Compass labels
+                    for deg, label in [(0, "N"), (90, "E"), (180, "S"), (270, "W")]:
+                        r_max = az_df["amp_mean"].max() * 1.15
+                        ax_polar.text(np.radians(deg), r_max, label, ha="center",
+                                      va="center", fontsize=8, fontweight="bold",
+                                      color="#666666")
+
+            ax_polar.set_rlabel_position(225)
+            ax_polar.set_title("Azimuth quality\nradius=amp, color=RH scatter\nsize=arc count",
+                               fontsize=8, pad=15)
+
+            # -- Frequency bar chart --
+            freq_data = enriched[
+                (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] != "ALL")
+            ]
+            freq_colors = {"L1": "#1f77b4", "L2C": "#ff7f0e", "L5": "#2ca02c",
+                           "E6": "#d62728", "B3": "#9467bd"}
+
+            if not freq_data.empty:
+                freq_summary = freq_data.groupby("freq_group").agg(
+                    total_arcs=("rh_count", "sum"),
+                    mean_std=("rh_std", "mean"),
+                    mean_amp=("amp_mean", "mean"),
+                ).reset_index()
+                freq_summary = freq_summary.sort_values("total_arcs", ascending=True)
+
+                bars = ax_freq.barh(
+                    freq_summary["freq_group"],
+                    freq_summary["total_arcs"],
+                    color=[freq_colors.get(fg, "#7f7f7f") for fg in freq_summary["freq_group"]],
+                    alpha=0.7,
+                )
+                for bar, (_, row) in zip(bars, freq_summary.iterrows()):
+                    ax_freq.text(bar.get_width() + 50, bar.get_y() + bar.get_height()/2,
+                                 f"std:{row['mean_std']:.3f}m",
+                                 va="center", fontsize=7)
+
+                ax_freq.set_xlabel("Total arcs")
+                ax_freq.set_title("Frequency bands", fontsize=9)
+
+            # -- Daily arc count timeline --
+            if not pooled.empty:
+                pooled_sorted = pooled.sort_values("date")
+                pooled_sorted["date_dt"] = pd.to_datetime(pooled_sorted["date"])
+                ax_timeline.fill_between(pooled_sorted["date_dt"], 0, pooled_sorted["rh_count"],
+                                         color="#1f77b4", alpha=0.4)
+                ax_timeline.plot(pooled_sorted["date_dt"], pooled_sorted["rh_count"],
+                                 color="#1f77b4", linewidth=0.8)
+                median_count = pooled_sorted["rh_count"].median()
+                ax_timeline.axhline(median_count, color="red", linestyle="--", linewidth=0.8)
+                ax_timeline.text(pooled_sorted["date_dt"].iloc[0], median_count * 1.05,
+                                 f"median: {median_count:.0f}", fontsize=7, color="red")
+                ax_timeline.set_ylabel("Arcs/day")
+                ax_timeline.set_title("Daily coverage", fontsize=9)
+                ax_timeline.tick_params(axis="x", labelsize=7, rotation=30)
+
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+
+            # Per-sector summary table (10-degree resolution from per-arc)
+            if has_per_arc:
+                az_step = 10
+                pa_t = per_arc.copy()
+                pa_t["az_10"] = (pa_t["Azim"] // az_step * az_step).astype(int)
+                rows = []
+                for az in sorted(pa_t["az_10"].unique()):
+                    ad = pa_t[pa_t["az_10"] == az]
+                    if len(ad) >= 20:
+                        daily_cv = ad.groupby("date")["Amp"].agg(
+                            lambda x: x.std() / x.mean() if x.mean() > 0 and len(x) >= 3 else np.nan
+                        ).dropna()
+                        rows.append({
+                            "Azimuth": f"{az}-{az+az_step}",
+                            "Arcs": len(ad),
+                            "Days": ad["date"].nunique(),
+                            "Amp": f"{ad['Amp'].mean():.1f}",
+                            "CV": f"{daily_cv.mean():.3f}" if len(daily_cv) > 0 else "-",
+                            "RH std": f"{ad.groupby('date')['RH'].std().mean():.3f}m",
+                            "P2N": f"{ad['PkNoise'].mean():.1f}",
+                        })
+                if rows:
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def render_overview_tab(
@@ -429,9 +592,14 @@ def render_overview_tab(
     else:
         st.warning("⚠️ No GNSS-IR data available for yearly summary")
 
+    # Signal Quality Summary (from enriched parquet)
+    st.markdown("---")
+    st.markdown("### Signal Quality Summary")
+    _render_quality_summary(selected_station, selected_year)
+
     # Diagnostic Visualizations Section
     st.markdown("---")
-    st.markdown("### 🔬 Diagnostic Visualizations")
+    st.markdown("### Diagnostic Visualizations")
 
     # Look for pre-generated visualizations
     results_dir = project_root / "results_annual" / selected_station
@@ -449,7 +617,7 @@ def render_overview_tab(
     with viz_col1:
         st.markdown("#### 📊 Correlation vs Temporal Resolution")
         if resolution_plot.exists():
-            st.image(str(resolution_plot), width="stretch")
+            st.image(str(resolution_plot), use_container_width=True)
             st.caption("Full-year correlation analysis showing how aggregation affects RMSE")
         else:
             st.info(
@@ -469,7 +637,7 @@ def render_overview_tab(
                 return int(m.group(2)) - int(m.group(1)) if m else 0
 
             gif_path = max(gif_files, key=_doy_span)
-            st.image(str(gif_path), width="stretch")
+            st.image(str(gif_path), use_container_width=True)
             # Extract DOY range from filename
             doy_match = re.search(r"DOY(\d+)-(\d+)", gif_path.name)
             if doy_match:

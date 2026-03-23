@@ -335,6 +335,88 @@ def render_monthly_data_tab(
         data_coverage = len(perf_data) / 365 * 100
         st.metric("Data Coverage", f"{data_coverage:.1f}%")
 
+    # Signal quality section from enriched data
+    st.markdown("---")
+    st.markdown("### Signal Quality by Month")
+    _render_monthly_quality(selected_station, selected_year)
+
+
+def _render_monthly_quality(station_id, year):
+    """Monthly amp_cv and per-azimuth quality from enriched parquet."""
+    enriched_path = project_root / "results_annual" / station_id / f"{station_id}_{year}_daily_enriched.parquet"
+    if not enriched_path.exists():
+        st.caption("Run `python scripts/backfill_enriched.py` for signal quality analysis.")
+        return
+
+    enriched = pd.read_parquet(enriched_path)
+    pooled = enriched[
+        (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
+    ].copy()
+    pooled["date_dt"] = pd.to_datetime(pooled["date"])
+    pooled["month"] = pooled["date_dt"].dt.month
+
+    if pooled.empty:
+        return
+
+    az_labels = {0: "0-90", 1: "90-180", 2: "180-270", 3: "270-360"}
+
+    # --- Figure: amp_cv + rh_std by month, with per-azimuth breakdown ---
+    fig, (ax_cv, ax_std) = plt.subplots(1, 2, figsize=(12, 4))
+
+    # Monthly pooled amp_cv
+    monthly = pooled.groupby("month").agg(
+        amp_cv_mean=("amp_cv", "mean"),
+        amp_cv_std=("amp_cv", "std"),
+        rh_std_mean=("rh_std", "mean"),
+        rh_std_std=("rh_std", "std"),
+        count=("rh_count", "mean"),
+    ).reset_index()
+
+    ax_cv.bar(monthly["month"], monthly["amp_cv_mean"], color="#ff7f0e", alpha=0.7,
+              yerr=monthly["amp_cv_std"], capsize=3, error_kw={"linewidth": 0.8})
+    ax_cv.set_xlabel("Month")
+    ax_cv.set_ylabel("Amplitude CV")
+    ax_cv.set_title("Monthly amplitude consistency", fontsize=10)
+    ax_cv.set_xticks(monthly["month"])
+
+    ax_std.bar(monthly["month"], monthly["rh_std_mean"], color="#2ca02c", alpha=0.7,
+               yerr=monthly["rh_std_std"], capsize=3, error_kw={"linewidth": 0.8})
+    ax_std.set_xlabel("Month")
+    ax_std.set_ylabel("RH std (m)")
+    ax_std.set_title("Monthly RH scatter", fontsize=10)
+    ax_std.set_xticks(monthly["month"])
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    # Per-azimuth monthly table
+    az_data = enriched[
+        (enriched["azimuth_bin"] != -1) & (enriched["freq_group"] == "ALL")
+    ].copy()
+    az_data["date_dt"] = pd.to_datetime(az_data["date"])
+    az_data["month"] = az_data["date_dt"].dt.month
+
+    if not az_data.empty:
+        month_names = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+                       7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+
+        with st.expander("Per-azimuth monthly quality"):
+            for b in sorted(az_data["azimuth_bin"].unique()):
+                bd = az_data[az_data["azimuth_bin"] == b]
+                st.markdown(f"**{az_labels.get(b, str(b))} deg**")
+                rows = []
+                for m in sorted(bd["month"].unique()):
+                    md = bd[bd["month"] == m]
+                    rows.append({
+                        "Month": month_names.get(m, str(m)),
+                        "Days": len(md),
+                        "Arcs/day": f"{md['rh_count'].mean():.0f}",
+                        "Amp CV": f"{md['amp_cv'].mean():.3f}",
+                        "RH std": f"{md['rh_std'].mean():.3f}m",
+                    })
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
 
 # Export the render function
 __all__ = ["render_monthly_data_tab"]

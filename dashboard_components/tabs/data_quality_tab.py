@@ -287,7 +287,7 @@ def _render_single_day(enriched, per_arc, station_id, year):
     """Single-Day Diagnostic: quickLook images + arc quality for selected day."""
 
     # QuickLook section (date picker + LSP/summary plots)
-    _render_quicklook_section(station_id, year)
+    _render_quicklook_section(station_id, year, key_prefix="dq_ql")
 
     # Arc quality distributions below quickLook
     if per_arc is not None:

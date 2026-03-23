@@ -1,5 +1,5 @@
 # ABOUTME: Dashboard tabs package with individual tab implementations
-# ABOUTME: Contains overview, monthly, subdaily, residual, and diagnostic tabs
+# ABOUTME: Overview, Data Quality, Validation, Per-Arc, Ice, plus legacy tabs pending removal
 
 from .overview_tab import render_overview_tab
 from .monthly_data_tab import render_monthly_data_tab

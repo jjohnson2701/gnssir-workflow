@@ -1,6 +1,9 @@
 # ABOUTME: Ice classification tab — literature-based scoring with indicator time series
 # ABOUTME: Walks through voting methodology, shows CLR/AF/damping evidence and sector analysis
 
+import json
+import warnings
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -340,6 +343,201 @@ def _median_across_sectors(clf, suffix):
     return clf[cols].median(axis=1)
 
 
+@st.cache_data(ttl=3600, show_spinner="Computing wavelet scalograms...")
+def _compute_example_scalograms(station, year):
+    """Compute CWT scalograms for representative ice and water arcs.
+
+    Returns dict with 'ice' and 'water' keys, each containing:
+        elevation_deg, rh_values, power (2D array), date, score, sat
+    Returns None on any failure.
+    """
+    try:
+        from scripts.snr_feature_extractor import (
+            read_snr_file, segment_satellite_arcs, find_matching_segment,
+            detrend_arc, FREQ_TO_COL, FREQ_WAVELENGTH, _snr_file_path,
+            _load_station_config as _load_gnssir_config,
+        )
+        from scipy.signal import cwt, morlet2
+    except ImportError:
+        return None
+
+    clf = _load_classification(station, year)
+    if clf is None or len(clf) < 10:
+        return None
+
+    # Representative days: strongest ice and strongest water
+    ice_row = clf.loc[clf["ice_score"].idxmin()]
+    water_row = clf.loc[clf["ice_score"].idxmax()]
+
+    pa_path = (PROJECT_ROOT / "results_annual" / station
+               / f"{station}_{year}_per_arc.parquet")
+    if not pa_path.exists():
+        return None
+    per_arc = pd.read_parquet(pa_path)
+
+    ice_doy = ice_row["date_dt"].timetuple().tm_yday
+    water_doy = water_row["date_dt"].timetuple().tm_yday
+
+    # Find satellite with best amplitude contrast on both days
+    ice_arcs = per_arc[per_arc["doy"] == ice_doy]
+    water_arcs = per_arc[per_arc["doy"] == water_doy]
+    common_sats = set(ice_arcs["sat"].unique()) & set(water_arcs["sat"].unique())
+    if not common_sats:
+        return None
+
+    best_sat, best_contrast = None, 0
+    for sat in common_sats:
+        ia = ice_arcs[ice_arcs["sat"] == sat]["Amp"].mean()
+        wa = water_arcs[water_arcs["sat"] == sat]["Amp"].mean()
+        contrast = ia / wa if wa > 0 else 0
+        if contrast > best_contrast:
+            best_contrast = contrast
+            best_sat = sat
+    if best_sat is None:
+        return None
+
+    config = _load_gnssir_config(station)
+    if config is None:
+        return None
+
+    e1, e2 = config["e1"], config["e2"]
+    min_rh, max_rh = config["minH"], config["maxH"]
+    poly_order = config.get("polyV", 4)
+    pele = tuple(config.get("pele", [5, 30]))
+
+    results = {}
+    for label, doy, row in [("ice", ice_doy, ice_row),
+                              ("water", water_doy, water_row)]:
+        snr_path = _snr_file_path(station, year, doy)
+        if not snr_path.exists():
+            gz = Path(str(snr_path) + ".gz")
+            if gz.exists():
+                snr_path = gz
+            else:
+                return None
+
+        snr_data = read_snr_file(snr_path)
+        sat_mask = snr_data[:, 0] == best_sat
+        sat_data = snr_data[sat_mask]
+        if len(sat_data) < 10:
+            return None
+
+        arcs = segment_satellite_arcs(sat_data[:, 3], sat_data[:, 1])
+        day_pa = per_arc[(per_arc["doy"] == doy) & (per_arc["sat"] == best_sat)]
+        if len(day_pa) == 0:
+            return None
+
+        arc_entry = day_pa.iloc[0]
+        freq = int(arc_entry["freq"])
+        col_idx = FREQ_TO_COL.get(freq)
+        wavelength = FREQ_WAVELENGTH.get(freq)
+        if col_idx is None or wavelength is None:
+            return None
+
+        seg_idx = find_matching_segment(
+            arcs, sat_data[:, 3], sat_data[:, 1],
+            target_utctime=arc_entry["UTCtime"],
+            target_rise=arc_entry["rise"],
+            e1=e1, e2=e2,
+        )
+        if seg_idx < 0:
+            return None
+
+        arc = arcs[seg_idx]
+        arc_data = sat_data[arc["start_idx"]:arc["end_idx"]]
+        arc_ele = arc_data[:, 1]
+        snr_db = arc_data[:, col_idx]
+        if np.all(snr_db == 0):
+            return None
+
+        snr_lin = np.power(10, snr_db / 20)
+        detrended = detrend_arc(arc_ele, snr_lin, poly_order, pele)
+
+        # Window to [e1, e2]
+        mask = (arc_ele >= e1) & (arc_ele <= e2)
+        if mask.sum() < 20:
+            return None
+        ele_w = arc_ele[mask]
+        dsnr = detrended[mask]
+        sin_e = np.sin(np.radians(ele_w))
+
+        # CWT computation
+        cf = wavelength / 2
+        sort_idx = np.argsort(sin_e)
+        x = sin_e[sort_idx] / cf
+        y = dsnr[sort_idx]
+        ele_sorted = ele_w[sort_idx]
+
+        dx = np.mean(np.diff(x))
+        if dx <= 0:
+            return None
+
+        w = 5.0
+        rh_values = np.linspace(min_rh, max_rh, 100)
+        scales = w / (2 * np.pi * rh_values * dx)
+        valid = scales > 1
+        if valid.sum() < 5:
+            return None
+        scales = scales[valid]
+        rh_values = rh_values[valid]
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            cwtmatr = cwt(y, morlet2, scales, w=w)
+        power = np.abs(cwtmatr) ** 2
+
+        results[label] = {
+            "elevation_deg": ele_sorted,
+            "rh_values": rh_values,
+            "power": power,
+            "date": row["date"],
+            "score": float(row["ice_score"]),
+            "sat": int(best_sat),
+        }
+
+    return results
+
+
+def _render_wavelet_comparison(station, year):
+    """Render side-by-side CWT scalograms for representative ice and water arcs."""
+    data = _compute_example_scalograms(station, year)
+    if data is None:
+        st.caption("Wavelet comparison unavailable (missing SNR files or per-arc data).")
+        return
+
+    fig, (ax_ice, ax_water) = plt.subplots(1, 2, figsize=(12, 4), dpi=100)
+
+    # Common color scale
+    vmax = max(data["ice"]["power"].max(), data["water"]["power"].max())
+
+    for ax, label, title_color in [(ax_ice, "ice", CLASS_COLOR["ice"]),
+                                    (ax_water, "water", CLASS_COLOR["water"])]:
+        d = data[label]
+        im = ax.pcolormesh(
+            d["elevation_deg"], d["rh_values"], d["power"],
+            shading="auto", cmap="inferno", vmin=0, vmax=vmax,
+        )
+        ax.set_xlabel("Elevation (deg)", fontsize=9)
+        ax.set_ylabel("Reflector Height (m)", fontsize=9)
+        ax.set_title(
+            "{} day: {} (score {:.2f})".format(
+                label.capitalize(), d["date"], d["score"]),
+            fontsize=10, color=title_color, fontweight="bold",
+        )
+        ax.tick_params(labelsize=8)
+
+    fig.colorbar(im, ax=[ax_ice, ax_water], label="CWT Power",
+                 shrink=0.8, pad=0.02)
+    fig.suptitle(
+        "Wavelet Scalogram — SAT {} (ice shows concentrated power at one RH)".format(
+            data["ice"]["sat"]),
+        fontsize=10, y=1.02,
+    )
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
 def _render_score_timeseries(clf):
     """Ice score time series with classification zone shading."""
     fig = go.Figure()
@@ -385,8 +583,18 @@ def _render_score_timeseries(clf):
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _load_ice_free_months(station):
+    """Load ice_free_months from stations_config.json."""
+    cfg_path = PROJECT_ROOT / "config" / "stations_config.json"
+    if not cfg_path.exists():
+        return []
+    with open(cfg_path) as f:
+        all_cfg = json.load(f)
+    return all_cfg.get(station, {}).get("ice_free_months", [])
+
+
 def _render_methodology(clf):
-    """Explain the scoring system with indicator table."""
+    """Explain the scoring system with equations and indicator table."""
     has_features = _has_snr_features(clf)
 
     st.markdown("""
@@ -395,17 +603,92 @@ Sector scores are combined (weighted by arc count) into a station-level
 **ice_score**: values below **-0.33** classify as ice, above **+0.33** as water.
 """)
 
-    # Build indicator table
+    # --- Equations ---
+    st.markdown("#### Signal Processing")
+    st.markdown(
+        "Raw SNR is converted to linear units and detrended with a 4th-order "
+        "polynomial to isolate the interference fringes:"
+    )
+    st.latex(r"d\text{SNR}(\varepsilon) = 10^{\text{SNR}_{dB}/20} - P_4(\varepsilon)")
+
+    st.markdown(
+        "The detrended signal is analyzed in the $\\sin(\\varepsilon) / (\\lambda/2)$ "
+        "domain, where peaks in the Lomb-Scargle periodogram correspond directly "
+        "to reflector height (RH) in meters."
+    )
+
+    if has_features:
+        st.markdown("#### Spectral Indicators")
+
+        st.markdown(
+            "**CLR** (Clarity Ratio) — Purnell 2024's best single-feature "
+            "discriminator (77.7% accuracy alone). Ratio of the dominant LSP peak "
+            "to the mean of all other peaks:"
+        )
+        st.latex(r"CLR = \frac{P_1}{\bar{P}_{2 \ldots N}}")
+
+        st.markdown(
+            "**PR** (Peak Ratio) — ratio of the two strongest LSP peaks. "
+            "High PR indicates a single dominant reflection surface (ice):"
+        )
+        st.latex(r"PR = \frac{P_1}{P_2}")
+
+        st.markdown("#### Wavelet Indicator")
+        st.markdown(
+            "**AF** (Area Factor) — Song 2022's snow-on-ice indicator. "
+            "Continuous wavelet transform (Morlet, $\\omega_0 = 5$) of "
+            "$d\\text{SNR}$ in the $\\sin(\\varepsilon)/(\\lambda/2)$ domain. "
+            "The power curve at the dominant RH scale $s_0$ is integrated:"
+        )
+        st.latex(r"AF = \int \left| W_{CWT}(s_0,\, \tau) \right|^2 \, d\tau")
+        st.markdown(
+            "Ice produces concentrated wavelet power (high AF) because the "
+            "smooth surface yields a strong, coherent reflection at a single RH. "
+            "Water scatters power across scales."
+        )
+
+        st.markdown("#### Envelope Indicator")
+        st.markdown(
+            "**$\\gamma$** (Damping) — Strandberg 2017. The Hilbert transform "
+            "envelope of the detrended signal decays with elevation. Fitting "
+            "the log-envelope gives the damping coefficient:"
+        )
+        st.latex(
+            r"\ln \left| \mathcal{H}\{d\text{SNR}\} \right| = "
+            r"\ln A_0 - 4 k^2 \gamma \sin^2 \varepsilon"
+            r"\qquad \text{where } k = 2\pi / \lambda"
+        )
+        st.markdown(
+            "Low $\\gamma$ → slow decay → smooth surface (ice). "
+            "High $\\gamma$ → fast decay → rough surface (water)."
+        )
+
+    st.markdown("#### Voting and Scoring")
+    st.markdown(
+        "Each indicator compares the daily value against thresholds derived "
+        "from the **ice-free calibration months** (p30 and p70 of summer daily "
+        "medians). Values beyond the ice threshold vote $v_i = -1$ (ice), "
+        "beyond the water threshold vote $v_i = +1$ (water), between = transition "
+        "($v_i = 0$). Sector score is the weighted mean:"
+    )
+    st.latex(r"S_{\text{sector}} = \frac{\sum_i w_i \, v_i}{\sum_i w_i}")
+    st.markdown(
+        "Station-level score combines sectors weighted by arc count $n_j$:"
+    )
+    st.latex(r"S_{\text{station}} = \frac{\sum_j n_j \, S_j}{\sum_j n_j}")
+
+    # --- Indicator table ---
+    st.markdown("#### Indicator Weights")
     rows = [
-        ("Amplitude mean", "2.0", "High", "Low", "Standard GNSS-IR"),
-        ("Amplitude CV", "1.5", "Low", "High", "Standard GNSS-IR"),
-        ("RH std dev", "1.0", "Low", "High", "Standard GNSS-IR"),
+        ("Amplitude mean", "2.0", "High (≥ p70)", "Low (≤ p30)", "Standard GNSS-IR"),
+        ("Amplitude CV", "1.5", "Low (≤ p25)", "High (≥ p75)", "Standard GNSS-IR"),
+        ("RH std dev", "1.0", "Low (≤ p30)", "High (≥ p70)", "Standard GNSS-IR"),
     ]
     if has_features:
-        rows.insert(1, ("**CLR** (clarity ratio)", "2.0", "High", "Low", "Purnell 2024"))
-        rows.insert(3, ("**AF** (area factor)", "1.5", "High", "Low", "Song 2022"))
-        rows.insert(5, ("**PR** (peak ratio)", "1.0", "High", "Low", "Purnell 2024"))
-        rows.insert(6, ("**gamma** (damping)", "1.0", "Low", "High", "Strandberg 2017"))
+        rows.insert(1, ("**CLR** (clarity ratio)", "2.0", "High (≥ p70)", "Low (≤ p30)", "Purnell 2024"))
+        rows.insert(3, ("**AF** (area factor)", "1.5", "High (≥ p70)", "Low (≤ p30)", "Song 2022"))
+        rows.insert(5, ("**PR** (peak ratio)", "1.0", "High (≥ p70)", "Low (≤ p30)", "Purnell 2024"))
+        rows.insert(6, ("**γ** (damping)", "1.0", "Low (≤ p30)", "High (≥ p70)", "Strandberg 2017"))
 
     header = "| Indicator | Weight | Ice Signal | Water Signal | Source |\n"
     header += "|-----------|--------|-----------|--------------|--------|\n"
@@ -414,10 +697,10 @@ Sector scores are combined (weighted by arc count) into a station-level
 
     if has_features:
         st.caption(
-            "Thresholds are **summer-anchored**: computed from the ice-free months "
-            "(Jul-Aug) rather than the full year, avoiding bias at stations with "
-            "long ice seasons. SNR-derived indicators (CLR, AF, PR, gamma) are "
-            "extracted from raw SNR arcs using wavelet and spectral analysis."
+            "Thresholds are **summer-anchored**: percentiles computed from the "
+            "ice-free months rather than the full year, avoiding bias at stations "
+            "with long ice seasons where full-year percentiles are dominated by "
+            "ice values."
         )
     else:
         st.caption(
@@ -496,12 +779,10 @@ def _render_sector_heatmap(clf):
     # Custom colormap: blue (ice) → yellow (transition) → green (water)
     cmap_colors = [CLASS_COLOR["ice"], "#e0e0e0", CLASS_COLOR["water"]]
     cmap = mcolors.LinearSegmentedColormap.from_list("ice_water", cmap_colors, N=256)
-    cmap.set_bad(color="#888888")  # gray for NaN/land
+    cmap.set_bad(color="#8B4513")  # brown for land/missing
 
-    # Mask land sectors
-    masked = np.ma.array(score_matrix)
-    for i in land_sectors:
-        masked[i, :] = np.ma.masked
+    # Mask NaN values (including land sectors which have NaN scores)
+    masked = np.ma.masked_invalid(score_matrix)
 
     fig, ax = plt.subplots(figsize=(14, max(3, len(score_cols) * 0.35)), dpi=100)
     im = ax.imshow(masked, aspect="auto", cmap=cmap, vmin=-1, vmax=1,
@@ -511,7 +792,7 @@ def _render_sector_heatmap(clf):
     date_series = pd.Series(dates)
     month_starts = []
     for m in range(1, 13):
-        mask = pd.to_datetime(date_series).month == m
+        mask = pd.to_datetime(date_series).dt.month == m
         if mask.any():
             first_idx = mask.values.argmax()
             month_starts.append((first_idx, MONTH_NAMES[m]))
@@ -525,14 +806,14 @@ def _render_sector_heatmap(clf):
 
     # Mark land sectors
     for i in land_sectors:
-        ax.text(len(dates) + 2, i, "LAND", fontsize=7, va="center", color="#888888")
+        ax.text(len(dates) + 2, i, "LAND", fontsize=7, va="center", color="#8B4513")
 
     # Colorbar
     cbar = plt.colorbar(im, ax=ax, shrink=0.8, pad=0.08)
     cbar.set_ticks([-1, -0.33, 0, 0.33, 1])
     cbar.set_ticklabels(["Ice", "", "Trans", "", "Water"])
 
-    ax.set_title("Per-Sector Classification Score (blue=ice, green=water, gray=land)")
+    ax.set_title("Per-Sector Classification Score (blue=ice, gray=transition, green=water, brown=land)")
     plt.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
@@ -583,6 +864,143 @@ def _render_monthly_summary(clf):
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
+def _render_calibration_validation(clf, ice_free_months):
+    """Show whether ice-free calibration months are appropriate.
+
+    Displays monthly box plots of key indicators with the calibration window
+    highlighted, plus percentile analysis.
+    """
+    if not ice_free_months:
+        st.caption("No ice-free calibration months configured for this station.")
+        return
+
+    has_features = _has_snr_features(clf)
+    clf = clf.copy()
+    clf["month"] = clf["date_dt"].dt.month
+
+    if has_features:
+        clf["clr_med"] = _median_across_sectors(clf, "clr")
+        clf["af_med"] = _median_across_sectors(clf, "af")
+        clf["gamma_med"] = _median_across_sectors(clf, "gamma")
+
+    # Determine which indicators to show
+    panels = [("amp_mean", "Amplitude Mean", True)]
+    if has_features:
+        panels = [
+            ("clr_med", "CLR (Clarity Ratio)", True),
+            ("af_med", "AF (Area Factor)", True),
+            ("amp_mean", "Amplitude Mean", True),
+            ("gamma_med", "Damping (γ)", False),
+        ]
+
+    n_panels = len(panels)
+    fig, axes = plt.subplots(1, n_panels, figsize=(3.5 * n_panels, 4), dpi=100)
+    if n_panels == 1:
+        axes = [axes]
+
+    cal_label = ", ".join(MONTH_NAMES.get(m, str(m)) for m in ice_free_months)
+    months_present = sorted(clf["month"].unique())
+
+    for ax, (col, label, high_is_ice) in zip(axes, panels):
+        # Monthly box plot data
+        month_data = []
+        month_positions = []
+        month_labels = []
+        for m in months_present:
+            vals = clf[clf["month"] == m][col].dropna().values
+            if len(vals) > 0:
+                month_data.append(vals)
+                month_positions.append(m)
+                month_labels.append(MONTH_NAMES.get(m, str(m)))
+
+        if not month_data:
+            ax.set_visible(False)
+            continue
+
+        bp = ax.boxplot(month_data, positions=month_positions, widths=0.6,
+                        patch_artist=True, showfliers=False)
+
+        # Color boxes: highlight calibration months
+        for i, (patch, pos) in enumerate(zip(bp["boxes"], month_positions)):
+            if pos in ice_free_months:
+                patch.set_facecolor("#c8e6c9")
+                patch.set_edgecolor(CLASS_COLOR["water"])
+                patch.set_linewidth(1.5)
+            else:
+                patch.set_facecolor("#e8e8e8")
+                patch.set_edgecolor("#999999")
+
+        ax.set_xticks(month_positions)
+        ax.set_xticklabels(month_labels, fontsize=7, rotation=45)
+        ax.set_title(label, fontsize=9)
+        ax.tick_params(labelsize=8)
+
+        # Add ice/water arrow annotation
+        direction = "↑ ice" if high_is_ice else "↓ ice"
+        ax.annotate(direction, xy=(0.02, 0.98), xycoords="axes fraction",
+                    fontsize=7, color=CLASS_COLOR["ice"], va="top",
+                    fontweight="bold")
+
+    fig.suptitle(
+        "Monthly Distributions — green = ice-free calibration ({})".format(cal_label),
+        fontsize=10, y=1.02,
+    )
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    # Percentile analysis
+    summer = clf[clf["month"].isin(ice_free_months)]
+    rest = clf[~clf["month"].isin(ice_free_months)]
+    if len(summer) < 5:
+        st.caption("Insufficient data in calibration months for percentile analysis.")
+        return
+
+    pct_rows = []
+    for col, label, high_is_ice in panels:
+        all_vals = clf[col].dropna().sort_values().values
+        summer_med = summer[col].median()
+        if len(all_vals) == 0 or np.isnan(summer_med):
+            continue
+        pctile = np.searchsorted(all_vals, summer_med) / len(all_vals) * 100
+        # For high_is_ice indicators, summer should be at LOW percentile
+        # For low_is_ice (damping), summer should be at HIGH percentile
+        expected = "low" if high_is_ice else "high"
+        actual_pos = "low" if pctile < 40 else ("mid" if pctile < 60 else "high")
+        ok = (expected == actual_pos) or (expected == "low" and pctile < 50) or (expected == "high" and pctile > 50)
+        pct_rows.append({
+            "Indicator": label,
+            "Summer Median": "{:.1f}".format(summer_med),
+            "Percentile": "{:.0f}%".format(pctile),
+            "Expected": expected,
+            "Valid": "yes" if ok else "marginal",
+        })
+
+    if pct_rows:
+        st.markdown("**Percentile of calibration months within full-year distribution:**")
+        pct_df = pd.DataFrame(pct_rows)
+
+        def _valid_color(val):
+            if val == "yes":
+                return "background-color: #c8e6c9"
+            return "background-color: #fff9c4"
+
+        styled = pct_df.style.map(_valid_color, subset=["Valid"])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        # Summary text
+        n_valid = sum(1 for r in pct_rows if r["Valid"] == "yes")
+        st.caption(
+            "{}/{} indicators confirm that {} values represent the water "
+            "baseline. {}".format(
+                n_valid, len(pct_rows), cal_label,
+                "Calibration months are appropriate."
+                if n_valid >= len(pct_rows) * 0.6
+                else "Consider adjusting ice-free month selection."
+            )
+        )
+
+
 def render_ice_comparison_tab(station_id, year):
     """Render ice classification tab with literature-based scoring methodology."""
     st.header("Ice Classification")
@@ -611,7 +1029,32 @@ def render_ice_comparison_tab(station_id, year):
     with st.expander("Scoring Methodology", expanded=False):
         _render_methodology(clf)
 
-    # --- Section 3: Indicator time series (if SNR features available) ---
+    # --- Section 3: Wavelet comparison (if SNR features available) ---
+    if has_features:
+        st.subheader("Wavelet Analysis")
+        st.caption(
+            "CWT scalograms for the strongest ice day vs strongest water day. "
+            "Ice produces concentrated power at one reflector height; water "
+            "disperses power across scales."
+        )
+        try:
+            _render_wavelet_comparison(station_id, year)
+        except Exception as e:
+            st.warning(f"Wavelet comparison unavailable: {e}")
+
+    # --- Section 4: Calibration validation ---
+    ice_free_months = _load_ice_free_months(station_id)
+    if ice_free_months:
+        st.subheader("Calibration Validation")
+        st.caption(
+            "Are the ice-free calibration months ({}) representative of open "
+            "water conditions? Monthly distributions of each indicator should "
+            "show calibration months at the water extreme.".format(
+                ", ".join(MONTH_NAMES.get(m, str(m)) for m in ice_free_months))
+        )
+        _render_calibration_validation(clf, ice_free_months)
+
+    # --- Section 5: Indicator time series (if SNR features available) ---
     if has_features:
         st.subheader("Indicator Evidence")
         st.caption(
@@ -620,11 +1063,11 @@ def render_ice_comparison_tab(station_id, year):
         )
         _render_indicator_timeseries(clf)
 
-    # --- Section 4: Per-sector heatmap ---
+    # --- Section 6: Per-sector heatmap ---
     st.subheader("Per-Sector Analysis")
     st.caption(
         "Each row is an azimuth sector. Blue = ice vote, green = water vote. "
-        "Gray = land-flagged (excluded from consensus)."
+        "Brown = land-flagged (excluded from consensus)."
     )
     _render_sector_heatmap(clf)
 
@@ -648,7 +1091,10 @@ def render_ice_comparison_tab(station_id, year):
 
                 # Analysis zone
                 with st.expander("Analysis zone overlay", expanded=False):
-                    _render_analysis_zone_legend(station_id, year)
+                    try:
+                        _render_analysis_zone_legend(station_id, year)
+                    except Exception as e:
+                        st.warning(f"Analysis zone overlay unavailable: {e}")
 
                 _render_thumbnail_grid(matched, station_id)
 

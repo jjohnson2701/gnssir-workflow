@@ -89,6 +89,12 @@ cache/
 # Claude Code specific (contains local paths)
 CLAUDE.md
 
+# Working documents (handoffs, specs, reports generated during development)
+docs/HANDOFF_*.md
+docs/SPEC_*.md
+docs/REPORT_*.md
+docs/SPEC*.md
+
 # Session logs
 session_logs/
 processing_session_log.md

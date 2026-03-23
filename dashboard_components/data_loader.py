@@ -28,6 +28,22 @@ except ImportError as e:
     NOAACOOPSClient = None
 
 
+def load_per_arc(station, year):
+    """Load per-arc parquet for a station/year, return DataFrame or None."""
+    path = project_root / "results_annual" / station / f"{station}_{year}_per_arc.parquet"
+    if not path.exists():
+        return None
+    return pd.read_parquet(path)
+
+
+def load_enriched(station, year):
+    """Load daily enriched parquet for a station/year, return DataFrame or None."""
+    path = project_root / "results_annual" / station / f"{station}_{year}_daily_enriched.parquet"
+    if not path.exists():
+        return None
+    return pd.read_parquet(path)
+
+
 def get_preferred_coops_stations(station_id):
     """Get preferred CO-OPS stations from station config."""
     config = get_station_config(station_id)
@@ -387,6 +403,8 @@ def date_to_doy(date):
 
 # Export all functions
 __all__ = [
+    "load_per_arc",
+    "load_enriched",
     "load_station_data",
     "load_available_stations",
     "get_station_coordinates",

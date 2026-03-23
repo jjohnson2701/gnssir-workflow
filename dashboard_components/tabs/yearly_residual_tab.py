@@ -35,6 +35,94 @@ except ImportError:
     DASHBOARD_PLOTS_AVAILABLE = False
 
 
+def _render_yearly_quality_context(station_id, year):
+    """Quality context panel: daily RH std, amp_cv, arc count, and per-azimuth bias.
+
+    Shows alongside residual analysis so the researcher can see WHY specific
+    days have poor performance — data quality, not reference errors.
+    """
+    enriched_path = project_root / "results_annual" / station_id / f"{station_id}_{year}_daily_enriched.parquet"
+    per_arc_path = project_root / "results_annual" / station_id / f"{station_id}_{year}_per_arc.parquet"
+
+    if not enriched_path.exists():
+        return
+
+    enriched = pd.read_parquet(enriched_path)
+    pooled = enriched[
+        (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
+    ].copy()
+    pooled["date_dt"] = pd.to_datetime(pooled["date"])
+    pooled = pooled.sort_values("date_dt")
+
+    if pooled.empty:
+        return
+
+    st.markdown("### Signal Quality Context")
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 5), sharex=True)
+
+    # Top: RH std over time — colored by quality
+    dates = pooled["date_dt"]
+    rh_std = pooled["rh_std"].values
+    # Color by quality: green=good, yellow=fair, red=poor
+    colors = np.where(rh_std < 0.5, "#2e7d32",
+             np.where(rh_std < 1.0, "#f9a825", "#e53935"))
+    ax1.bar(dates, rh_std, width=1, color=colors, alpha=0.7)
+    ax1.set_ylabel("Daily RH std (m)")
+    ax1.set_title("Measurement scatter — days with high RH std will have larger residuals", fontsize=10)
+    ax1.axhline(pooled["rh_std"].median(), color="gray", linewidth=0.8, linestyle="--")
+
+    # Bottom: Arc count + amp_cv on twin axis
+    ax2.bar(dates, pooled["rh_count"], width=1, color="#1f77b4", alpha=0.5, label="arc count")
+    ax2.set_ylabel("Arc count", color="#1f77b4")
+    ax2.set_xlabel("Date")
+
+    ax2b = ax2.twinx()
+    ax2b.plot(dates, pooled["amp_cv"], color="#ff7f0e", linewidth=0.8, alpha=0.8, label="amp CV")
+    ax2b.set_ylabel("Amp CV", color="#ff7f0e")
+
+    ax2.legend(loc="upper left", fontsize=7)
+    ax2b.legend(loc="upper right", fontsize=7)
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    # Per-azimuth RH bias check
+    if per_arc_path.exists():
+        per_arc = pd.read_parquet(per_arc_path)
+        az_step = 10
+        per_arc_c = per_arc.copy()
+        per_arc_c["az_10"] = (per_arc_c["Azim"] // az_step * az_step).astype(int)
+
+        # Compute per-azimuth mean RH deviation from daily median
+        daily_median = per_arc.groupby("date")["RH"].median()
+        per_arc_c["daily_median"] = per_arc_c["date"].map(daily_median)
+        per_arc_c["rh_bias"] = per_arc_c["RH"] - per_arc_c["daily_median"]
+
+        with st.expander("Per-azimuth RH bias"):
+            st.caption("Systematic offset from daily median by azimuth. "
+                       "Non-zero bias indicates a direction consistently reads high or low.")
+
+            bias_by_az = per_arc_c.groupby("az_10")["rh_bias"].agg(["mean", "std", "count"]).reset_index()
+            bias_by_az = bias_by_az[bias_by_az["count"] >= 50]
+
+            if not bias_by_az.empty:
+                fig2, ax = plt.subplots(figsize=(10, 3))
+                colors = ["#e53935" if abs(m) > 0.1 else "#43a047" for m in bias_by_az["mean"]]
+                ax.bar(range(len(bias_by_az)), bias_by_az["mean"], color=colors, alpha=0.7,
+                       yerr=bias_by_az["std"] / np.sqrt(bias_by_az["count"]), capsize=2)
+                ax.set_xticks(range(len(bias_by_az)))
+                ax.set_xticklabels([f"{int(a)}" for a in bias_by_az["az_10"]], fontsize=7, rotation=45)
+                ax.set_xlabel("Azimuth (deg)")
+                ax.set_ylabel("Mean RH bias (m)")
+                ax.axhline(0, color="gray", linewidth=0.5)
+                ax.set_title("Per-azimuth RH bias from daily median (red = |bias| > 0.1m)", fontsize=9)
+                plt.tight_layout()
+                st.pyplot(fig2)
+                plt.close(fig2)
+
+
 def preprocess_for_residual_analysis(
     gnss_data: pd.DataFrame,
     usgs_data: pd.DataFrame,
@@ -625,7 +713,7 @@ def render_yearly_residual_tab(
     erddap_data : pd.DataFrame, optional
         ERDDAP water level data (for co-located sensor stations)
     """
-    st.header("📈 Yearly Time Series & Residual Analysis")
+    st.header("Yearly Time Series & Residual Analysis")
 
     st.markdown(
         """
@@ -653,8 +741,11 @@ def render_yearly_residual_tab(
         reference_data = coops_data
         reference_source = "CO-OPS"
 
+    # Always show quality context, even without reference data
+    _render_yearly_quality_context(selected_station, selected_year)
+
     if reference_data is None:
-        st.warning("⚠️ No reference data (ERDDAP, USGS, or CO-OPS) available for residual analysis")
+        st.warning("No reference data (ERDDAP, USGS, or CO-OPS) available for residual analysis")
         return
 
     st.info(f"📊 Using **{reference_source}** as reference source for comparison")

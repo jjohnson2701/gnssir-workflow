@@ -35,7 +35,6 @@ from dashboard_components import (
 from dashboard_components.constants import (
     ENHANCED_COLORS,
     PAGE_CONFIG,
-    TABS,
     DEFAULT_STATION,
     DEFAULT_YEAR,
     DEFAULT_DOY_RANGE,
@@ -293,20 +292,24 @@ def main():
         # Determine if CO-OPS data is available for tabs
         include_coops = coops_data is not None and not coops_data.empty
 
-        # Build tab list — conditionally include new tabs
-        tab_names = list(TABS)
-
-        # Data Quality tab after Overview (index 1)
+        # Build tab list: new tabs first, then old tabs (pending removal)
         show_quality = has_quality_data(selected_station, selected_year)
-        if show_quality:
-            tab_names.insert(1, "📡 Data Quality")
-
-        # Validation tab after Yearly Analysis
         show_validation = has_validation_data(selected_station, selected_year)
+
+        tab_names = ["🏠 Overview"]
+        if show_quality:
+            tab_names.append("📡 Data Quality")
         if show_validation:
-            # Find Yearly Analysis position (shifts if Data Quality was inserted)
-            yearly_idx = tab_names.index("📈 Yearly Analysis")
-            tab_names.insert(yearly_idx + 1, "✅ Validation")
+            tab_names.append("✅ Validation")
+        tab_names.append("🛰️ Arc-Level Analysis")
+        tab_names.append("🧊 Ice Classification")
+        # Old tabs — kept during transition
+        tab_names.extend([
+            "📊 Monthly Data",
+            "🌊 Subdaily Comparison",
+            "📈 Yearly Analysis",
+            "🔍 Daily Diagnostics",
+        ])
 
         tab_widgets = st.tabs(tab_names)
         tab_map = dict(zip(tab_names, tab_widgets))
@@ -326,6 +329,17 @@ def main():
             with tab_map["📡 Data Quality"]:
                 render_data_quality_tab(selected_station, selected_year)
 
+        if show_validation:
+            with tab_map["✅ Validation"]:
+                render_validation_tab(selected_station, selected_year)
+
+        with tab_map["🛰️ Arc-Level Analysis"]:
+            render_per_arc_tab(selected_station, selected_year)
+
+        with tab_map["🧊 Ice Classification"]:
+            render_ice_comparison_tab(selected_station, selected_year)
+
+        # --- Old tabs (pending removal) ---
         with tab_map["📊 Monthly Data"]:
             render_monthly_data_tab(
                 rh_data, usgs_data, coops_data, selected_station, selected_year, include_coops
@@ -349,10 +363,6 @@ def main():
                 erddap_data=erddap_data,
             )
 
-        if show_validation:
-            with tab_map["✅ Validation"]:
-                render_validation_tab(selected_station, selected_year)
-
         with tab_map["🔍 Daily Diagnostics"]:
             data_dict = {
                 "rh_data": rh_data,
@@ -361,12 +371,6 @@ def main():
                 "coops_data": coops_data,
             }
             render_diagnostics_tab(selected_station, selected_year, data_dict)
-
-        with tab_map["🛰️ Arc-Level Analysis"]:
-            render_per_arc_tab(selected_station, selected_year)
-
-        with tab_map["🧊 Ice Classification"]:
-            render_ice_comparison_tab(selected_station, selected_year)
 
     else:
         st.info("👈 Please configure settings and click 'Load/Refresh Data' to begin analysis")
@@ -387,28 +391,12 @@ def main():
 
         with col2:
             st.markdown("""
-            **Features:**
-            - 🌊 **Subdaily Comparison** tab with full-resolution data
-            - 📍 Station-aware reference source detection
-            - 📊 Improved statistics and export options
-            - 🔧 Better error messages for missing data
+            **Tabs:**
+            - **📡 Data Quality** — signal health, azimuth coverage, frequency bands
+            - **✅ Validation** — Year/Month/Week comparison vs reference gauge
+            - **🛰️ Arc-Level** — subdaily per-arc analysis with S1 backscatter
+            - **🧊 Ice Classification** — surface state detection for Arctic stations
             """)
-
-        # Show example visualizations
-        st.markdown("### Example Visualizations")
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.markdown("#### 📅 Calendar Heat Map")
-            st.caption("Year-at-a-glance performance metrics")
-
-        with col2:
-            st.markdown("#### 🌊 Subdaily Comparison")
-            st.caption("Individual retrievals vs reference gauge")
-
-        with col3:
-            st.markdown("#### 📈 Yearly Residual Analysis")
-            st.caption("Comprehensive error statistics")
 
 
 if __name__ == "__main__":

@@ -60,11 +60,13 @@ TABS = [
     "🌊 Subdaily Comparison",
     "📈 Yearly Analysis",
     "🔍 Daily Diagnostics",
+    "🛰️ Arc-Level Analysis",
+    "🧊 Ice Classification",
 ]
 
 # Default values
-DEFAULT_STATION = "GLBX"
-DEFAULT_YEAR = 2024
+DEFAULT_STATION = "UMNQ"
+DEFAULT_YEAR = 2025
 DEFAULT_DOY_RANGE = (1, 365)
 
 # Plotting parameters
