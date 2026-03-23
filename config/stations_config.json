@@ -50,6 +50,10 @@
     "longitude_deg": -52.115436,
     "gnssir_json_params_path": "config/umnq.json",
     "reference_gauge_id": null,
+    "suspect_azimuths": {
+      "50-60": "land_contamination",
+      "notes": "No seasonal amplitude change (ratio 0.98x). Likely exposed rock or coastline, not water. Data preserved but excluded from water/ice analysis."
+    },
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
@@ -323,6 +327,48 @@
       "ndbc_buoys": {
         "enabled": false
       }
+    }
+  },
+  "NIAQ": {
+    "station_id_4char_lower": "niaq",
+    "data_source": "earthscope",
+    "ellipsoidal_height_m": 95.308,
+    "latitude_deg": 70.79172,
+    "longitude_deg": -53.66145,
+    "gnssir_json_params_path": "config/niaq.json",
+    "reference_gauge_id": null,
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "LRSK": {
+    "station_id_4char_lower": "lrsk",
+    "data_source": "earthscope",
+    "ellipsoidal_height_m": 225.0,
+    "latitude_deg": 71.187,
+    "longitude_deg": -52.240,
+    "gnssir_json_params_path": "config/lrsk.json",
+    "reference_gauge_id": null,
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "priority_param_codes": [
+        "00065",
+        "62610",
+        "62611",
+        "62620"
+      ],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
     }
   }
 }

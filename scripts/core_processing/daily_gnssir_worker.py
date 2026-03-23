@@ -158,11 +158,12 @@ def process_single_day(
     day_logger.info(f"REFL_CODE_BASE: {refl_code_base}")
     day_logger.info(f"ORBITS_BASE: {orbits_base}")
 
-    # Steps 1-2: Data acquisition (NPS: download + convert; EarthScope: handled by rinex2snr)
-    if data_source == "earthscope":
+    # Steps 1-2: Data acquisition (NPS: download + convert; other archives: handled by rinex2snr)
+    if data_source != "nps":
+        archive_label = "unavco" if data_source == "earthscope" else data_source
         day_logger.info(
-            "Steps 1-2: SKIPPING download/convert "
-            "(EarthScope data acquired via rinex2snr -archive unavco)"
+            f"Steps 1-2: SKIPPING download/convert "
+            f"(data acquired via rinex2snr -archive {archive_label})"
         )
         result["skipped_steps"].extend(["download", "rinex_conversion"])
     else:
@@ -191,7 +192,7 @@ def process_single_day(
 
     # Step 2: Convert RINEX 3 to RINEX 2.11 (NPS only; EarthScope already skipped above)
     rinex2_path = None  # Default for skipping case
-    if data_source != "earthscope":
+    if data_source == "nps":
         if skip_options.get("skip_rinex_conversion", False):
             day_logger.info(
                 "Step 2: RINEX 3 to RINEX 2.11 conversion - SKIPPING as requested."
@@ -260,9 +261,16 @@ def process_single_day(
                 return result
 
     # Step 3: Run rinex2snr
-    # EarthScope: use unavco archive with GFZ final orbits (highest quality, widely available)
-    rinex2snr_archive = "unavco" if data_source == "earthscope" else None
-    rinex2snr_orbit = "gnss3" if data_source == "earthscope" else None
+    # Non-NPS sources: pass data_source as -archive flag to rinex2snr.
+    # "earthscope" is an alias for "unavco" (backward compatibility).
+    # Orbit type defaults to "gnss3" but can be overridden per station.
+    if data_source == "nps":
+        rinex2snr_archive = None
+        rinex2snr_orbit = station_config.get("orbit_type", "gnss")
+    else:
+        archive_name = "unavco" if data_source == "earthscope" else data_source
+        rinex2snr_archive = archive_name
+        rinex2snr_orbit = station_config.get("orbit_type", "gnss3")
     rinex2snr_success = True  # Default for skipping case
     if skip_options.get("skip_snr", False):
         day_logger.info("Step 3: rinex2snr - SKIPPING as requested.")

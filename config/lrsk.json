@@ -1,27 +1,27 @@
 {
-    "station": "umnq",
-    "lat": 70.67755,
-    "lon": -52.115436,
-    "ht": 36.9963,
-    "minH": 5.0,
-    "maxH": 30.0,
-    "e1": 5.0,
-    "e2": 15.0,
+    "station": "lrsk",
+    "lat": 71.187,
+    "lon": -52.240,
+    "ht": 225.0,
+    "minH": 180.0,
+    "maxH": 260.0,
+    "e1": 1.0,
+    "e2": 8.0,
     "NReg": [
-        5.0,
-        30.0
+        180.0,
+        260.0
     ],
-    "PkNoise": 5.0,
+    "PkNoise": 2.0,
     "polyV": 4,
     "pele": [
-        5,
+        1.0,
         30
     ],
-    "ediff": 200.0,
+    "ediff": 2.0,
     "desiredP": 0.005,
     "azval2": [
-        40.0,
-        185.0
+        30.0,
+        260.0
     ],
     "freqs": [
         1,
@@ -33,23 +33,19 @@
         205,
         206,
         207,
-        208,
-        302,
-        306
+        208
     ],
     "reqAmp": [
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
     ],
     "refraction": true,
     "overwriteResults": true,
@@ -58,7 +54,7 @@
     "plt_screen": false,
     "onesat": null,
     "screenstats": false,
-    "pltname": "umnq_lsp.png",
+    "pltname": "lrsk_lsp.png",
     "delTmax": 90.0,
     "gzip": false,
     "ellist": []

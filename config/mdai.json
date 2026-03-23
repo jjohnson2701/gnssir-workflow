@@ -1,27 +1,27 @@
 {
-    "station": "umnq",
-    "lat": 70.67755,
-    "lon": -52.115436,
-    "ht": 36.9963,
-    "minH": 5.0,
-    "maxH": 30.0,
+    "station": "mdai",
+    "lat": 38.1390532246,
+    "lon": -75.1888452235,
+    "ht": -33.159,
+    "minH": 1.0,
+    "maxH": 6.0,
     "e1": 5.0,
-    "e2": 15.0,
+    "e2": 25.0,
     "NReg": [
-        5.0,
-        30.0
+        1.0,
+        6.0
     ],
-    "PkNoise": 5.0,
+    "PkNoise": 3.0,
     "polyV": 4,
     "pele": [
-        5,
+        5.0,
         30
     ],
-    "ediff": 200.0,
+    "ediff": 2.0,
     "desiredP": 0.005,
     "azval2": [
-        40.0,
-        185.0
+        0.0,
+        360.0
     ],
     "freqs": [
         1,
@@ -33,23 +33,19 @@
         205,
         206,
         207,
-        208,
-        302,
-        306
+        208
     ],
     "reqAmp": [
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0,
-        15.0
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
     ],
     "refraction": true,
     "overwriteResults": true,
@@ -58,8 +54,8 @@
     "plt_screen": false,
     "onesat": null,
     "screenstats": false,
-    "pltname": "umnq_lsp.png",
-    "delTmax": 90.0,
+    "pltname": "mdai_lsp.png",
+    "delTmax": 75.0,
     "gzip": false,
     "ellist": []
 }
