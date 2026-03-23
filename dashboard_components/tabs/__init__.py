@@ -9,6 +9,7 @@ from .subdaily_tab import render_subdaily_tab
 from .per_arc_tab import render_per_arc_tab
 from .ice_comparison_tab import render_ice_comparison_tab
 from .validation_tab import render_validation_tab, has_validation_data
+from .data_quality_tab import render_data_quality_tab, has_quality_data
 
 __all__ = [
     "render_overview_tab",
@@ -20,4 +21,6 @@ __all__ = [
     "render_ice_comparison_tab",
     "render_validation_tab",
     "has_validation_data",
+    "render_data_quality_tab",
+    "has_quality_data",
 ]

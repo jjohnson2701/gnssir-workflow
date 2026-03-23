@@ -52,6 +52,8 @@ from dashboard_components.tabs import (
     render_ice_comparison_tab,
     render_validation_tab,
     has_validation_data,
+    render_data_quality_tab,
+    has_quality_data,
 )
 
 # Import station metadata helper
@@ -291,12 +293,20 @@ def main():
         # Determine if CO-OPS data is available for tabs
         include_coops = coops_data is not None and not coops_data.empty
 
-        # Build tab list — conditionally include Validation tab
+        # Build tab list — conditionally include new tabs
         tab_names = list(TABS)
+
+        # Data Quality tab after Overview (index 1)
+        show_quality = has_quality_data(selected_station, selected_year)
+        if show_quality:
+            tab_names.insert(1, "📡 Data Quality")
+
+        # Validation tab after Yearly Analysis
         show_validation = has_validation_data(selected_station, selected_year)
         if show_validation:
-            # Insert after Yearly Analysis (index 4)
-            tab_names.insert(4, "✅ Validation")
+            # Find Yearly Analysis position (shifts if Data Quality was inserted)
+            yearly_idx = tab_names.index("📈 Yearly Analysis")
+            tab_names.insert(yearly_idx + 1, "✅ Validation")
 
         tab_widgets = st.tabs(tab_names)
         tab_map = dict(zip(tab_names, tab_widgets))
@@ -311,6 +321,10 @@ def main():
                 selected_year,
                 coops_station_id,
             )
+
+        if show_quality:
+            with tab_map["📡 Data Quality"]:
+                render_data_quality_tab(selected_station, selected_year)
 
         with tab_map["📊 Monthly Data"]:
             render_monthly_data_tab(
