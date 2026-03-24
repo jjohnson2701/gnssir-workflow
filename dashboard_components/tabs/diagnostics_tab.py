@@ -154,7 +154,7 @@ def _render_azimuth_quality(per_arc):
 
     def _flag_style(val):
         if val and len(val) > 0:
-            return "background-color: #ffcdd2"
+            return "background-color: #ffcdd2; color: #1a1a1a"
         return ""
 
     styled = table_df.style.map(_flag_style, subset=["Flag"])

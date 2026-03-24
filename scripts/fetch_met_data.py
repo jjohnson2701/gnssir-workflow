@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ABOUTME: Fetch daily temperature data from Open-Meteo for GNSS-IR stations.
+# ABOUTME: Fetch daily temperature and sea surface temperature from Open-Meteo.
 # ABOUTME: Saves CSV to results_annual/{STATION}/{STATION}_{year}_met_daily.csv.
 
 """
@@ -28,6 +28,7 @@ CONFIG_PATH = PROJECT_ROOT / "config" / "stations_config.json"
 RESULTS_DIR = PROJECT_ROOT / "results_annual"
 
 OPEN_METEO_BASE = "https://archive-api.open-meteo.com/v1/archive"
+OPEN_METEO_MARINE = "https://marine-api.open-meteo.com/v1/marine"
 
 
 def get_station_coords(station_id, config_path=None):
@@ -60,6 +61,19 @@ def build_open_meteo_url(latitude, longitude, year):
     return f"{OPEN_METEO_BASE}?{params}"
 
 
+def build_marine_url(latitude, longitude, year):
+    """Construct the Open-Meteo Marine API URL for daily SST."""
+    params = (
+        f"latitude={latitude}"
+        f"&longitude={longitude}"
+        f"&start_date={year}-01-01"
+        f"&end_date={year}-12-31"
+        f"&daily=sea_surface_temperature_max"
+        f"&timezone=UTC"
+    )
+    return f"{OPEN_METEO_MARINE}?{params}"
+
+
 def parse_open_meteo_response(data):
     """Parse Open-Meteo JSON response into a DataFrame.
 
@@ -71,6 +85,18 @@ def parse_open_meteo_response(data):
         "temp_mean_c": daily["temperature_2m_mean"],
         "temp_min_c": daily["temperature_2m_min"],
         "temp_max_c": daily["temperature_2m_max"],
+    })
+
+
+def parse_marine_response(data):
+    """Parse Open-Meteo Marine API response into a DataFrame.
+
+    Returns DataFrame with columns: date, sst_max_c.
+    """
+    daily = data["daily"]
+    return pd.DataFrame({
+        "date": daily["time"],
+        "sst_max_c": daily["sea_surface_temperature_max"],
     })
 
 
@@ -104,6 +130,19 @@ def fetch_met_data(station_id, year, config_path=None, overwrite=False):
         return None
 
     df = parse_open_meteo_response(data)
+
+    # Fetch SST from the Marine API (separate endpoint)
+    marine_url = build_marine_url(lat, lon, year)
+    try:
+        req_m = urllib.request.Request(marine_url, headers={"User-Agent": "gnssir-workflow/1.0"})
+        with urllib.request.urlopen(req_m, timeout=30) as resp_m:
+            marine_data = json.loads(resp_m.read().decode("utf-8"))
+        sst_df = parse_marine_response(marine_data)
+        df = df.merge(sst_df, on="date", how="left")
+        n_sst = sst_df["sst_max_c"].notna().sum()
+        print(f"  SST: {n_sst}/{len(sst_df)} days with data")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+        print(f"  SST fetch failed (non-fatal): {e}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)

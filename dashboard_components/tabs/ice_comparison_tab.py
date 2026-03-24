@@ -634,10 +634,25 @@ def _render_score_timeseries(clf, station_id=None, year=None):
             mode="lines",
             line=dict(color="#ff7f0e", width=1.5),
             opacity=0.6,
-            name="Temperature (\u00b0C)",
+            name="Air Temp (\u00b0C)",
             yaxis="y2",
             hovertemplate="%{x|%b %d}: %{y:.1f}\u00b0C<extra></extra>",
         ))
+
+        # SST trace if available
+        if "sst_max_c" in met.columns:
+            sst_data = met.dropna(subset=["sst_max_c"])
+            if not sst_data.empty:
+                fig.add_trace(go.Scatter(
+                    x=sst_data["date"],
+                    y=sst_data["sst_max_c"],
+                    mode="lines",
+                    line=dict(color="#1f77b4", width=2),
+                    opacity=0.7,
+                    name="SST (\u00b0C)",
+                    yaxis="y2",
+                    hovertemplate="%{x|%b %d}: SST %{y:.1f}\u00b0C<extra></extra>",
+                ))
 
         # Freezing point reference line
         fig.add_shape(
@@ -943,10 +958,10 @@ def _render_monthly_summary(clf):
         except (ValueError, TypeError):
             return ""
         if v <= -0.33:
-            return "background-color: #bbdefb"
+            return "background-color: #bbdefb; color: #1a1a1a"
         elif v >= 0.33:
-            return "background-color: #c8e6c9"
-        return "background-color: #fff9c4"
+            return "background-color: #c8e6c9; color: #1a1a1a"
+        return "background-color: #fff9c4; color: #1a1a1a"
 
     styled = table_df.style.map(_score_color, subset=["Score"])
     st.dataframe(styled, use_container_width=True, hide_index=True)
@@ -1070,8 +1085,8 @@ def _render_calibration_validation(clf, ice_free_months):
 
         def _valid_color(val):
             if val == "yes":
-                return "background-color: #c8e6c9"
-            return "background-color: #fff9c4"
+                return "background-color: #c8e6c9; color: #1a1a1a"
+            return "background-color: #fff9c4; color: #1a1a1a"
 
         styled = pct_df.style.map(_valid_color, subset=["Valid"])
         st.dataframe(styled, use_container_width=True, hide_index=True)

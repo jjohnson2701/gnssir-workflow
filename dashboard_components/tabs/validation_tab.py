@@ -395,19 +395,19 @@ def _render_year_view(df, daily, cols, ref_info):
         if pd.isna(val):
             return ""
         if val < 0.1:
-            return "background-color: #c8e6c9"  # green
+            return "background-color: #c8e6c9; color: #1a1a1a"  # green
         if val < 0.2:
-            return "background-color: #fff9c4"  # yellow
-        return "background-color: #ffcdd2"  # red
+            return "background-color: #fff9c4; color: #1a1a1a"  # yellow
+        return "background-color: #ffcdd2; color: #1a1a1a"  # red
 
     def _color_corr(val):
         if pd.isna(val):
             return ""
         if val > 0.8:
-            return "background-color: #c8e6c9"
+            return "background-color: #c8e6c9; color: #1a1a1a"
         if val > 0.6:
-            return "background-color: #fff9c4"
-        return "background-color: #ffcdd2"
+            return "background-color: #fff9c4; color: #1a1a1a"
+        return "background-color: #ffcdd2; color: #1a1a1a"
 
     styled = display_df.style.map(_color_rmse, subset=["RMSE (m)"]).map(
         _color_corr, subset=["Correlation"]

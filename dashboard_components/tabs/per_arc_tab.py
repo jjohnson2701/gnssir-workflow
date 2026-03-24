@@ -271,9 +271,9 @@ def _render_panel0b_azimuth_map(per_arc, selected_date, min_numbof):
 
             def _flag_color(val):
                 if val == "no seasonal change":
-                    return "background-color: #ffcdd2"  # red — suspect
+                    return "background-color: #ffcdd2; color: #1a1a1a"  # red — suspect
                 elif val == "strong seasonal signal":
-                    return "background-color: #c8e6c9"  # green
+                    return "background-color: #c8e6c9; color: #1a1a1a"  # green
                 return ""
 
             styled = table.style.map(_flag_color, subset=["Flag"])
@@ -624,10 +624,10 @@ def _render_panel3_amplitude(per_arc, enriched, selected_date, station_id):
             except (ValueError, TypeError):
                 return ""
             if v < AMP_CV_ICE:
-                return "background-color: #bbdefb"
+                return "background-color: #bbdefb; color: #1a1a1a"
             elif v > AMP_CV_WATER:
-                return "background-color: #c8e6c9"
-            return "background-color: #fff9c4"
+                return "background-color: #c8e6c9; color: #1a1a1a"
+            return "background-color: #fff9c4; color: #1a1a1a"
 
         styled = table_df.style.map(_cv_color, subset=["CV"])
         st.dataframe(styled, use_container_width=True, hide_index=True)

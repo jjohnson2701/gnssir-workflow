@@ -11,7 +11,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.fetch_met_data import (
     build_open_meteo_url,
+    build_marine_url,
     parse_open_meteo_response,
+    parse_marine_response,
     get_station_coords,
 )
 
@@ -105,3 +107,30 @@ class TestGetStationCoords:
 
         with pytest.raises(KeyError):
             get_station_coords("ZZZZ", cfg_file)
+
+
+# ── Marine API (SST) ───────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+class TestMarineUrl:
+    def test_marine_url(self):
+        url = build_marine_url(70.67, -52.11, 2025)
+        assert "marine-api.open-meteo.com" in url
+        assert "sea_surface_temperature_max" in url
+        assert "start_date=2025-01-01" in url
+
+
+@pytest.mark.unit
+class TestParseMarineResponse:
+    def test_parses_sst(self):
+        response = {
+            "daily": {
+                "time": ["2025-01-01", "2025-01-02"],
+                "sea_surface_temperature_max": [-1.7, -1.8],
+            }
+        }
+        df = parse_marine_response(response)
+        assert len(df) == 2
+        assert "sst_max_c" in df.columns
+        assert df.iloc[0]["sst_max_c"] == pytest.approx(-1.7)

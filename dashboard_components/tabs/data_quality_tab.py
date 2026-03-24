@@ -225,9 +225,11 @@ def _render_annual_summary(enriched, per_arc, station_id, year):
         for m in range(1, 13):
             doy = pd.Timestamp(year=year, month=m, day=1).day_of_year - 1
             ax_gap.axvline(doy, color="white", linewidth=0.5)
+            import matplotlib.patheffects as pe
             ax_gap.text(doy + 15, 0.5,
                         pd.Timestamp(year=year, month=m, day=1).strftime("%b"),
-                        ha="center", va="center", fontsize=8, color="#333")
+                        ha="center", va="center", fontsize=8, color="#1a1a1a",
+                        path_effects=[pe.withStroke(linewidth=2, foreground="white")])
         ax_gap.set_title("Gap Analysis", fontsize=10, loc="left")
         plt.tight_layout()
         st.pyplot(fig_gap)
