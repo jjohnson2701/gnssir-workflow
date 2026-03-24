@@ -96,7 +96,7 @@ def _render_analysis_zone_legend(station, year):
     Scale 1 (regional): all water pixels in azimuth range (faded blue)
     Scale 2 (Fresnel):  water pixels within Fresnel annulus (bright green)
     """
-    from scripts.s1_fresnel_utils import get_station_s1_config, get_s1_fresnel_dir, _load_gsw_water_mask
+    from scripts.s1_fresnel_utils import get_station_s1_config, get_s1_fresnel_dir, _load_gsw_water_mask, resolve_crs
 
     config = get_station_s1_config(station)
     az_range = config.get("azval2", [0, 360])
@@ -119,7 +119,7 @@ def _render_analysis_zone_legend(station, year):
         s1_transform = src.transform
         s1_crs = src.crs
 
-    t_proj = Transformer.from_crs("EPSG:4326", s1_crs, always_xy=True)
+    t_proj = Transformer.from_crs("EPSG:4326", resolve_crs(s1_crs), always_xy=True)
     cx, cy = t_proj.transform(config["lon"], config["lat"])
     sta_col = (cx - s1_transform.c) / s1_transform.a
     sta_row = (cy - s1_transform.f) / s1_transform.e
@@ -326,6 +326,49 @@ def _render_thumbnail_grid(matched, station, cols_per_row=8):
     plt.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
+
+
+def _render_scene_detail(matched, station):
+    """Scene picker: select a thumbnail to view full-size with classification details."""
+    scenes = matched.sort_values("date_dt")
+    options = scenes["acquisition_date"].tolist()
+    labels = {
+        d: f"{d}  —  {row['classification']}  (score {row['ice_score']:+.2f}, amp {row['amp_mean']:.0f})"
+        for d, (_, row) in zip(options, scenes.iterrows())
+    }
+
+    selected = st.selectbox(
+        "Select scene to view",
+        options,
+        format_func=lambda d: labels[d],
+        key=f"ice_s1_scene_{station}",
+    )
+
+    if selected:
+        row = scenes[scenes["acquisition_date"] == selected].iloc[0]
+        thumb_path = _get_thumb_path(station, selected)
+
+        col_img, col_info = st.columns([3, 1])
+        with col_img:
+            if thumb_path.exists():
+                st.image(str(thumb_path), use_container_width=True)
+            else:
+                st.warning("Thumbnail file not found.")
+
+        with col_info:
+            cls = row["classification"]
+            color = CLASS_COLOR.get(cls, "#999999")
+            st.markdown(
+                f"<div style='border-left: 4px solid {color}; padding-left: 8px;'>"
+                f"<b>{selected}</b><br>"
+                f"Classification: <b>{cls}</b><br>"
+                f"Ice score: <b>{row['ice_score']:+.3f}</b><br>"
+                f"Amplitude: <b>{row['amp_mean']:.1f}</b><br>"
+                f"Amp CV: <b>{row['amp_cv']:.3f}</b><br>"
+                f"RH std: <b>{row['rh_std']:.3f} m</b>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def _has_snr_features(clf):
@@ -1071,7 +1114,7 @@ def render_ice_comparison_tab(station_id, year):
     )
     _render_sector_heatmap(clf)
 
-    # --- Section 5: S1 SAR validation (expander) ---
+    # --- Section 5: S1 SAR validation ---
     s1_index = _load_s1_index(station_id)
     if s1_index is not None:
         s1_year = s1_index[s1_index["date_dt"].dt.year == year].copy()
@@ -1082,21 +1125,20 @@ def render_ice_comparison_tab(station_id, year):
         matched = matched[matched["thumb_exists"]]
 
         if not matched.empty:
-            with st.expander(f"S1 SAR Validation ({len(matched)} scenes)", expanded=False):
-                st.caption(
-                    "Sentinel-1 thumbnails with classification-colored borders. "
-                    "Purnell 2024 found r = -0.8 between GNSS-IR spectral power "
-                    "and C-band SAR backscatter."
-                )
+            st.subheader(f"S1 SAR Validation ({len(matched)} scenes)")
+            st.caption(
+                "Sentinel-1 thumbnails with classification-colored borders. "
+                "Select a scene below the grid to view full-size."
+            )
 
-                # Analysis zone
-                with st.expander("Analysis zone overlay", expanded=False):
-                    try:
-                        _render_analysis_zone_legend(station_id, year)
-                    except Exception as e:
-                        st.warning(f"Analysis zone overlay unavailable: {e}")
+            _render_thumbnail_grid(matched, station_id)
+            _render_scene_detail(matched, station_id)
 
-                _render_thumbnail_grid(matched, station_id)
+            with st.expander("Analysis zone overlay", expanded=False):
+                try:
+                    _render_analysis_zone_legend(station_id, year)
+                except Exception as e:
+                    st.warning(f"Analysis zone overlay unavailable: {e}")
 
     # --- Section 6: Monthly summary ---
     st.subheader("Monthly Summary")

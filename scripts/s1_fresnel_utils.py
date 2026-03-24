@@ -17,6 +17,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CLIP_HALF_EXTENT_M = 2500  # 5 km total
 
 
+def resolve_crs(crs):
+    """Resolve a rasterio CRS to a pyproj-compatible CRS string.
+
+    OPERA RTC-S1 crops sometimes store CRS as LOCAL_CS, which pyproj
+    cannot parse. This detects known projections from the WKT name
+    and returns the corresponding EPSG code.
+    """
+    if crs.to_epsg() is not None:
+        return crs
+    wkt = crs.to_wkt()
+    if "Polar Stereographic North" in wkt or "NSIDC" in wkt:
+        return "EPSG:3413"
+    if "Polar Stereographic South" in wkt:
+        return "EPSG:3031"
+    m = re.search(r"UTM.*?(\d{1,2})([NS])", wkt)
+    if m:
+        zone = int(m.group(1))
+        return f"EPSG:{32600 + zone}" if m.group(2) == "N" else f"EPSG:{32700 + zone}"
+    return crs
+
+
 def get_station_s1_config(station, project_root=None):
     """Load station coordinates and GNSS-IR params relevant to S1 pipeline.
 
@@ -220,7 +241,7 @@ def _load_gsw_water_mask(station, s1_crs, s1_transform, s1_shape, project_root=N
     s1_x = s1_transform.c + (cols_grid + 0.5) * s1_transform.a
     s1_y = s1_transform.f + (rows_grid + 0.5) * s1_transform.e
 
-    t = Transformer.from_crs(s1_crs, "EPSG:4326", always_xy=True)
+    t = Transformer.from_crs(resolve_crs(s1_crs), "EPSG:4326", always_xy=True)
     s1_lon, s1_lat = t.transform(s1_x.ravel(), s1_y.ravel())
     s1_lon = s1_lon.reshape(s1_shape)
     s1_lat = s1_lat.reshape(s1_shape)
@@ -286,7 +307,7 @@ def compute_sector_stats(tif_path, station, per_arc_path=None, window_arcs=None,
     y_coords = transform.f + (rows_grid + 0.5) * transform.e
 
     # Station position in scene CRS
-    t = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    t = Transformer.from_crs("EPSG:4326", resolve_crs(crs), always_xy=True)
     cx, cy = t.transform(lon, lat)
 
     # Per-pixel azimuth and distance from station

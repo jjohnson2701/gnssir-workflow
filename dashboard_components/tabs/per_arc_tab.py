@@ -708,7 +708,8 @@ def _render_panel4_s1_map(station_id, selected_date, s1_index, per_arc):
 
     # Station pixel coords
     config = get_station_s1_config(station_id)
-    t_proj = Transformer.from_crs("EPSG:4326", s1_crs, always_xy=True)
+    from scripts.s1_fresnel_utils import resolve_crs
+    t_proj = Transformer.from_crs("EPSG:4326", resolve_crs(s1_crs), always_xy=True)
     cx_scene, cy_scene = t_proj.transform(config["lon"], config["lat"])
     sta_col = (cx_scene - s1_transform.c) / s1_transform.a
     sta_row = (cy_scene - s1_transform.f) / s1_transform.e
