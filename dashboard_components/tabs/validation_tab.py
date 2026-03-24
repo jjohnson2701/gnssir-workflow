@@ -139,6 +139,7 @@ def _detect_columns(df):
     cols["satellite"] = "satellite" if "satellite" in df.columns else ("sat" if "sat" in df.columns else None)
     cols["azimuth"] = "azimuth" if "azimuth" in df.columns else ("Az" if "Az" in df.columns else None)
     cols["amplitude"] = "amplitude" if "amplitude" in df.columns else ("Amp" if "Amp" in df.columns else None)
+    cols["pknoise"] = "pknoise" if "pknoise" in df.columns else ("PkNoise" if "PkNoise" in df.columns else None)
 
     return cols
 
@@ -198,6 +199,83 @@ def _compute_stats(gnss_vals, ref_vals):
         "bias": (g - r).mean(),
         "n": len(g),
     }
+
+
+def _apply_week_qc(week_data, cols):
+    """Apply PkNoise and MAD outlier filters to week view retrievals.
+
+    Returns (rejected_mask, counts) where:
+    - rejected_mask: boolean array, True for rejected retrievals
+    - counts: dict with keys "all", "pknoise", "outlier", "final"
+    """
+    n = len(week_data)
+    rejected_mask = np.zeros(n, dtype=bool)
+
+    gnss_dm_col = cols["gnss_dm"]
+
+    # PkNoise filter: reject arcs with pknoise < 3.0
+    pkn_rejected = 0
+    if cols.get("pknoise") and cols["pknoise"] in week_data.columns:
+        pkn_vals = pd.to_numeric(week_data[cols["pknoise"]], errors="coerce")
+        pkn_bad = (pkn_vals < 3.0).fillna(False).values
+        rejected_mask |= pkn_bad
+        pkn_rejected = int(pkn_bad.sum())
+
+    n_after_pknoise = n - int(rejected_mask.sum())
+
+    # Outlier filter: reject retrievals > 3*MAD from daily median
+    if gnss_dm_col and gnss_dm_col in week_data.columns:
+        dm_vals = pd.to_numeric(week_data[gnss_dm_col], errors="coerce")
+        dates = week_data["gnss_datetime"].dt.date
+
+        for date_val in dates.unique():
+            day_mask = (dates == date_val).values
+            day_vals = dm_vals.values[day_mask]
+            day_indices = np.where(day_mask)[0]
+
+            if len(day_vals) < 5:
+                continue
+
+            med = np.nanmedian(day_vals)
+            mad = np.nanmedian(np.abs(day_vals - med))
+            if mad < 0.001:
+                continue
+
+            # MAD to σ conversion factor
+            sigma = mad * 1.4826
+            outlier_flags = np.abs(day_vals - med) > 3 * sigma
+            for idx, is_outlier in zip(day_indices, outlier_flags):
+                if is_outlier:
+                    rejected_mask[idx] = True
+
+    n_final = n - int(rejected_mask.sum())
+
+    counts = {
+        "all": n,
+        "pknoise": n_after_pknoise,
+        "outlier": n_final,
+        "final": n_final,
+    }
+
+    return rejected_mask, counts
+
+
+def _render_funnel(counts):
+    """Render funnel counter strip showing data reduction at each QC stage."""
+    labels = ["All retrievals", "After PkNoise filter", "After outlier removal", "Final"]
+    keys = ["all", "pknoise", "outlier", "final"]
+    funnel_cols = st.columns(len(keys))
+
+    for i, (key, label) in enumerate(zip(keys, labels)):
+        n_val = counts[key]
+        if i == 0:
+            pct_text = ""
+        else:
+            pct = n_val / counts["all"] * 100 if counts["all"] > 0 else 0
+            pct_text = f" ({pct:.0f}%)"
+
+        prefix = "\u2192 " if i > 0 else ""
+        funnel_cols[i].metric(f"{prefix}{label}", f"{n_val:,}{pct_text}")
 
 
 def _render_stats_bar(stats, extra_metrics=None):
@@ -418,49 +496,79 @@ def _render_month_view(df, daily, cols, ref_info, selected_month):
 
 
 def _render_week_view(df, cols, ref_info, week_start, spline_df=None):
-    """Week view: raw retrieval scatter + reference line + per-retrieval residual."""
+    """Week view: three-layer scatter (rejected/passed/reference) with QC funnel."""
     week_end = week_start + pd.Timedelta(days=7)
     mask = (df["gnss_datetime"] >= week_start) & (df["gnss_datetime"] < week_end)
-    week_data = df[mask].copy()
+    week_data = df[mask].copy().reset_index(drop=True)
 
     if week_data.empty:
         st.warning("No retrievals in selected week.")
         return
 
-    # Stats bar with datum offset when absolute values available
-    if cols["gnss_dm"] and cols["ref_dm"]:
-        stats = _compute_stats(week_data[cols["gnss_dm"]], week_data[cols["ref_dm"]])
-        n_days = week_data["gnss_datetime"].dt.date.nunique()
-        extra = {"Days with data": f"{n_days}/7",
-                 "Arcs/day": f"{len(week_data) / max(n_days, 1):.1f}"}
-        if cols["gnss_wse"] and cols["ref_wl"]:
-            wk_offset = week_data[cols["gnss_wse"]].mean() - week_data[cols["ref_wl"]].mean()
-            extra["Datum Offset"] = f"{wk_offset:.3f} m"
-        _render_stats_bar(stats, extra_metrics=extra)
-
-    fig, (ax_ts, ax_resid) = plt.subplots(
-        2, 1, figsize=(14, 8), height_ratios=[3, 1], sharex=True, facecolor="white"
-    )
-    ax_ts.set_facecolor("white")
-    ax_resid.set_facecolor("white")
-    plt.subplots_adjust(hspace=0.05)
-
     gnss_dm_col = cols["gnss_dm"]
     ref_dm_col = cols["ref_dm"]
 
-    # Color by frequency if available
-    if cols["freq"]:
-        freq_vals = week_data[cols["freq"]].values
-        unique_freqs = sorted(week_data[cols["freq"]].unique())
+    # --- QC filtering ---
+    rejected_mask, counts = _apply_week_qc(week_data, cols)
+    passed_mask = ~rejected_mask
+    passed_data = week_data[passed_mask]
+
+    # --- Funnel counter strip ---
+    _render_funnel(counts)
+
+    # --- Stats bar (computed from passed retrievals only) ---
+    if gnss_dm_col and ref_dm_col:
+        stats = _compute_stats(passed_data[gnss_dm_col], passed_data[ref_dm_col])
+        n_days = passed_data["gnss_datetime"].dt.date.nunique()
+        extra = {"Days with data": f"{n_days}/7",
+                 "Arcs/day": f"{len(passed_data) / max(n_days, 1):.1f}"}
+        if cols["gnss_wse"] and cols["ref_wl"]:
+            wk_offset = passed_data[cols["gnss_wse"]].mean() - passed_data[cols["ref_wl"]].mean()
+            extra["Datum Offset"] = f"{wk_offset:.3f} m"
+        _render_stats_bar(stats, extra_metrics=extra)
+
+    # --- Figure: time series + residual ---
+    has_ref = ref_dm_col is not None
+    if has_ref:
+        fig, (ax_ts, ax_resid) = plt.subplots(
+            2, 1, figsize=(14, 8), height_ratios=[3, 1], sharex=True, facecolor="white"
+        )
+        ax_resid.set_facecolor("white")
+    else:
+        fig, ax_ts = plt.subplots(figsize=(14, 6), facecolor="white")
+        ax_resid = None
+    ax_ts.set_facecolor("white")
+    if ax_resid is not None:
+        plt.subplots_adjust(hspace=0.05)
+
+    # Layer 1 (background): Rejected retrievals — faint gray X markers
+    if rejected_mask.sum() > 0:
+        rejected_data = week_data[rejected_mask]
+        ax_ts.scatter(
+            rejected_data["gnss_datetime"], rejected_data[gnss_dm_col],
+            marker="x", c="#cccccc", s=12, alpha=0.35, zorder=1,
+            label=f"Filtered ({rejected_mask.sum()})",
+        )
+
+    # Layer 2 (middle): Passed retrievals — colored by frequency band
+    legend_handles = []
+    if rejected_mask.sum() > 0:
+        legend_handles.append(
+            Line2D([0], [0], marker="x", color="#cccccc", markersize=6,
+                   linestyle="None", label=f"Filtered ({rejected_mask.sum()})")
+        )
+
+    if cols["freq"] and cols["freq"] in passed_data.columns and not passed_data.empty:
+        freq_vals = passed_data[cols["freq"]].values
+        unique_freqs = sorted(passed_data[cols["freq"]].unique())
         scatter_colors = [FREQ_COLORS.get(int(f), "#888888") for f in freq_vals]
 
         ax_ts.scatter(
-            week_data["gnss_datetime"], week_data[gnss_dm_col],
-            c=scatter_colors, s=15, alpha=0.7, zorder=4,
+            passed_data["gnss_datetime"], passed_data[gnss_dm_col],
+            c=scatter_colors, s=18, alpha=0.75, zorder=4,
+            edgecolors="white", linewidth=0.3,
         )
 
-        # Legend for frequency bands
-        legend_handles = []
         for f in unique_freqs:
             color = FREQ_COLORS.get(int(f), "#888888")
             label = {1: "L1", 2: "L2", 5: "L5", 20: "L2C",
@@ -471,43 +579,43 @@ def _render_week_view(df, cols, ref_info, week_start, spline_df=None):
                        markersize=6, linestyle="None", label=label)
             )
 
-        # Residual with same colors
-        if ref_dm_col:
-            residuals = week_data[gnss_dm_col].values - week_data[ref_dm_col].values
+        # Residual for passed points only, with same colors
+        if has_ref and ax_resid is not None:
+            residuals = passed_data[gnss_dm_col].values - passed_data[ref_dm_col].values
             ax_resid.scatter(
-                week_data["gnss_datetime"], residuals,
+                passed_data["gnss_datetime"], residuals,
                 c=scatter_colors, s=10, alpha=0.6, zorder=4,
             )
-    else:
-        # Single color scatter
+    elif not passed_data.empty:
         ax_ts.scatter(
-            week_data["gnss_datetime"], week_data[gnss_dm_col],
-            c="#2e86ab", s=15, alpha=0.7, zorder=4, label="GNSS-IR retrievals",
+            passed_data["gnss_datetime"], passed_data[gnss_dm_col],
+            c="#2e86ab", s=18, alpha=0.75, zorder=4,
+            edgecolors="white", linewidth=0.3,
         )
-        legend_handles = [
+        legend_handles.append(
             Line2D([0], [0], marker="o", color="w", markerfacecolor="#2e86ab",
                    markersize=6, linestyle="None", label="GNSS-IR retrievals")
-        ]
+        )
 
-        if ref_dm_col:
-            residuals = week_data[gnss_dm_col].values - week_data[ref_dm_col].values
+        if has_ref and ax_resid is not None:
+            residuals = passed_data[gnss_dm_col].values - passed_data[ref_dm_col].values
             ax_resid.scatter(
-                week_data["gnss_datetime"], residuals,
+                passed_data["gnss_datetime"], residuals,
                 c="#8e44ad", s=10, alpha=0.5, zorder=4,
             )
 
-    # Reference gauge as hourly-binned line
-    if ref_dm_col and cols["ref_datetime"]:
+    # Layer 3 (foreground): Reference gauge as hourly-binned line
+    if has_ref and cols["ref_datetime"]:
         ref_dt = cols["ref_datetime"]
         if ref_dt in week_data.columns:
             ref_times = pd.to_datetime(week_data[ref_dt], format="mixed", utc=True)
             ref_df = pd.DataFrame({"dt": ref_times, "val": week_data[ref_dm_col].values})
             ref_df["hour"] = ref_df["dt"].dt.floor("h")
             hourly = ref_df.groupby("hour")["val"].mean().sort_index()
-            ax_ts.plot(hourly.index, hourly.values, color="#c0392b", linewidth=1.5,
-                       alpha=0.9, zorder=5, label=ref_info["primary_source"])
+            ax_ts.plot(hourly.index, hourly.values, color="#c0392b", linewidth=1.8,
+                       alpha=0.9, zorder=5)
             legend_handles.append(
-                Line2D([0], [0], color="#c0392b", linewidth=1.5,
+                Line2D([0], [0], color="#c0392b", linewidth=1.8,
                        label=ref_info["primary_source"])
             )
 
@@ -519,7 +627,7 @@ def _render_week_view(df, cols, ref_info, week_start, spline_df=None):
             ax_ts.plot(
                 spline_week["spline_datetime"], spline_week["spline_dm"],
                 color="#2e86ab", linewidth=1.0, linestyle="--", alpha=0.6,
-                zorder=3, label="Spline fit",
+                zorder=3,
             )
             legend_handles.append(
                 Line2D([0], [0], color="#2e86ab", linewidth=1.0, linestyle="--",
@@ -532,25 +640,53 @@ def _render_week_view(df, cols, ref_info, week_start, spline_df=None):
     ax_ts.grid(True, alpha=0.2)
     ax_ts.set_title("Week View — Subdaily Retrievals", fontsize=13)
 
-    ax_resid.axhline(0, color="gray", linestyle="--", alpha=0.4, linewidth=0.8)
-    ax_resid.set_ylabel("Residual (m)", fontsize=11)
-    ax_resid.set_xlabel("Date", fontsize=11)
-    ax_resid.grid(True, alpha=0.2)
+    if ax_resid is not None:
+        ax_resid.axhline(0, color="gray", linestyle="--", alpha=0.4, linewidth=0.8)
+        ax_resid.set_ylabel("Residual (m)", fontsize=11)
+        ax_resid.set_xlabel("Date", fontsize=11)
+        ax_resid.grid(True, alpha=0.2)
 
-    # Auto-scale residual
-    if ref_dm_col:
-        resid_vals = week_data[gnss_dm_col].values - week_data[ref_dm_col].values
-        valid_resid = resid_vals[~np.isnan(resid_vals)]
-        if len(valid_resid) > 0:
-            lim = max(0.3, np.percentile(np.abs(valid_resid), 98) * 1.3)
-            ax_resid.set_ylim(-lim, lim)
+        # Auto-scale residual from passed retrievals
+        if has_ref and not passed_data.empty:
+            resid_vals = passed_data[gnss_dm_col].values - passed_data[ref_dm_col].values
+            valid_resid = resid_vals[~np.isnan(resid_vals)]
+            if len(valid_resid) > 0:
+                lim = max(0.3, np.percentile(np.abs(valid_resid), 98) * 1.3)
+                ax_resid.set_ylim(-lim, lim)
+
+        ax_resid.xaxis.set_major_formatter(mdates.DateFormatter("%b %d\n%H:%M"))
 
     ax_ts.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-    ax_resid.xaxis.set_major_formatter(mdates.DateFormatter("%b %d\n%H:%M"))
 
     plt.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
+
+    # --- Annotations below the plot ---
+    annotations = []
+    n_pkn_rejected = counts["all"] - counts["pknoise"]
+    n_outlier_rejected = counts["pknoise"] - counts["outlier"]
+
+    if n_pkn_rejected > 0:
+        annotations.append(
+            f"**PkNoise filter** removed {n_pkn_rejected} retrievals with weak spectral peaks "
+            f"(PkNoise < 3.0) — the reflected signal wasn't clearly distinguishable from noise."
+        )
+
+    if n_outlier_rejected > 0:
+        annotations.append(
+            f"**Outlier filter** removed {n_outlier_rejected} retrievals more than 3\u03c3 from the daily median "
+            f"— likely multipath from boats, debris, or transient obstructions."
+        )
+
+    if rejected_mask.sum() > 0:
+        annotations.append(
+            f"**{counts['final']} retrievals** passed quality control and are shown as colored points."
+        )
+    else:
+        annotations.append("All retrievals passed quality control.")
+
+    st.caption(" \u00b7 ".join(annotations))
 
 
 def render_validation_tab(station_id: str, year: int):

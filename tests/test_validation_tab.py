@@ -1,4 +1,4 @@
-# ABOUTME: Tests for validation tab column detection, daily aggregation, and bias computation.
+# ABOUTME: Tests for validation tab column detection, daily aggregation, bias, and week QC filtering.
 # ABOUTME: Covers all three station column formats (ERDDAP, USGS, CO-OPS) and missing-column edge cases.
 
 import pytest
@@ -15,6 +15,7 @@ from dashboard_components.tabs.validation_tab import (
     _detect_columns,
     _aggregate_to_daily,
     _compute_stats,
+    _apply_week_qc,
 )
 
 
@@ -73,6 +74,13 @@ def _make_subdaily(columns, n=48, seed=42):
         df["azimuth"] = rng.uniform(0, 360, n)
     if "amplitude" in columns:
         df["amplitude"] = rng.uniform(5, 15, n)
+    if "pknoise" in columns:
+        # Most values above threshold (3.0), some below to trigger filtering
+        vals = rng.uniform(3.5, 8.0, n)
+        # Plant some low-pknoise values
+        low_indices = rng.choice(n, size=max(1, n // 10), replace=False)
+        vals[low_indices] = rng.uniform(0.5, 2.5, len(low_indices))
+        df["pknoise"] = vals
 
     return df
 
@@ -232,3 +240,152 @@ class TestBiasComputation:
         cols = _detect_columns(no_gnss_wse_df)
         daily = _aggregate_to_daily(no_gnss_wse_df, cols)
         assert "gnss_wse_median" not in daily.columns
+
+
+# ── _apply_week_qc ──────────────────────────────────────────────────────────
+
+
+def _make_week_data(n=100, seed=42, include_pknoise=True, include_freq=True,
+                    n_low_pknoise=10, n_outliers=5):
+    """Build synthetic week data with controllable bad points."""
+    rng = np.random.default_rng(seed)
+    base = datetime(2024, 6, 1, tzinfo=None)
+    # Spread across 7 days with multiple retrievals per day
+    dt = [base + timedelta(hours=i * 1.5) for i in range(n)]
+
+    df = pd.DataFrame({"gnss_datetime": pd.to_datetime(dt, utc=True)})
+
+    hours = np.arange(n) * 1.5
+    tidal = 0.5 * np.sin(2 * np.pi * hours / 12.42)
+    df["gnss_dm"] = tidal + rng.normal(0, 0.03, n)
+    df["bartlett_cove_dm"] = tidal + rng.normal(0, 0.02, n)
+    df["bartlett_cove_datetime"] = df["gnss_datetime"]
+    df["gnss_wse"] = 20.0 + tidal + rng.normal(0, 0.03, n)
+    df["bartlett_cove_wl"] = -2.0 + tidal + rng.normal(0, 0.02, n)
+
+    if include_pknoise:
+        # All good pknoise by default
+        df["pknoise"] = rng.uniform(4.0, 8.0, n)
+        # Plant low-pknoise values at specific indices
+        if n_low_pknoise > 0:
+            low_idx = rng.choice(n, size=n_low_pknoise, replace=False)
+            df.loc[low_idx, "pknoise"] = rng.uniform(0.5, 2.5, n_low_pknoise)
+
+    if include_freq:
+        df["freq"] = rng.choice([1, 2, 5, 20], n)
+
+    # Plant outliers: huge deviations from tidal signal
+    if n_outliers > 0:
+        # Pick indices that won't overlap with low-pknoise ones
+        all_idx = np.arange(n)
+        outlier_idx = rng.choice(all_idx, size=n_outliers, replace=False)
+        df.loc[outlier_idx, "gnss_dm"] += rng.choice([-3.0, 3.0], n_outliers)
+
+    return df
+
+
+@pytest.mark.unit
+class TestDetectPknoise:
+    def test_pknoise_lowercase(self):
+        df = _make_subdaily([
+            "gnss_wse", "gnss_dm",
+            "bartlett_cove_wl", "bartlett_cove_dm", "bartlett_cove_datetime",
+            "pknoise",
+        ])
+        cols = _detect_columns(df)
+        assert cols["pknoise"] == "pknoise"
+
+    def test_pknoise_capitalized(self):
+        df = _make_subdaily([
+            "gnss_wse", "gnss_dm",
+            "bartlett_cove_wl", "bartlett_cove_dm", "bartlett_cove_datetime",
+        ])
+        df["PkNoise"] = 5.0
+        cols = _detect_columns(df)
+        assert cols["pknoise"] == "PkNoise"
+
+    def test_no_pknoise(self):
+        df = _make_subdaily([
+            "gnss_wse", "gnss_dm",
+            "bartlett_cove_wl", "bartlett_cove_dm", "bartlett_cove_datetime",
+        ])
+        cols = _detect_columns(df)
+        assert cols["pknoise"] is None
+
+
+@pytest.mark.unit
+class TestApplyWeekQC:
+    def test_pknoise_filter_rejects_low_values(self):
+        """Retrievals with pknoise < 3.0 should be rejected."""
+        df = _make_week_data(n=100, n_low_pknoise=10, n_outliers=0)
+        cols = _detect_columns(df)
+        rejected_mask, counts = _apply_week_qc(df, cols)
+
+        # All 10 low-pknoise points should be rejected
+        low_pkn = df["pknoise"] < 3.0
+        assert low_pkn.sum() == 10
+        # Every low-pknoise point should be in the rejected mask
+        assert (rejected_mask[low_pkn.values]).all()
+
+    def test_outlier_filter_rejects_extreme_values(self):
+        """Retrievals > 3σ from daily median should be rejected."""
+        df = _make_week_data(n=100, n_low_pknoise=0, n_outliers=5,
+                             include_pknoise=False)
+        cols = _detect_columns(df)
+        rejected_mask, counts = _apply_week_qc(df, cols)
+
+        # Should have rejected some outliers (the 3m deviations)
+        assert counts["outlier"] < counts["all"]
+        assert rejected_mask.sum() > 0
+
+    def test_funnel_counts_consistent(self):
+        """Funnel counts should be monotonically decreasing: all >= pknoise >= final."""
+        df = _make_week_data(n=100, n_low_pknoise=10, n_outliers=5)
+        cols = _detect_columns(df)
+        rejected_mask, counts = _apply_week_qc(df, cols)
+
+        assert counts["all"] == 100
+        assert counts["pknoise"] <= counts["all"]
+        assert counts["outlier"] <= counts["pknoise"]
+        assert counts["final"] == counts["outlier"]
+        assert counts["final"] == counts["all"] - rejected_mask.sum()
+
+    def test_no_pknoise_column_skips_filter(self):
+        """When pknoise absent, pknoise count equals all count."""
+        df = _make_week_data(n=100, n_low_pknoise=0, n_outliers=5,
+                             include_pknoise=False)
+        cols = _detect_columns(df)
+        rejected_mask, counts = _apply_week_qc(df, cols)
+
+        assert counts["pknoise"] == counts["all"]
+
+    def test_all_points_pass(self):
+        """Clean data: no rejections."""
+        df = _make_week_data(n=50, n_low_pknoise=0, n_outliers=0)
+        cols = _detect_columns(df)
+        rejected_mask, counts = _apply_week_qc(df, cols)
+
+        assert counts["final"] == counts["all"]
+        assert rejected_mask.sum() == 0
+
+    def test_few_points_skips_outlier_filter(self):
+        """With < 5 points per day, MAD outlier filter is skipped."""
+        # Only 4 points total, all in one day
+        df = _make_week_data(n=4, n_low_pknoise=0, n_outliers=0,
+                             include_pknoise=False)
+        # Inject an outlier manually
+        df.loc[0, "gnss_dm"] += 5.0
+        cols = _detect_columns(df)
+        rejected_mask, counts = _apply_week_qc(df, cols)
+
+        # Should NOT be rejected because day has < 5 points
+        assert counts["final"] == counts["all"]
+
+    def test_returns_boolean_mask_same_length(self):
+        """Rejected mask should be a boolean array matching input length."""
+        df = _make_week_data(n=80)
+        cols = _detect_columns(df)
+        rejected_mask, counts = _apply_week_qc(df, cols)
+
+        assert len(rejected_mask) == 80
+        assert rejected_mask.dtype == bool
