@@ -41,6 +41,42 @@ def _load_classification(station, year):
     return df
 
 
+def _load_met_data(station, year, project_root=None):
+    """Load cached met data CSV. Returns DataFrame or None."""
+    root = project_root or PROJECT_ROOT
+    path = root / "results_annual" / station / f"{station}_{year}_met_daily.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    df["date"] = pd.to_datetime(df["date"])
+    return df
+
+
+def _get_freezing_point(station, config_path=None):
+    """Get local freezing point from config, defaulting by surface type.
+
+    Stations with ice_free_months configured → seawater (-1.8°C).
+    Other stations → freshwater (0.0°C).
+    Explicit met_data.freezing_point_c overrides both defaults.
+    """
+    cfg_path = config_path or (PROJECT_ROOT / "config" / "stations_config.json")
+    if not cfg_path.exists():
+        return -1.8
+
+    with open(cfg_path) as f:
+        all_cfg = json.load(f)
+
+    station_cfg = all_cfg.get(station, {})
+    met_cfg = station_cfg.get("met_data", {})
+    if "freezing_point_c" in met_cfg:
+        return met_cfg["freezing_point_c"]
+
+    # Default: seawater freezing if ice classification is configured
+    if station_cfg.get("ice_free_months"):
+        return -1.8
+    return 0.0
+
+
 def _match_s1_to_classification(s1_index, clf):
     merged = pd.merge_asof(
         s1_index.sort_values("date_dt"),
@@ -543,8 +579,8 @@ def _render_wavelet_comparison(station, year):
     plt.close(fig)
 
 
-def _render_score_timeseries(clf):
-    """Ice score time series with classification zone shading."""
+def _render_score_timeseries(clf, station_id=None, year=None):
+    """Ice score time series with classification zone shading and optional temperature overlay."""
     fig = go.Figure()
 
     # Shaded classification zones
@@ -573,8 +609,11 @@ def _render_score_timeseries(clf):
             hovertemplate="%{x|%b %d}: %{y:.2f}<extra></extra>",
         ))
 
-    fig.update_layout(
-        height=280, margin=dict(l=50, r=20, t=30, b=30),
+    # Temperature overlay on secondary y-axis
+    met = _load_met_data(station_id, year) if station_id and year else None
+
+    layout_kwargs = dict(
+        height=320, margin=dict(l=50, r=60, t=30, b=30),
         yaxis=dict(title="Ice Score", range=[-1.1, 1.1]),
         xaxis=dict(title=""),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
@@ -585,7 +624,52 @@ def _render_score_timeseries(clf):
                  showarrow=False, font=dict(color=CLASS_COLOR["water"], size=10)),
         ],
     )
+
+    if met is not None:
+        freezing_pt = _get_freezing_point(station_id)
+
+        fig.add_trace(go.Scatter(
+            x=met["date"],
+            y=met["temp_mean_c"],
+            mode="lines",
+            line=dict(color="#ff7f0e", width=1.5),
+            opacity=0.6,
+            name="Temperature (\u00b0C)",
+            yaxis="y2",
+            hovertemplate="%{x|%b %d}: %{y:.1f}\u00b0C<extra></extra>",
+        ))
+
+        # Freezing point reference line
+        fig.add_shape(
+            type="line", y0=freezing_pt, y1=freezing_pt,
+            x0=0, x1=1, xref="paper", yref="y2",
+            line=dict(color="#ff7f0e", width=1, dash="dash"),
+            opacity=0.4,
+        )
+        fig.add_annotation(
+            x=1.0, y=freezing_pt, xref="paper", yref="y2",
+            text=f"Freezing ({freezing_pt}\u00b0C)",
+            showarrow=False, font=dict(color="#ff7f0e", size=9),
+            xanchor="right", yanchor="bottom",
+        )
+
+        layout_kwargs["yaxis2"] = dict(
+            title="Temperature (\u00b0C)",
+            overlaying="y",
+            side="right",
+            showgrid=False,
+            titlefont=dict(color="#ff7f0e"),
+            tickfont=dict(color="#ff7f0e"),
+        )
+
+    fig.update_layout(**layout_kwargs)
     st.plotly_chart(fig, use_container_width=True)
+
+    if met is None and station_id:
+        st.caption(
+            f"Add temperature context: "
+            f"`python scripts/fetch_met_data.py --station {station_id} --year {year}`"
+        )
 
 
 def _load_ice_free_months(station):
@@ -1028,7 +1112,7 @@ def render_ice_comparison_tab(station_id, year):
     c3.metric("Transition", counts.get("transition", 0))
     c4.metric("Water", counts.get("water", 0))
 
-    _render_score_timeseries(clf)
+    _render_score_timeseries(clf, station_id=station_id, year=year)
 
     # --- Section 2: Methodology ---
     with st.expander("Scoring Methodology", expanded=False):

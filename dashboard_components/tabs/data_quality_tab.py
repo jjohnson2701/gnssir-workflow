@@ -67,6 +67,49 @@ def _get_pooled_daily(enriched):
     return pooled
 
 
+def _analyze_gaps(enriched, per_arc, year):
+    """Classify each day of the year as: data, qc_gap, or no_data.
+
+    - 'data': at least one arc passed QC and appears in enriched pooled rows
+    - 'qc_gap': arcs were recorded but all failed quality control
+    - 'no_data': no arcs were even attempted
+    """
+    all_days = pd.date_range(f"{year}-01-01", f"{year}-12-31", freq="D")
+
+    # Days with valid pooled data
+    pooled = _get_pooled_daily(enriched)
+    if not pooled.empty:
+        pooled_dates = pd.to_datetime(pooled["date"])
+        data_days = set(pooled_dates.dt.date)
+    else:
+        data_days = set()
+
+    # Days with ANY arcs attempted (including failed)
+    attempted_days = {}
+    if per_arc is not None and "date" in per_arc.columns:
+        per_arc_counts = per_arc.groupby("date").size().reset_index(name="arc_attempts")
+        per_arc_counts["date_dt"] = pd.to_datetime(per_arc_counts["date"])
+        attempted_days = dict(zip(
+            per_arc_counts["date_dt"].dt.date,
+            per_arc_counts["arc_attempts"],
+        ))
+
+    records = []
+    for day in all_days:
+        d = day.date()
+        if d in data_days:
+            records.append({"date": day, "status": "data",
+                            "arc_attempts": attempted_days.get(d, 0)})
+        elif d in attempted_days:
+            records.append({"date": day, "status": "qc_gap",
+                            "arc_attempts": attempted_days[d]})
+        else:
+            records.append({"date": day, "status": "no_data",
+                            "arc_attempts": 0})
+
+    return pd.DataFrame(records)
+
+
 def _render_key_metrics(enriched, per_arc):
     """Top strip: key quality metrics with traffic-light indicators."""
     # Get pooled daily stats
@@ -152,6 +195,59 @@ def _render_annual_summary(enriched, per_arc, station_id, year):
             plt.tight_layout()
             st.pyplot(fig)
             plt.close(fig)
+
+    # --- Gap analysis strip ---
+    gap_df = _analyze_gaps(enriched, per_arc, year)
+    n_data = int((gap_df["status"] == "data").sum())
+    n_qc_gap = int((gap_df["status"] == "qc_gap").sum())
+    n_no_data = int((gap_df["status"] == "no_data").sum())
+
+    if n_qc_gap > 0 or n_no_data > 0:
+        # Summary metrics
+        g1, g2, g3 = st.columns(3)
+        g1.metric("Days with data", f"{n_data}",
+                   help="At least one arc passed QC")
+        g2.metric("QC gaps", f"{n_qc_gap}",
+                   help="Arcs were recorded but all failed quality control")
+        g3.metric("No data", f"{n_no_data}",
+                   help="No arcs were even attempted — station may have been down")
+
+        # Visual gap bar: one colored cell per day of year
+        import matplotlib.dates as mdates
+        fig_gap, ax_gap = plt.subplots(figsize=(14, 0.6))
+        gap_colors = {"data": "#4caf50", "qc_gap": "#f44336", "no_data": "#e0e0e0"}
+        bar_colors = [gap_colors[s] for s in gap_df["status"]]
+        ax_gap.bar(range(len(gap_df)), 1, color=bar_colors, width=1, edgecolor="none")
+        ax_gap.set_xlim(-0.5, len(gap_df) - 0.5)
+        ax_gap.set_yticks([])
+
+        # Month labels
+        for m in range(1, 13):
+            doy = pd.Timestamp(year=year, month=m, day=1).day_of_year - 1
+            ax_gap.axvline(doy, color="white", linewidth=0.5)
+            ax_gap.text(doy + 15, 0.5,
+                        pd.Timestamp(year=year, month=m, day=1).strftime("%b"),
+                        ha="center", va="center", fontsize=8, color="#333")
+        ax_gap.set_title("Gap Analysis", fontsize=10, loc="left")
+        plt.tight_layout()
+        st.pyplot(fig_gap)
+        plt.close(fig_gap)
+
+        st.caption(
+            "\U0001f7e2 Data available \u00b7 "
+            "\U0001f534 Arcs recorded but all failed QC \u00b7 "
+            "\u2b1c No data"
+        )
+
+        # Contextual annotation for significant QC gaps
+        if n_qc_gap > 5:
+            qc_gap_days = gap_df[gap_df["status"] == "qc_gap"]
+            mean_attempts = qc_gap_days["arc_attempts"].mean()
+            st.caption(
+                f"On {n_qc_gap} days, the station recorded arcs (avg {mean_attempts:.0f}/day) "
+                f"but none passed the PkNoise threshold — this may indicate antenna icing, "
+                f"snow accumulation on the choke ring, or unusually rough surface conditions."
+            )
 
     # --- Azimuth quality + Frequency performance side by side ---
     if per_arc is not None or enriched is not None:
