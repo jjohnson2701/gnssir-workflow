@@ -334,11 +334,13 @@
   "NIAQ": {
     "station_id_4char_lower": "niaq",
     "data_source": "earthscope",
+    "orbit_type": "gnss",
     "ellipsoidal_height_m": 95.308,
     "latitude_deg": 70.79172,
     "longitude_deg": -53.66145,
     "gnssir_json_params_path": "config/niaq.json",
     "reference_gauge_id": null,
+    "ice_free_months": [7, 8],
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
@@ -350,6 +352,27 @@
       "target_usgs_site": null,
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
+    },
+    "external_data_sources": {
+      "erddap": {
+        "enabled": true,
+        "primary_reference": true,
+        "server": "UHSLC",
+        "base_url": "https://uhslc.soest.hawaii.edu/erddap",
+        "dataset_id": "global_hourly_fast",
+        "station_name": "Upernavik harbour",
+        "uhslc_id": 817,
+        "distance_km": 238.2,
+        "latitude": 72.787,
+        "longitude": -56.142,
+        "variables": {
+          "water_level": "sea_level",
+          "time": "time",
+          "units_scale": 0.001
+        },
+        "datum": "Relative (pressure gauge)",
+        "notes": "UHSLC station 817, Upernavik harbour. Fast delivery hourly data, 2024-08 to present. Sea level in mm, converted to m via units_scale. 238 km from NIAQ — nearest tide gauge with continuous observations."
+      }
     }
   },
   "LRSK": {
