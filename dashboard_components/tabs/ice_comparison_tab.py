@@ -654,11 +654,10 @@ def _render_score_timeseries(clf, station_id=None, year=None):
         )
 
         layout_kwargs["yaxis2"] = dict(
-            title="Temperature (\u00b0C)",
+            title=dict(text="Temperature (\u00b0C)", font=dict(color="#ff7f0e")),
             overlaying="y",
             side="right",
             showgrid=False,
-            titlefont=dict(color="#ff7f0e"),
             tickfont=dict(color="#ff7f0e"),
         )
 
