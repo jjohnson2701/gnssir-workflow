@@ -1200,6 +1200,11 @@ def _render_standard_indicators(clf):
         ax.axvspan(ice_start, ice_end, alpha=0.1, color="#1565c0", label="Ice season")
         ax.axvspan(water_start, water_end, alpha=0.1, color="#2e7d32", label="Water season")
 
+        # Rotate date labels to prevent overlap
+        ax.tick_params(axis="x", rotation=45)
+        ax.xaxis.set_major_locator(matplotlib.dates.MonthLocator(interval=2))
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter("%b"))
+
     fig.tight_layout()
     st.pyplot(fig)
     plt.close(fig)

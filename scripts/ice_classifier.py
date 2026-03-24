@@ -381,7 +381,8 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
                 f"  Sector {AZ_BIN_LABELS.get(b, str(b))}: "
                 f"amp ice>{t['amp_mean_ice']:.1f} water<{t['amp_mean_water']:.1f}, "
                 f"cv ice<{t['amp_cv_ice']:.3f} water>{t['amp_cv_water']:.3f}, "
-                f"seasonal ratio={t['seasonal_ratio']:.2f}x, n={t['n_arcs']}"
+                f"seasonal ratio={t['seasonal_ratio']:.2f}x, n={t['n_arcs']}" if t["seasonal_ratio"] is not None else
+                f"seasonal ratio=N/A, n={t['n_arcs']}"
                 f"{snr_info}{flag}"
             )
 
@@ -664,10 +665,11 @@ def main():
     print(f"\nSector thresholds:")
     for b, t in sector_thresholds.items():
         flag = " ** LAND **" if t["land_flag"] else ""
+        ratio_str = f"{t['seasonal_ratio']:.2f}x" if t["seasonal_ratio"] is not None else "N/A"
         print(f"  {AZ_BIN_LABELS.get(b, str(b))} deg: "
               f"amp [{t['amp_mean_water']:.1f}, {t['amp_mean_ice']:.1f}], "
               f"cv [{t['amp_cv_ice']:.3f}, {t['amp_cv_water']:.3f}], "
-              f"ratio={t['seasonal_ratio']:.2f}x, n={t['n_arcs']}{flag}")
+              f"ratio={ratio_str}, n={t['n_arcs']}{flag}")
 
     print(f"\nDays classified: {len(result)}")
     print(f"\n{result['classification'].value_counts().to_string()}")
