@@ -779,7 +779,127 @@ def extract_features(station, year, num_cores=1):
     full_pct = df["full_arc"].mean() * 100
     logger.info(f"Full arcs: {full_pct:.1f}%")
 
+    # Save example arcs for dashboard single-arc display
+    _save_example_arcs(df, station, year, config)
+
     return df
+
+
+# ---------------------------------------------------------------------------
+# Example arc saving for dashboard
+# ---------------------------------------------------------------------------
+
+def _save_example_arcs(results_df, station, year, config):
+    """Save the best ice-like and water-like example arcs for dashboard display.
+
+    Selects the arc with lowest gamma (ice) and highest gamma (water),
+    re-reads the SNR files, extracts the detrended signal and Hilbert
+    envelope, and saves to a JSON file.
+    """
+    if "gamma" not in results_df.columns or results_df["gamma"].isna().all():
+        return
+
+    valid = results_df.dropna(subset=["gamma"])
+    if len(valid) < 2:
+        return
+
+    ice_row = valid.loc[valid["gamma"].idxmin()]
+    water_row = valid.loc[valid["gamma"].idxmax()]
+
+    e1 = config["e1"]
+    e2 = config["e2"]
+    poly_order = config.get("polyV", 4)
+    pele = tuple(config.get("pele", [5, 30]))
+
+    examples = {}
+    for label, row in [("ice", ice_row), ("water", water_row)]:
+        doy = int(row["doy"])
+        sat = int(row["sat"])
+        freq = int(row["freq"])
+        utctime = float(row["UTCtime"])
+        rise = int(row["rise"])
+
+        snr_path = _snr_file_path(station, year, doy)
+        if not snr_path.exists():
+            gz_path = Path(str(snr_path) + ".gz")
+            snr_path = gz_path if gz_path.exists() else snr_path
+        if not snr_path.exists():
+            continue
+
+        try:
+            snr_data = read_snr_file(snr_path)
+        except Exception:
+            continue
+
+        sat_mask = snr_data[:, 0] == sat
+        sat_data = snr_data[sat_mask]
+        if len(sat_data) < 5:
+            continue
+
+        arcs = segment_satellite_arcs(sat_data[:, 3], sat_data[:, 1])
+        seg_idx = find_matching_segment(
+            arcs, sat_data[:, 3], sat_data[:, 1],
+            target_utctime=utctime, target_rise=rise,
+            e1=e1, e2=e2,
+        )
+        if seg_idx < 0:
+            continue
+
+        arc = arcs[seg_idx]
+        arc_data = sat_data[arc["start_idx"]:arc["end_idx"]]
+        arc_ele = arc_data[:, 1]
+
+        col_idx = FREQ_TO_COL.get(freq)
+        if col_idx is None or col_idx >= arc_data.shape[1]:
+            continue
+
+        snr_db = arc_data[:, col_idx]
+        if np.all(snr_db == 0):
+            continue
+
+        wavelength = FREQ_WAVELENGTH.get(freq)
+        if wavelength is None:
+            continue
+
+        snr_lin = np.power(10, snr_db / 20)
+        detrended = detrend_arc(arc_ele, snr_lin, poly_order, pele)
+
+        # Window to [e1, e2]
+        mask = (arc_ele >= e1) & (arc_ele <= e2)
+        ele_w = arc_ele[mask]
+        dsnr_w = detrended[mask]
+
+        if len(dsnr_w) < 15:
+            continue
+
+        # Hilbert envelope
+        analytic = hilbert(dsnr_w)
+        envelope = np.abs(analytic)
+
+        date_str = str(
+            pd.Timestamp(year=year, month=1, day=1) + pd.Timedelta(days=doy - 1)
+        )[:10]
+
+        examples[label] = {
+            "date": date_str,
+            "doy": doy,
+            "sat": sat,
+            "freq": freq,
+            "gamma": float(row["gamma"]),
+            "af": float(row.get("AF", 0)),
+            "clr": float(row.get("CLR", 0)),
+            "elevation": ele_w.tolist(),
+            "dsnr": dsnr_w.tolist(),
+            "envelope": envelope.tolist(),
+        }
+
+    if examples:
+        import json as json_mod
+        out_path = (PROJECT_ROOT / "results_annual" / station
+                    / f"{station}_{year}_example_arcs.json")
+        with open(out_path, "w") as f:
+            json_mod.dump(examples, f)
+        logger.info(f"Saved example arcs to {out_path}")
 
 
 # ---------------------------------------------------------------------------

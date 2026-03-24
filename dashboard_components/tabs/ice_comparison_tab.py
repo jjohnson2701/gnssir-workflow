@@ -1113,8 +1113,282 @@ def _render_calibration_validation(clf, ice_free_months):
         )
 
 
+def _load_example_arcs(station, year):
+    """Load precomputed example arcs (ice and water) for single-arc displays."""
+    path = (PROJECT_ROOT / "results_annual" / station
+            / f"{station}_{year}_example_arcs.json")
+    if not path.exists():
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
+def _load_per_arc(station, year):
+    """Load per-arc parquet for raw amplitude and standard indicator plots."""
+    path = (PROJECT_ROOT / "results_annual" / station
+            / f"{station}_{year}_per_arc.parquet")
+    if not path.exists():
+        return None
+    return safe_read_parquet(path)
+
+
+def _render_raw_amplitude(per_arc):
+    """Section 1: Raw daily mean amplitude scatter — what the antenna sees."""
+    daily_amp = per_arc.groupby("date")["Amp"].mean()
+    dates = pd.to_datetime(daily_amp.index)
+    months = dates.month
+
+    # Color by season
+    season_colors = []
+    for m in months:
+        if m in (12, 1, 2, 3):
+            season_colors.append("#1565c0")   # winter blue
+        elif m in (4, 5):
+            season_colors.append("#7986cb")   # spring
+        elif m in (6, 7, 8):
+            season_colors.append("#2e7d32")   # summer green
+        elif m in (9, 10, 11):
+            season_colors.append("#f9a825")   # autumn
+        else:
+            season_colors.append("#888888")
+
+    fig, ax = plt.subplots(figsize=(10, 3), dpi=100)
+    ax.scatter(dates, daily_amp.values, c=season_colors, s=8, alpha=0.7)
+    ax.set_ylabel("Mean Amplitude")
+    ax.set_xlabel("")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+    st.caption(
+        "Each point is one day's mean reflected signal strength across all "
+        "azimuth sectors. Blue = winter, green = summer, yellow = autumn."
+    )
+
+
+def _render_standard_indicators(clf):
+    """Section 2: Three-panel figure of amplitude mean, CV, RH std."""
+    clf = clf.copy()
+    clf["month"] = clf["date_dt"].dt.month
+
+    panels = [
+        ("amp_mean", "Amplitude Mean"),
+        ("amp_cv", "Amplitude CV"),
+        ("rh_std", "RH Std Dev (m)"),
+    ]
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3.5), dpi=100)
+
+    for ax, (col, label) in zip(axes, panels):
+        if col not in clf.columns:
+            ax.set_visible(False)
+            continue
+
+        vals = clf[col].values
+        dates = clf["date_dt"].values
+
+        ax.scatter(dates, vals, s=6, alpha=0.6, c="#555555")
+        ax.set_title(label, fontsize=10)
+        ax.grid(True, alpha=0.3)
+
+        # Shade Mar-May (ice) and Jul-Aug (water)
+        year = clf["date_dt"].dt.year.iloc[0]
+        ice_start = pd.Timestamp(year=year, month=3, day=1)
+        ice_end = pd.Timestamp(year=year, month=5, day=31)
+        water_start = pd.Timestamp(year=year, month=7, day=1)
+        water_end = pd.Timestamp(year=year, month=8, day=31)
+        ax.axvspan(ice_start, ice_end, alpha=0.1, color="#1565c0", label="Ice season")
+        ax.axvspan(water_start, water_end, alpha=0.1, color="#2e7d32", label="Water season")
+
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+    st.caption(
+        "Standard GNSS-IR indicators over the year. Blue shading = typical ice "
+        "season (Mar-May), green = ice-free calibration (Jul-Aug). "
+        "Amplitude alone cannot resolve the freeze-up transition — we need "
+        "indicators that measure *how* the signal reflects, not just *how strong* it is."
+    )
+
+
+def _render_damping_section(clf, examples):
+    """Section 3: Damping parameter with single-arc envelope display."""
+    st.markdown(
+        "**$\\gamma$** (Damping) — Strandberg 2017. The Hilbert transform "
+        "envelope of the detrended signal decays with elevation. Fitting "
+        "the log-envelope gives the damping coefficient:"
+    )
+    st.latex(
+        r"\ln \left| \mathcal{H}\{d\text{SNR}\} \right| = "
+        r"\ln A_0 - 4 k^2 \gamma \sin^2 \varepsilon"
+        r"\qquad \text{where } k = 2\pi / \lambda"
+    )
+    st.markdown(
+        "Low $\\gamma$ → slow decay → smooth surface (ice). "
+        "High $\\gamma$ → fast decay → rough surface (water)."
+    )
+
+    # Single-arc example
+    if examples and "ice" in examples and "water" in examples:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5), dpi=100)
+
+        for ax, label, color in [(ax1, "ice", "#1565c0"), (ax2, "water", "#2e7d32")]:
+            arc = examples[label]
+            ele = np.array(arc["elevation"])
+            dsnr = np.array(arc["dsnr"])
+            env = np.array(arc["envelope"])
+
+            ax.plot(ele, dsnr, color="#999999", linewidth=0.5, alpha=0.7)
+            ax.plot(ele, env, color=color, linewidth=2,
+                    label=f"Envelope (γ={arc['gamma']:.4f})")
+            ax.plot(ele, -env, color=color, linewidth=2, alpha=0.5)
+            ax.set_title(
+                f"{label.capitalize()} — {arc['date']} PRN {arc['sat']}",
+                fontsize=10,
+            )
+            ax.set_xlabel("Elevation (°)")
+            ax.set_ylabel("dSNR")
+            ax.legend(fontsize=8, loc="upper right")
+            ax.grid(True, alpha=0.3)
+
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+        st.caption(
+            "The envelope decays faster over rough water (high γ) than smooth "
+            "ice (low γ). The Hilbert transform extracts this decay rate per "
+            "arc without needing the full Strandberg multi-day inversion."
+        )
+    else:
+        st.caption(
+            "Single-arc example not available. Re-run the feature extractor "
+            "to generate example arcs."
+        )
+
+    # γ timeseries
+    clf = clf.copy()
+    clf["gamma_med"] = _median_across_sectors(clf, "gamma")
+    if "gamma_med" in clf.columns and clf["gamma_med"].notna().any():
+        fig, ax = plt.subplots(figsize=(10, 3), dpi=100)
+        for cls, color in CLASS_COLOR.items():
+            mask = clf["classification"] == cls
+            if mask.sum() == 0:
+                continue
+            subset = clf[mask]
+            ax.scatter(subset["date_dt"], subset["gamma_med"],
+                       c=color, s=6, alpha=0.7, label=cls.capitalize())
+        ax.set_ylabel("γ (damping)")
+        ax.legend(fontsize=8, loc="upper right")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+
+
+def _render_area_factor_section(clf, station_id, year, examples):
+    """Section 4: Area factor with corrected physics and wavelet scalograms."""
+    st.markdown(
+        "**AF** (Area Factor) — Song 2022. "
+        "Continuous wavelet transform (Morlet, $\\omega_0 = 5$) of "
+        "$d\\text{SNR}$ in the $\\sin(\\varepsilon)/(\\lambda/2)$ domain. "
+        "The power curve at the dominant RH scale $s_0$ is integrated:"
+    )
+    st.latex(r"AF = \int \left| W_{CWT}(s_0,\, \tau) \right|^2 \, d\tau")
+    st.markdown(
+        "AF measures total reflected power across all elevation angles, which "
+        "depends on both the Fresnel reflectivity of the surface layers and "
+        "their roughness. Ice and snow-on-ice produce higher total RHCP "
+        "reflectivity than open water — despite water's higher permittivity, "
+        "the air-water interface converts most reflected energy to LHCP which "
+        "the geodetic antenna rejects. The area factor captures both "
+        "reflectivity and roughness effects without parametric assumptions, "
+        "making it robust to multilayer conditions (Song 2022)."
+    )
+
+    # Wavelet scalograms (existing)
+    try:
+        _render_wavelet_comparison(station_id, year)
+    except Exception as e:
+        st.warning(f"Wavelet comparison unavailable: {e}")
+
+    # AF timeseries
+    clf = clf.copy()
+    clf["af_med"] = _median_across_sectors(clf, "af")
+    if "af_med" in clf.columns and clf["af_med"].notna().any():
+        fig, ax = plt.subplots(figsize=(10, 3), dpi=100)
+        for cls, color in CLASS_COLOR.items():
+            mask = clf["classification"] == cls
+            if mask.sum() == 0:
+                continue
+            subset = clf[mask]
+            ax.scatter(subset["date_dt"], subset["af_med"],
+                       c=color, s=6, alpha=0.7, label=cls.capitalize())
+        ax.set_ylabel("Area Factor")
+        ax.legend(fontsize=8, loc="upper right")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+
+
+def _render_voting_section(clf):
+    """Section 5: Purnell 2024 — CLR/PR intro, weight table, all indicators."""
+    has_features = _has_snr_features(clf)
+
+    if has_features:
+        st.markdown(
+            "**CLR** (Clarity Ratio) — Purnell 2024's best single-feature "
+            "discriminator (77.7% accuracy alone). Ratio of the dominant LSP peak "
+            "to the mean of all other peaks:"
+        )
+        st.latex(r"CLR = \frac{P_1}{\bar{P}_{2 \ldots N}}")
+        st.markdown(
+            "**PR** (Peak Ratio) — ratio of the two strongest LSP peaks. "
+            "High PR indicates a single dominant reflection surface (ice):"
+        )
+        st.latex(r"PR = \frac{P_1}{P_2}")
+
+    st.markdown(
+        "Each indicator compares the daily value against thresholds derived "
+        "from the **ice-free calibration months** (p30 and p70 of summer daily "
+        "medians). Sector score is the weighted mean of all indicator votes:"
+    )
+    st.latex(r"S_{\text{sector}} = \frac{\sum_i w_i \, v_i}{\sum_i w_i}")
+
+    # Indicator weight table
+    rows = [
+        ("Amplitude mean", "2.0", "High (≥ p70)", "Low (≤ p30)", "Standard GNSS-IR"),
+        ("Amplitude CV", "1.5", "Low (≤ p25)", "High (≥ p75)", "Standard GNSS-IR"),
+        ("RH std dev", "1.0", "Low (≤ p30)", "High (≥ p70)", "Standard GNSS-IR"),
+    ]
+    if has_features:
+        rows.insert(1, ("**CLR** (clarity ratio)", "2.0", "High (≥ p70)", "Low (≤ p30)", "Purnell 2024"))
+        rows.insert(3, ("**AF** (area factor)", "1.5", "High (≥ p70)", "Low (≤ p30)", "Song 2022"))
+        rows.insert(5, ("**PR** (peak ratio)", "1.0", "High (≥ p70)", "Low (≤ p30)", "Purnell 2024"))
+        rows.insert(6, ("**γ** (damping)", "1.0", "Low (≤ p30)", "High (≥ p70)", "Strandberg 2017"))
+
+    header = "| Indicator | Weight | Ice Signal | Water Signal | Source |\n"
+    header += "|-----------|--------|-----------|--------------|--------|\n"
+    body = "\n".join(f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} |" for r in rows)
+    st.markdown(header + body)
+
+    # All-indicator evidence plot
+    if has_features:
+        st.markdown(
+            "Different indicators respond to different physical processes. "
+            "γ detects pre-freeze surface calming (roughness); CLR only responds "
+            "when a coherent ice sheet forms. Their divergence during freeze-up "
+            "reveals the transition sequence."
+        )
+        _render_indicator_timeseries(clf)
+
+
 def render_ice_comparison_tab(station_id, year):
-    """Render ice classification tab with literature-based scoring methodology."""
+    """Render ice classification tab as a paper-by-paper narrative.
+
+    Walks from raw signal → standard indicators → damping → area factor →
+    voting → classification result → validation → summary.
+    """
     st.header("Ice Classification")
 
     clf = _load_classification(station_id, year)
@@ -1126,8 +1400,11 @@ def render_ice_comparison_tab(station_id, year):
         return
 
     has_features = _has_snr_features(clf)
+    per_arc = _load_per_arc(station_id, year)
+    examples = _load_example_arcs(station_id, year)
+    ice_free_months = _load_ice_free_months(station_id)
 
-    # --- Section 1: Overview metrics + score time series ---
+    # --- Section 0: Metrics strip ---
     counts = clf["classification"].value_counts()
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Days Classified", len(clf))
@@ -1135,55 +1412,53 @@ def render_ice_comparison_tab(station_id, year):
     c3.metric("Transition", counts.get("transition", 0))
     c4.metric("Water", counts.get("water", 0))
 
+    # --- Section 1: What does the antenna see? ---
+    if per_arc is not None:
+        st.subheader("What does the antenna see?")
+        _render_raw_amplitude(per_arc)
+
+    # --- Section 2: Amplitude tells part of the story ---
+    st.subheader("Amplitude tells part of the story")
+    _render_standard_indicators(clf)
+
+    # --- Section 3: Damping sees roughness changes (Strandberg 2017) ---
+    if has_features:
+        st.subheader("The damping parameter sees roughness changes")
+        _render_damping_section(clf, examples)
+
+    # --- Section 4: The area factor handles snow-on-ice (Song 2022) ---
+    if has_features:
+        st.subheader("The area factor handles snow-on-ice")
+        _render_area_factor_section(clf, station_id, year, examples)
+
+    # --- Section 5: Multiple indicators vote together (Purnell 2024) ---
+    st.subheader("Multiple indicators vote together")
+    _render_voting_section(clf)
+
+    # --- Section 6: The classification result ---
+    st.subheader("The classification result")
     _render_score_timeseries(clf, station_id=station_id, year=year)
 
-    # --- Section 2: Methodology ---
-    with st.expander("Scoring Methodology", expanded=False):
-        _render_methodology(clf)
+    # --- Section 7: Validation ---
+    st.subheader("Validation")
 
-    # --- Section 3: Wavelet comparison (if SNR features available) ---
-    if has_features:
-        st.subheader("Wavelet Analysis")
-        st.caption(
-            "CWT scalograms for the strongest ice day vs strongest water day. "
-            "Ice produces concentrated power at one reflector height; water "
-            "disperses power across scales."
-        )
-        try:
-            _render_wavelet_comparison(station_id, year)
-        except Exception as e:
-            st.warning(f"Wavelet comparison unavailable: {e}")
-
-    # --- Section 4: Calibration validation ---
-    ice_free_months = _load_ice_free_months(station_id)
     if ice_free_months:
-        st.subheader("Calibration Validation")
+        with st.expander("Calibration validation", expanded=False):
+            st.caption(
+                "Are the ice-free calibration months ({}) representative of open "
+                "water conditions?".format(
+                    ", ".join(MONTH_NAMES.get(m, str(m)) for m in ice_free_months))
+            )
+            _render_calibration_validation(clf, ice_free_months)
+
+    with st.expander("Per-sector analysis", expanded=False):
         st.caption(
-            "Are the ice-free calibration months ({}) representative of open "
-            "water conditions? Monthly distributions of each indicator should "
-            "show calibration months at the water extreme.".format(
-                ", ".join(MONTH_NAMES.get(m, str(m)) for m in ice_free_months))
+            "Each row is an azimuth sector. Blue = ice vote, green = water vote. "
+            "Brown = land-flagged (excluded from consensus)."
         )
-        _render_calibration_validation(clf, ice_free_months)
+        _render_sector_heatmap(clf)
 
-    # --- Section 5: Indicator time series (if SNR features available) ---
-    if has_features:
-        st.subheader("Indicator Evidence")
-        st.caption(
-            "Daily median of each indicator across active azimuth sectors. "
-            "Points colored by station-level classification."
-        )
-        _render_indicator_timeseries(clf)
-
-    # --- Section 6: Per-sector heatmap ---
-    st.subheader("Per-Sector Analysis")
-    st.caption(
-        "Each row is an azimuth sector. Blue = ice vote, green = water vote. "
-        "Brown = land-flagged (excluded from consensus)."
-    )
-    _render_sector_heatmap(clf)
-
-    # --- Section 5: S1 SAR validation ---
+    # S1 SAR validation
     s1_index = load_s1_index(station_id)
     if s1_index is not None:
         s1_year = s1_index[s1_index["date_dt"].dt.year == year].copy()
@@ -1194,21 +1469,17 @@ def render_ice_comparison_tab(station_id, year):
         matched = matched[matched["thumb_exists"]]
 
         if not matched.empty:
-            st.subheader(f"S1 SAR Validation ({len(matched)} scenes)")
-            st.caption(
-                "Sentinel-1 thumbnails with classification-colored borders. "
-                "Select a scene below the grid to view full-size."
-            )
+            with st.expander(
+                f"S1 SAR validation ({len(matched)} scenes)", expanded=False
+            ):
+                _render_thumbnail_grid(matched, station_id)
+                _render_scene_detail(matched, station_id)
 
-            _render_thumbnail_grid(matched, station_id)
-            _render_scene_detail(matched, station_id)
-
-            with st.expander("Analysis zone overlay", expanded=False):
                 try:
                     _render_analysis_zone_legend(station_id, year)
-                except Exception as e:
-                    st.warning(f"Analysis zone overlay unavailable: {e}")
+                except Exception:
+                    pass
 
-    # --- Section 6: Monthly summary ---
-    st.subheader("Monthly Summary")
+    # --- Section 8: Summary ---
+    st.subheader("Summary")
     _render_monthly_summary(clf)
