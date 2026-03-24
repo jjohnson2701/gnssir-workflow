@@ -90,6 +90,140 @@ def _load_suspect_azimuths(station_cfg):
     return flagged_bins
 
 
+def _normalize_features_per_satellite(per_arc, feature_cols, ice_free_months=None):
+    """Z-score normalize SNR features per satellite PRN.
+
+    For each feature column, compute mean and std per satellite from
+    the ice-free months (or full year if not specified), then apply
+    (value - mean) / std.
+
+    Satellites that only appear during ice months fall back to full-year
+    stats. Satellites with <10 reference arcs are left unnormalized.
+
+    Modifies per_arc in place.
+    """
+    if ice_free_months:
+        months = pd.to_datetime(per_arc["date"]).dt.month
+        ref_mask = months.isin(ice_free_months)
+        ref_data = per_arc[ref_mask]
+    else:
+        ref_data = per_arc
+
+    for col in feature_cols:
+        if col not in per_arc.columns:
+            continue
+
+        sat_stats = ref_data.groupby("sat")[col].agg(["mean", "std", "count"])
+
+        # Satellites only seen during ice months: fall back to full-year stats
+        if ice_free_months:
+            all_sats = per_arc["sat"].unique()
+            missing_sats = set(all_sats) - set(sat_stats.index)
+            if missing_sats:
+                fallback_stats = per_arc.groupby("sat")[col].agg(
+                    ["mean", "std", "count"]
+                )
+                for sat in missing_sats:
+                    if sat in fallback_stats.index:
+                        sat_stats.loc[sat] = fallback_stats.loc[sat]
+                        logger.warning(
+                            f"Satellite {sat}: no ice-free data for {col}, "
+                            f"using full-year stats"
+                        )
+
+        normalized_count = 0
+        skipped_count = 0
+        for sat, row in sat_stats.iterrows():
+            mask = per_arc["sat"] == sat
+            if row["count"] < 10:
+                skipped_count += 1
+                continue
+            if row["std"] > 0:
+                per_arc.loc[mask, col] = (
+                    (per_arc.loc[mask, col] - row["mean"]) / row["std"]
+                )
+                normalized_count += 1
+            else:
+                per_arc.loc[mask, col] = 0.0
+                normalized_count += 1
+
+        logger.debug(
+            f"Normalized {col}: {normalized_count} satellites, "
+            f"{skipped_count} skipped (<10 arcs)"
+        )
+
+
+def _extract_indicators(per_arc, dates, sector_thresholds, has_snr_features):
+    """Pass 1: Extract raw indicator values per (date, sector).
+
+    Returns DataFrame with columns: date, sector, n_arcs, land,
+    amp_mean, amp_cv, rh_std, and optionally clr_med, af_med, pr_med, gamma_med.
+    Sectors with <3 arcs have indicator values set to NaN.
+    """
+    rows = []
+    for date in dates:
+        day_arcs = per_arc[per_arc["date"] == date]
+        for b, thresh in sector_thresholds.items():
+            sector_arcs = day_arcs[day_arcs["azimuth_bin"] == b]
+            n = len(sector_arcs)
+
+            entry = {
+                "date": date, "sector": b, "n_arcs": n,
+                "land": thresh["land_flag"],
+            }
+
+            if n < 3 or thresh["land_flag"]:
+                rows.append(entry)
+                continue
+
+            amp_mean = sector_arcs["Amp"].mean()
+            entry["amp_mean"] = amp_mean
+            entry["amp_cv"] = (
+                sector_arcs["Amp"].std() / amp_mean if amp_mean > 0 else np.nan
+            )
+            entry["rh_std"] = sector_arcs["RH"].std()
+
+            if has_snr_features:
+                for feat in ["CLR", "AF", "PR", "gamma"]:
+                    if feat in sector_arcs.columns:
+                        entry[f"{feat.lower()}_med"] = sector_arcs[feat].median()
+
+            rows.append(entry)
+
+    return pd.DataFrame(rows)
+
+
+def _smooth_indicators(indicators_df, window=3):
+    """Pass 2: Apply centered rolling median to indicator values per sector.
+
+    n_arcs and land flag are not smoothed. Only numeric indicator columns
+    are smoothed. Setting window=1 returns the input unchanged.
+    """
+    if window <= 1:
+        return indicators_df
+
+    smoothed = indicators_df.copy()
+    smoothed["_date_dt"] = pd.to_datetime(smoothed["date"])
+    smoothed = smoothed.sort_values(["sector", "_date_dt"])
+
+    value_cols = ["amp_mean", "amp_cv", "rh_std",
+                  "clr_med", "af_med", "pr_med", "gamma_med"]
+    value_cols = [c for c in value_cols if c in smoothed.columns]
+
+    for sector in smoothed["sector"].unique():
+        mask = smoothed["sector"] == sector
+        sector_data = smoothed.loc[mask]
+        for col in value_cols:
+            smoothed.loc[mask, col] = (
+                sector_data[col]
+                .rolling(window, min_periods=1, center=True)
+                .median()
+            )
+
+    smoothed = smoothed.drop(columns=["_date_dt"])
+    return smoothed
+
+
 def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
                               ice_free_months=None):
     """Compute thresholds for a single azimuth sector from its own data.
@@ -185,11 +319,16 @@ def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
 
 
 def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
-                   station=None, snr_features=None, ice_free_months=None):
+                   station=None, snr_features=None, ice_free_months=None,
+                   smoothing_window=3):
     """Classify each day per azimuth sector, then compute station-level consensus.
 
-    When snr_features is provided, merges CLR/AF/PR/gamma into per_arc and uses
-    them as additional voting indicators.
+    Three-pass architecture:
+      1. Extract raw indicator values per (date, sector)
+      2. Apply centered rolling median (smoothing_window days) per sector
+      3. Vote on smoothed values, compute sector and station-level scores
+
+    Setting smoothing_window=1 disables smoothing (pass-through).
 
     Returns DataFrame with per-date, per-sector classifications and overall score.
     """
@@ -217,6 +356,14 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
         logger.info(f"Summer-anchored thresholds using months: {ice_free_months}")
 
     has_snr_features = "CLR" in per_arc.columns
+
+    # Per-satellite z-score normalization (Purnell 2024)
+    if has_snr_features:
+        _normalize_features_per_satellite(
+            per_arc,
+            feature_cols=["CLR", "AF", "PR", "gamma"],
+            ice_free_months=ice_free_months,
+        )
 
     # Compute per-sector thresholds
     sector_thresholds = {}
@@ -258,107 +405,91 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
             if len(grp) >= 2:
                 interfreq[date] = grp["rh_mean"].max() - grp["rh_mean"].min()
 
+    # --- Pass 1: Extract raw indicator values per (date, sector) ---
+    indicators = _extract_indicators(
+        per_arc, dates, sector_thresholds, has_snr_features
+    )
+    logger.info(
+        f"Extracted indicators: {len(indicators)} (date, sector) entries"
+    )
+
+    # --- Pass 2: Temporal smoothing ---
+    indicators = _smooth_indicators(indicators, window=smoothing_window)
+    if smoothing_window > 1:
+        logger.info(f"Applied {smoothing_window}-day rolling median smoothing")
+
+    # Build lookup: (date, sector) → indicator row
+    ind_lookup = {}
+    for _, irow in indicators.iterrows():
+        ind_lookup[(irow["date"], int(irow["sector"]))] = irow
+
+    # --- Pass 3: Vote on smoothed indicator values ---
+    # Indicator voting config: (indicator_key, thresh_ice_key, thresh_water_key,
+    #                           high_is_ice, weight, output_suffix)
+    base_indicators = [
+        ("amp_mean", "amp_mean_ice", "amp_mean_water", True, 2.0, "amp"),
+        ("amp_cv", "amp_cv_ice", "amp_cv_water", False, 1.5, "cv"),
+        ("rh_std", "rh_std_ice", "rh_std_water", False, 1.0, "rh"),
+    ]
+    snr_indicators = [
+        ("clr_med", "CLR_ice", "CLR_water", True, 2.0, "clr"),
+        ("af_med", "AF_ice", "AF_water", True, 1.5, "af"),
+        ("pr_med", "PR_ice", "PR_water", True, 1.0, "pr"),
+        ("gamma_med", "gamma_ice", "gamma_water", False, 1.0, "gamma"),
+    ]
+
     rows = []
     for date in dates:
-        day_arcs = per_arc[per_arc["date"] == date]
         row = {"date": date}
 
         sector_scores = []
         sector_weights = []
 
         for b, thresh in sector_thresholds.items():
-            sector_arcs = day_arcs[day_arcs["azimuth_bin"] == b]
             prefix = f"az{b}"
+            ind = ind_lookup.get((date, b))
 
-            if len(sector_arcs) < 3:
+            if ind is None or ind["n_arcs"] < 3:
                 row[f"{prefix}_class"] = None
                 row[f"{prefix}_score"] = np.nan
                 continue
 
-            # Skip land-flagged sectors
-            if thresh["land_flag"]:
+            if ind["land"]:
                 row[f"{prefix}_class"] = "land"
                 row[f"{prefix}_score"] = np.nan
                 continue
 
-            amp_mean = sector_arcs["Amp"].mean()
-            amp_cv = sector_arcs["Amp"].std() / amp_mean if amp_mean > 0 else np.nan
-            rh_std = sector_arcs["RH"].std()
-
-            row[f"{prefix}_amp"] = amp_mean
-            row[f"{prefix}_cv"] = amp_cv
-            row[f"{prefix}_rh_std"] = rh_std
-
-            # Vote per indicator for this sector
             votes = []
             weights_i = []
 
-            # Amp mean (weight 2)
-            v = _vote(amp_mean, thresh["amp_mean_ice"], thresh["amp_mean_water"], high_is_ice=True)
-            if v:
-                votes.append(_score(v))
-                weights_i.append(2.0)
-            row[f"{prefix}_amp_vote"] = v
+            # Vote on base indicators
+            for ind_key, ice_key, water_key, high_ice, weight, suffix in base_indicators:
+                val = ind.get(ind_key, np.nan)
+                if np.isnan(val) if isinstance(val, float) else pd.isna(val):
+                    continue
+                row[f"{prefix}_{suffix}"] = val
+                v = _vote(val, thresh[ice_key], thresh[water_key],
+                          high_is_ice=high_ice)
+                row[f"{prefix}_{suffix}_vote"] = v
+                if v:
+                    votes.append(_score(v))
+                    weights_i.append(weight)
 
-            # Amp CV (weight 1.5)
-            v = _vote(amp_cv, thresh["amp_cv_ice"], thresh["amp_cv_water"], high_is_ice=False)
-            if v:
-                votes.append(_score(v))
-                weights_i.append(1.5)
-            row[f"{prefix}_cv_vote"] = v
-
-            # RH std (weight 1)
-            v = _vote(rh_std, thresh["rh_std_ice"], thresh["rh_std_water"], high_is_ice=False)
-            if v:
-                votes.append(_score(v))
-                weights_i.append(1.0)
-            row[f"{prefix}_rh_vote"] = v
-
-            # SNR-derived features (literature-based indicators)
+            # Vote on SNR-derived indicators
             if has_snr_features:
-                # CLR — clarity ratio (Purnell 2024, weight 2)
-                if "CLR_ice" in thresh and "CLR" in sector_arcs.columns:
-                    clr_med = sector_arcs["CLR"].median()
-                    row[f"{prefix}_clr"] = clr_med
-                    v = _vote(clr_med, thresh["CLR_ice"], thresh["CLR_water"],
-                              high_is_ice=True)
+                for ind_key, ice_key, water_key, high_ice, weight, suffix in snr_indicators:
+                    if ice_key not in thresh:
+                        continue
+                    val = ind.get(ind_key, np.nan)
+                    if np.isnan(val) if isinstance(val, float) else pd.isna(val):
+                        continue
+                    row[f"{prefix}_{suffix}"] = val
+                    v = _vote(val, thresh[ice_key], thresh[water_key],
+                              high_is_ice=high_ice)
+                    row[f"{prefix}_{suffix}_vote"] = v
                     if v:
                         votes.append(_score(v))
-                        weights_i.append(2.0)
-                    row[f"{prefix}_clr_vote"] = v
-
-                # AF — area factor (Song 2022, weight 1.5)
-                if "AF_ice" in thresh and "AF" in sector_arcs.columns:
-                    af_med = sector_arcs["AF"].median()
-                    row[f"{prefix}_af"] = af_med
-                    v = _vote(af_med, thresh["AF_ice"], thresh["AF_water"],
-                              high_is_ice=True)
-                    if v:
-                        votes.append(_score(v))
-                        weights_i.append(1.5)
-                    row[f"{prefix}_af_vote"] = v
-
-                # PR — peak ratio (Purnell 2024, weight 1)
-                if "PR_ice" in thresh and "PR" in sector_arcs.columns:
-                    pr_med = sector_arcs["PR"].median()
-                    row[f"{prefix}_pr"] = pr_med
-                    v = _vote(pr_med, thresh["PR_ice"], thresh["PR_water"],
-                              high_is_ice=True)
-                    if v:
-                        votes.append(_score(v))
-                        weights_i.append(1.0)
-                    row[f"{prefix}_pr_vote"] = v
-
-                # gamma — damping (Strandberg 2017, weight 1)
-                if "gamma_ice" in thresh and "gamma" in sector_arcs.columns:
-                    gamma_med = sector_arcs["gamma"].median()
-                    row[f"{prefix}_gamma"] = gamma_med
-                    v = _vote(gamma_med, thresh["gamma_ice"], thresh["gamma_water"],
-                              high_is_ice=False)
-                    if v:
-                        votes.append(_score(v))
-                        weights_i.append(1.0)
-                    row[f"{prefix}_gamma_vote"] = v
+                        weights_i.append(weight)
 
             # Sector score
             if votes:
@@ -379,7 +510,7 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
             # Contribute to station-level, weighted by arc count
             if not np.isnan(sector_score):
                 sector_scores.append(sector_score)
-                sector_weights.append(len(sector_arcs))
+                sector_weights.append(int(ind["n_arcs"]))
 
         # Interfreq spread (station-level indicator)
         row["interfreq_spread"] = interfreq.get(date, np.nan)
@@ -425,9 +556,13 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
             row["ice_score"] = np.nan
             row["classification"] = None
 
-        # Also store pooled amp stats for backward compatibility
+        # Pooled station-level stats
+        day_arcs = per_arc[per_arc["date"] == date]
         row["amp_mean"] = day_arcs["Amp"].mean()
-        row["amp_cv"] = day_arcs["Amp"].std() / day_arcs["Amp"].mean() if day_arcs["Amp"].mean() > 0 else np.nan
+        day_amp_mean = day_arcs["Amp"].mean()
+        row["amp_cv"] = (
+            day_arcs["Amp"].std() / day_amp_mean if day_amp_mean > 0 else np.nan
+        )
         row["rh_std"] = day_arcs["RH"].std()
 
         rows.append(row)

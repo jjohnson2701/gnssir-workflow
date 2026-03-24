@@ -21,6 +21,7 @@ from dashboard_components.s1_helpers import (
     get_thumb_path,
     compute_fresnel_radii,
 )
+from dashboard_components.data_loader import safe_read_parquet
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -36,7 +37,9 @@ def _load_classification(station, year):
             / f"{station}_{year}_ice_classification.parquet")
     if not path.exists():
         return None
-    df = pd.read_parquet(path)
+    df = safe_read_parquet(path)
+    if df is None:
+        return None
     df["date_dt"] = pd.to_datetime(df["date"])
     return df
 
@@ -398,7 +401,7 @@ def _compute_example_scalograms(station, year):
             detrend_arc, FREQ_TO_COL, FREQ_WAVELENGTH, _snr_file_path,
             _load_station_config as _load_gnssir_config,
         )
-        from scipy.signal import cwt, morlet2
+        from scripts.snr_feature_extractor import _cwt as cwt, _morlet2 as morlet2
     except ImportError:
         return None
 
@@ -412,9 +415,9 @@ def _compute_example_scalograms(station, year):
 
     pa_path = (PROJECT_ROOT / "results_annual" / station
                / f"{station}_{year}_per_arc.parquet")
-    if not pa_path.exists():
+    per_arc = safe_read_parquet(pa_path)
+    if per_arc is None:
         return None
-    per_arc = pd.read_parquet(pa_path)
 
     ice_doy = ice_row["date_dt"].timetuple().tm_yday
     water_doy = water_row["date_dt"].timetuple().tm_yday
@@ -745,9 +748,14 @@ Sector scores are combined (weighted by arc count) into a station-level
         )
         st.latex(r"AF = \int \left| W_{CWT}(s_0,\, \tau) \right|^2 \, d\tau")
         st.markdown(
-            "Ice produces concentrated wavelet power (high AF) because the "
-            "smooth surface yields a strong, coherent reflection at a single RH. "
-            "Water scatters power across scales."
+            "AF measures total reflected power across all elevation angles, which "
+            "depends on both the Fresnel reflectivity of the surface layers and "
+            "their roughness. Ice and snow-on-ice produce higher total RHCP "
+            "reflectivity than open water — despite water's higher permittivity, "
+            "the air-water interface converts most reflected energy to LHCP which "
+            "the geodetic antenna rejects. The area factor captures both "
+            "reflectivity and roughness effects without parametric assumptions, "
+            "making it robust to multilayer conditions (Song 2022)."
         )
 
         st.markdown("#### Envelope Indicator")
@@ -859,9 +867,10 @@ def _render_indicator_timeseries(clf):
 
 def _render_sector_heatmap(clf):
     """Date x sector heatmap showing per-sector classification scores."""
-    # Find all sector score columns
-    score_cols = sorted([c for c in clf.columns
-                         if c.endswith("_score") and c.startswith("az")])
+    # Find all sector score columns, sorted numerically by azimuth
+    score_cols = [c for c in clf.columns
+                  if c.endswith("_score") and c.startswith("az")]
+    score_cols.sort(key=lambda c: int(c.replace("az", "").replace("_score", "")))
     if not score_cols:
         return
 
