@@ -29,12 +29,25 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.signal import lombscargle, find_peaks, hilbert, cwt, morlet2
+from scipy.signal import lombscargle, find_peaks, hilbert
 
-# scipy.signal.cwt is deprecated in 1.12, removed in 1.15. We're on 1.13.
-# When upgrading scipy, migrate to pywt.cwt.
-warnings.filterwarnings("ignore", message="scipy.signal.cwt is deprecated",
-                        category=DeprecationWarning)
+
+def _morlet2(M, w, s):
+    """Morlet wavelet (replacement for removed scipy.signal.morlet2)."""
+    t = np.arange(0, M) - (M - 1.0) / 2
+    t = t / s
+    output = np.exp(1j * w * t) * np.exp(-0.5 * t ** 2) * np.pi ** (-0.25)
+    return output
+
+
+def _cwt(data, wavelet_func, widths, **kwargs):
+    """Continuous wavelet transform (replacement for removed scipy.signal.cwt)."""
+    N = len(data)
+    out = np.empty((len(widths), N), dtype=complex)
+    for i, width in enumerate(widths):
+        wavelet = wavelet_func(N, kwargs.get("w", 5), width)
+        out[i] = np.convolve(data, np.conj(wavelet[::-1]), mode="same")
+    return out
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -293,28 +306,40 @@ def compute_lsp_features(sin_elev, detrended, wavelength,
 # Area factor (Song 2022)
 # ---------------------------------------------------------------------------
 
-def compute_area_factor(sin_elev, detrended, wavelength, min_rh, max_rh):
+def compute_area_factor(sin_elev, detrended, wavelength, min_rh, max_rh,
+                        baseline_power_curve=None, baseline_sin_grid=None,
+                        return_power=False):
     """Compute wavelet-derived area factor.
 
     Uses CWT with Morlet wavelet on dSNR(sin(ε)) to get 2D power spectrum.
     Extracts the power curve at the dominant RH frequency and integrates.
+
+    If baseline_power_curve is provided, subtracts the per-PRN average power
+    curve before integration (Song 2022 Eq. 19), isolating surface-driven
+    power changes from the antenna gain pattern.
 
     Args:
         sin_elev: sin(elevation) array (must be sorted ascending)
         detrended: detrended SNR array
         wavelength: carrier wavelength in meters
         min_rh, max_rh: RH range in meters
+        baseline_power_curve: optional per-PRN average power curve to subtract
+        baseline_sin_grid: sin(ε) grid the baseline is defined on
+        return_power: if True, also return the 2D power matrix and metadata
 
     Returns:
         float: area factor (integrated power at dominant RH)
+        If return_power=True, returns (af, power_info_dict) instead.
     """
     # Sort by sin(elev) for consistent CWT input
     sort_idx = np.argsort(sin_elev)
     x = sin_elev[sort_idx]
     y = detrended[sort_idx]
 
+    nan_result = (np.nan, None) if return_power else np.nan
+
     if len(y) < 20:
-        return np.nan
+        return nan_result
 
     cf = wavelength / 2
     # The SNR oscillation frequency in the sin(e)/cf domain is the RH value.
@@ -325,7 +350,7 @@ def compute_area_factor(sin_elev, detrended, wavelength, min_rh, max_rh):
     # Sampling rate in the sin(e)/cf domain
     dx = np.mean(np.diff(x / cf))
     if dx <= 0:
-        return np.nan
+        return nan_result
 
     # Morlet center frequency (w parameter)
     w = 5.0
@@ -336,14 +361,14 @@ def compute_area_factor(sin_elev, detrended, wavelength, min_rh, max_rh):
     # Filter out invalid scales
     valid = scales > 1
     if valid.sum() < 5:
-        return np.nan
+        return nan_result
     scales = scales[valid]
     rh_values = rh_values[valid]
 
     # Compute CWT
     # scipy.signal.cwt signature: cwt(data, wavelet, widths)
     # morlet2 signature: morlet2(M, w, s) where M=length, w=omega0, s=scale
-    cwtmatr = cwt(y, morlet2, scales, w=w)
+    cwtmatr = _cwt(y, _morlet2, scales, w=w)
     power = np.abs(cwtmatr) ** 2
 
     # Find dominant RH (scale with max integrated power)
@@ -353,8 +378,26 @@ def compute_area_factor(sin_elev, detrended, wavelength, min_rh, max_rh):
     # Power curve at dominant RH frequency
     power_curve = power[dominant_idx, :]
 
+    # Subtract per-PRN baseline if provided (Song 2022)
+    if baseline_power_curve is not None and baseline_sin_grid is not None:
+        from scipy.interpolate import interp1d
+        bl_interp = interp1d(
+            baseline_sin_grid, baseline_power_curve,
+            bounds_error=False, fill_value=0.0,
+        )(x / cf)
+        power_curve = np.maximum(power_curve - bl_interp, 0.0)
+
     # Area factor = integral of power curve (trapezoidal)
     af = float(np.trapz(power_curve, x / cf))
+
+    if return_power:
+        power_info = {
+            "power": power,
+            "rh_values": rh_values,
+            "sin_elev": x / cf,
+            "dominant_idx": dominant_idx,
+        }
+        return af, power_info
     return af
 
 
@@ -408,7 +451,8 @@ def compute_damping(elevation_deg, detrended, wavelength):
 # ---------------------------------------------------------------------------
 
 def extract_arc_features(elevation, snr_db, snr_linear, detrended,
-                         wavelength, e1, e2, min_rh, max_rh, precision):
+                         wavelength, e1, e2, min_rh, max_rh, precision,
+                         af_baseline=None, af_baseline_sin_grid=None):
     """Compute all 6 features + full_arc flag for one arc on one frequency.
 
     Args:
@@ -420,6 +464,8 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
         e1, e2: elevation window
         min_rh, max_rh: RH search range
         precision: LSP step
+        af_baseline: optional per-PRN power curve baseline for AF correction
+        af_baseline_sin_grid: sin(ε) grid the baseline is defined on
 
     Returns:
         dict with CLR, PR, AF, gamma, MS, VS, SP, RH, full_arc
@@ -444,7 +490,11 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
     lsp = compute_lsp_features(sin_e, dsnr, wavelength, min_rh, max_rh, precision)
 
     # Area factor (only meaningful for full arcs, but compute anyway)
-    af = compute_area_factor(sin_e, dsnr, wavelength, min_rh, max_rh)
+    af = compute_area_factor(
+        sin_e, dsnr, wavelength, min_rh, max_rh,
+        baseline_power_curve=af_baseline,
+        baseline_sin_grid=af_baseline_sin_grid,
+    )
 
     # Damping
     gamma = compute_damping(ele_w, dsnr, wavelength)
@@ -497,7 +547,8 @@ def _snr_file_path(station, year, doy):
             / f"{station_lower}{doy_str}0.{yy}.snr66")
 
 
-def extract_features_for_day(station, year, doy, per_arc_day, config):
+def extract_features_for_day(station, year, doy, per_arc_day, config,
+                             af_baselines=None, af_sin_grid=None):
     """Extract all SNR features for one day.
 
     Args:
@@ -506,6 +557,8 @@ def extract_features_for_day(station, year, doy, per_arc_day, config):
         doy: day of year
         per_arc_day: DataFrame — per_arc parquet rows for this day
         config: dict from station gnssir json (e1, e2, minH, maxH, polyV, pele, desiredP)
+        af_baselines: optional dict of {(sat, freq): power_curve_array} for AF correction
+        af_sin_grid: sin(ε) grid the baselines are defined on
 
     Returns:
         list of dicts, one per (arc, frequency) pair with features + join keys
@@ -590,10 +643,19 @@ def extract_features_for_day(station, year, doy, per_arc_day, config):
             snr_lin = np.power(10, snr_db_col / 20)
             detrended = detrend_arc(arc_ele, snr_lin, poly_order, pele)
 
+            # Look up AF baseline for this (sat, freq) if available
+            bl_curve = None
+            bl_grid = None
+            if af_baselines is not None:
+                bl_curve = af_baselines.get((int(sat), int(freq)))
+                if bl_curve is not None:
+                    bl_grid = af_sin_grid
+
             # Extract features
             feats = extract_arc_features(
                 arc_ele, snr_db_col, snr_lin, detrended,
                 wavelength, e1, e2, min_rh, max_rh, precision,
+                af_baseline=bl_curve, af_baseline_sin_grid=bl_grid,
             )
             if feats is None:
                 continue
@@ -612,11 +674,35 @@ def extract_features_for_day(station, year, doy, per_arc_day, config):
 # Station-year processing
 # ---------------------------------------------------------------------------
 
+def _load_af_baselines(station, year):
+    """Load precomputed AF baselines if available.
+
+    Returns (baselines_dict, sin_grid) or (None, None).
+    baselines_dict maps (sat, freq) → power_curve_array.
+    """
+    bl_path = (PROJECT_ROOT / "results_annual" / station
+               / f"{station}_{year}_af_baselines.npz")
+    if not bl_path.exists():
+        return None, None
+
+    bl_data = np.load(bl_path)
+    baselines = {
+        (int(k[0]), int(k[1])): curve
+        for k, curve in zip(bl_data["keys"], bl_data["baselines"])
+    }
+    sin_grid = bl_data["sin_grid"]
+    logger.info(f"Loaded AF baselines for {len(baselines)} PRN/freq combinations")
+    return baselines, sin_grid
+
+
 def _process_day_worker(args):
     """Multiprocessing worker for extract_features. Must be module-level for pickle."""
-    station, year, doy, day_arcs_records, config = args
+    station, year, doy, day_arcs_records, config, af_baselines, af_sin_grid = args
     day_arcs = pd.DataFrame.from_records(day_arcs_records)
-    return extract_features_for_day(station, year, doy, day_arcs, config)
+    return extract_features_for_day(
+        station, year, doy, day_arcs, config,
+        af_baselines=af_baselines, af_sin_grid=af_sin_grid,
+    )
 
 
 def extract_features(station, year, num_cores=1):
@@ -624,6 +710,9 @@ def extract_features(station, year, num_cores=1):
 
     Reads per-arc parquet as index, processes each day's SNR file,
     and outputs {station}_{year}_snr_features.parquet.
+
+    If AF baselines exist (from compute_af_baselines.py), applies per-PRN
+    power curve correction when computing area factors.
     """
     config = _load_station_config(station)
     if config is None:
@@ -640,6 +729,11 @@ def extract_features(station, year, num_cores=1):
     doys = sorted(per_arc["doy"].unique())
     logger.info(f"Processing {station} {year}: {len(doys)} days, {len(per_arc)} arcs")
 
+    # Load AF baselines if available
+    af_baselines, af_sin_grid = _load_af_baselines(station, year)
+    if af_baselines is None:
+        logger.info("No AF baselines found — computing uncorrected area factors")
+
     if num_cores > 1:
         from multiprocessing import Pool
 
@@ -647,7 +741,10 @@ def extract_features(station, year, num_cores=1):
         day_args = []
         for doy in doys:
             day_arcs = per_arc[per_arc["doy"] == doy]
-            day_args.append((station, year, doy, day_arcs.to_dict("records"), config))
+            day_args.append((
+                station, year, doy, day_arcs.to_dict("records"), config,
+                af_baselines, af_sin_grid,
+            ))
 
         with Pool(num_cores) as pool:
             day_results = pool.map(_process_day_worker, day_args)
@@ -659,7 +756,10 @@ def extract_features(station, year, num_cores=1):
                 logger.info(f"  Day {i + 1}/{len(doys)} (DOY {doy})")
             day_arcs = per_arc[per_arc["doy"] == doy]
             all_results.extend(
-                extract_features_for_day(station, year, doy, day_arcs, config)
+                extract_features_for_day(
+                    station, year, doy, day_arcs, config,
+                    af_baselines=af_baselines, af_sin_grid=af_sin_grid,
+                )
             )
 
     if not all_results:
