@@ -16,6 +16,12 @@ import matplotlib.image as mpimg
 import matplotlib.colors as mcolors
 from pathlib import Path
 
+from dashboard_components.s1_helpers import (
+    load_s1_index,
+    get_thumb_path,
+    compute_fresnel_radii,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Classification colors
@@ -35,15 +41,6 @@ def _load_classification(station, year):
     return df
 
 
-def _load_s1_index(station):
-    path = PROJECT_ROOT / "data" / station / "s1_fresnel" / f"{station}_s1_fresnel_index.csv"
-    if not path.exists():
-        return None
-    df = pd.read_csv(path)
-    df["date_dt"] = pd.to_datetime(df["acquisition_date"])
-    return df
-
-
 def _match_s1_to_classification(s1_index, clf):
     merged = pd.merge_asof(
         s1_index.sort_values("date_dt"),
@@ -53,41 +50,6 @@ def _match_s1_to_classification(s1_index, clf):
     )
     return merged.dropna(subset=["classification"])
 
-
-def _get_thumb_path(station, date_str):
-    d = date_str.replace("-", "")
-    return PROJECT_ROOT / "data" / station / "s1_fresnel" / "thumbnails" / f"{station}_{d}_thumb.png"
-
-
-def _compute_fresnel_radii(station, year):
-    """Compute Fresnel zone inner/outer radii from per-arc data or config.
-
-    Returns (inner_m, outer_m, method) or (None, None, None) if no data.
-    """
-    import json
-
-    # Try per-arc data first (actual observed reflection distances)
-    pa_path = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_per_arc.parquet"
-    if pa_path.exists():
-        pa = pd.read_parquet(pa_path)
-        elev_mid = (pa["eminO"] + pa["emaxO"]) / 2.0
-        refl_dist = pa["RH"] / np.tan(np.radians(elev_mid))
-        # Use p2-p98 with 30m buffer (1 S1 pixel) on each side
-        inner = max(0, refl_dist.quantile(0.02) - 30)
-        outer = refl_dist.quantile(0.98) + 30
-        return float(inner), float(outer), "per-arc p2-p98 +30m buffer"
-
-    # Fallback: config-based
-    cfg_path = PROJECT_ROOT / "config" / f"{station.lower()}.json"
-    if cfg_path.exists():
-        with open(cfg_path) as f:
-            cfg = json.load(f)
-        # Widest range: maxH at lowest elev, minH at highest elev
-        inner = max(0, cfg["minH"] / np.tan(np.radians(cfg["e2"])) - 30)
-        outer = cfg["maxH"] / np.tan(np.radians(cfg["e1"])) + 30
-        return float(inner), float(outer), "config (minH/maxH, e1/e2)"
-
-    return None, None, None
 
 
 def _render_analysis_zone_legend(station, year):
@@ -148,7 +110,7 @@ def _render_analysis_zone_legend(station, year):
             az_mask |= (az_deg >= az_min) | (az_deg <= az_max)
 
     # Fresnel annulus
-    inner_m, outer_m, fresnel_method = _compute_fresnel_radii(station, year)
+    inner_m, outer_m, fresnel_method = compute_fresnel_radii(station, year)
     has_fresnel = inner_m is not None
 
     # Two-panel figure: full scene (left) + zoomed Fresnel (right)
@@ -275,7 +237,7 @@ def _render_thumbnail_grid(matched, station, cols_per_row=8):
         r, c = divmod(idx, cols_per_row)
         ax = axes[r, c]
 
-        thumb_path = _get_thumb_path(station, scene["acquisition_date"])
+        thumb_path = get_thumb_path(station, scene["acquisition_date"])
         if thumb_path.exists():
             img = mpimg.imread(str(thumb_path))
             ax.imshow(img)
@@ -346,7 +308,7 @@ def _render_scene_detail(matched, station):
 
     if selected:
         row = scenes[scenes["acquisition_date"] == selected].iloc[0]
-        thumb_path = _get_thumb_path(station, selected)
+        thumb_path = get_thumb_path(station, selected)
 
         col_img, col_info = st.columns([3, 1])
         with col_img:
@@ -1115,12 +1077,12 @@ def render_ice_comparison_tab(station_id, year):
     _render_sector_heatmap(clf)
 
     # --- Section 5: S1 SAR validation ---
-    s1_index = _load_s1_index(station_id)
+    s1_index = load_s1_index(station_id)
     if s1_index is not None:
         s1_year = s1_index[s1_index["date_dt"].dt.year == year].copy()
         matched = _match_s1_to_classification(s1_year, clf)
         matched["thumb_exists"] = matched["acquisition_date"].apply(
-            lambda d: _get_thumb_path(station_id, d).exists()
+            lambda d: get_thumb_path(station_id, d).exists()
         )
         matched = matched[matched["thumb_exists"]]
 

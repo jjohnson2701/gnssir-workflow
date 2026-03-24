@@ -47,12 +47,30 @@ def has_quality_data(station_id: str, year: int) -> bool:
     return enriched_path.exists() or per_arc_path.exists()
 
 
+def _get_pooled_daily(enriched):
+    """Extract pooled daily rows, or compute them if sentinel rows are missing."""
+    if enriched is None or enriched.empty:
+        return pd.DataFrame()
+
+    pooled = enriched[
+        (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
+    ].copy()
+
+    if pooled.empty:
+        # Fallback: aggregate across all azimuth bins
+        numeric_cols = enriched.select_dtypes(include="number").columns.tolist()
+        agg_cols = [c for c in numeric_cols if c != "azimuth_bin"]
+        pooled = enriched.groupby("date")[agg_cols].mean().reset_index()
+        pooled["azimuth_bin"] = -1
+        pooled["freq_group"] = "ALL"
+
+    return pooled
+
+
 def _render_key_metrics(enriched, per_arc):
     """Top strip: key quality metrics with traffic-light indicators."""
     # Get pooled daily stats
-    pooled = enriched[
-        (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
-    ].copy() if enriched is not None else pd.DataFrame()
+    pooled = _get_pooled_daily(enriched) if enriched is not None else pd.DataFrame()
 
     if pooled.empty and per_arc is None:
         return
@@ -103,9 +121,7 @@ def _render_annual_summary(enriched, per_arc, station_id, year):
 
     # --- Calendar heatmap ---
     if enriched is not None and HAS_CALENDAR:
-        pooled = enriched[
-            (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
-        ].copy()
+        pooled = _get_pooled_daily(enriched)
 
         if not pooled.empty:
             st.markdown("#### Daily Retrieval Count")
@@ -123,9 +139,7 @@ def _render_annual_summary(enriched, per_arc, station_id, year):
             plt.close(fig)
     elif enriched is not None:
         # Fallback: simple bar chart of daily arc count
-        pooled = enriched[
-            (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
-        ].copy()
+        pooled = _get_pooled_daily(enriched)
         if not pooled.empty:
             st.markdown("#### Daily Retrieval Count")
             pooled["date_dt"] = pd.to_datetime(pooled["date"])
@@ -161,9 +175,7 @@ def _render_monthly_detail(enriched, per_arc, station_id, year):
         st.warning("No enriched daily data available for monthly analysis.")
         return
 
-    pooled = enriched[
-        (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
-    ].copy()
+    pooled = _get_pooled_daily(enriched)
 
     if pooled.empty:
         st.warning("No pooled daily data available.")

@@ -71,7 +71,15 @@ def _detect_columns(df):
     Returns dict with standardized keys for GNSS-IR columns, reference columns,
     and optional metadata columns (freq, satellite, azimuth, amplitude).
     """
-    cols = {"gnss_datetime": "gnss_datetime", "gnss_wse": "gnss_wse"}
+    cols = {"gnss_datetime": "gnss_datetime"}
+
+    # Detect GNSS absolute WSE column
+    for candidate in ["gnss_wse", "gnss_wse_m", "wse_ellips"]:
+        if candidate in df.columns:
+            cols["gnss_wse"] = candidate
+            break
+    else:
+        cols["gnss_wse"] = None
 
     # GNSS demeaned column
     if "gnss_dm" in df.columns:
@@ -140,22 +148,33 @@ def _aggregate_to_daily(df, cols):
     work = df.copy()
     work["date"] = work["gnss_datetime"].dt.date
 
-    agg_dict = {
-        cols["gnss_wse"]: ["median", "std"],
-        cols["gnss_dm"]: "median",
-    }
-
+    agg_dict = {}
+    if cols["gnss_wse"]:
+        agg_dict[cols["gnss_wse"]] = ["median", "std"]
+    if cols["gnss_dm"]:
+        agg_dict[cols["gnss_dm"]] = "median"
     if cols["ref_wl"]:
         agg_dict[cols["ref_wl"]] = "mean"
     if cols["ref_dm"]:
         agg_dict[cols["ref_dm"]] = "mean"
 
     daily = work.groupby("date").agg(agg_dict)
+
     # Flatten multi-level column index
-    daily.columns = ["gnss_wse_median", "gnss_wse_std", "gnss_dm_median",
-                      *([f"ref_wl_mean"] if cols["ref_wl"] else []),
-                      *([f"ref_dm_mean"] if cols["ref_dm"] else [])]
-    daily["n_retrievals"] = work.groupby("date")[cols["gnss_wse"]].count()
+    flat_names = []
+    if cols["gnss_wse"]:
+        flat_names.extend(["gnss_wse_median", "gnss_wse_std"])
+    if cols["gnss_dm"]:
+        flat_names.append("gnss_dm_median")
+    if cols["ref_wl"]:
+        flat_names.append("ref_wl_mean")
+    if cols["ref_dm"]:
+        flat_names.append("ref_dm_mean")
+    daily.columns = flat_names
+
+    # Count retrievals from whichever column is available
+    count_col = cols["gnss_wse"] or cols["gnss_dm"]
+    daily["n_retrievals"] = work.groupby("date")[count_col].count()
     daily = daily.reset_index()
     daily["date"] = pd.to_datetime(daily["date"])
 
@@ -204,7 +223,7 @@ def _render_year_view(df, daily, cols, ref_info):
     stats = _compute_stats(daily["gnss_dm_median"], daily["ref_dm_mean"])
     # Real bias from absolute values
     abs_bias = np.nan
-    if cols["ref_wl"] and "ref_wl_mean" in daily.columns:
+    if cols["ref_wl"] and "gnss_wse_median" in daily.columns and "ref_wl_mean" in daily.columns:
         abs_bias = daily["gnss_wse_median"].mean() - daily["ref_wl_mean"].mean()
 
     total_days_possible = (daily["date"].max() - daily["date"].min()).days + 1
@@ -212,6 +231,10 @@ def _render_year_view(df, daily, cols, ref_info):
 
     extra = {"Datum Offset": f"{abs_bias:.3f} m" if not np.isnan(abs_bias) else "N/A",
              "Coverage": f"{coverage:.0f}%"}
+
+    # Annotate the bias label based on what data was used
+    if np.isnan(abs_bias):
+        stats["bias_label"] = "Bias (demeaned)"
     _render_stats_bar(stats, extra_metrics=extra)
 
     # --- Rolling stats plot ---
@@ -328,9 +351,13 @@ def _render_month_view(df, daily, cols, ref_info, selected_month):
 
     month_data = month_data.sort_values("date")
 
-    # Stats bar
+    # Stats bar with datum offset when absolute values available
     stats = _compute_stats(month_data["gnss_dm_median"], month_data["ref_dm_mean"])
-    _render_stats_bar(stats)
+    extra = {}
+    if "gnss_wse_median" in month_data.columns and "ref_wl_mean" in month_data.columns:
+        mo_offset = month_data["gnss_wse_median"].mean() - month_data["ref_wl_mean"].mean()
+        extra["Datum Offset"] = f"{mo_offset:.3f} m"
+    _render_stats_bar(stats, extra_metrics=extra)
 
     fig, (ax_ts, ax_resid) = plt.subplots(
         2, 1, figsize=(14, 8), height_ratios=[3, 1], sharex=True, facecolor="white"
@@ -400,12 +427,15 @@ def _render_week_view(df, cols, ref_info, week_start, spline_df=None):
         st.warning("No retrievals in selected week.")
         return
 
-    # Stats bar
+    # Stats bar with datum offset when absolute values available
     if cols["gnss_dm"] and cols["ref_dm"]:
         stats = _compute_stats(week_data[cols["gnss_dm"]], week_data[cols["ref_dm"]])
         n_days = week_data["gnss_datetime"].dt.date.nunique()
         extra = {"Days with data": f"{n_days}/7",
                  "Arcs/day": f"{len(week_data) / max(n_days, 1):.1f}"}
+        if cols["gnss_wse"] and cols["ref_wl"]:
+            wk_offset = week_data[cols["gnss_wse"]].mean() - week_data[cols["ref_wl"]].mean()
+            extra["Datum Offset"] = f"{wk_offset:.3f} m"
         _render_stats_bar(stats, extra_metrics=extra)
 
     fig, (ax_ts, ax_resid) = plt.subplots(

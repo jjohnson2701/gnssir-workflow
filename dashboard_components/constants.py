@@ -53,20 +53,9 @@ PAGE_CONFIG = {
     "initial_sidebar_state": "expanded",
 }
 
-# Tab configuration with subdaily comparison
-TABS = [
-    "🏠 Overview",
-    "📊 Monthly Data",
-    "🌊 Subdaily Comparison",
-    "📈 Yearly Analysis",
-    "🔍 Daily Diagnostics",
-    "🛰️ Arc-Level Analysis",
-    "🧊 Ice Classification",
-]
-
 # Default values
-DEFAULT_STATION = "UMNQ"
-DEFAULT_YEAR = 2025
+DEFAULT_STATION = "GLBX"
+DEFAULT_YEAR = 2024
 DEFAULT_DOY_RANGE = (1, 365)
 
 # Plotting parameters
@@ -105,7 +94,6 @@ __all__ = [
     "ENHANCED_COLORS",
     "PUBLICATION_THEME_AVAILABLE",
     "PAGE_CONFIG",
-    "TABS",
     "DEFAULT_STATION",
     "DEFAULT_YEAR",
     "DEFAULT_DOY_RANGE",

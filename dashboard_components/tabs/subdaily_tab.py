@@ -469,6 +469,11 @@ def create_raw_comparison_plot(
 def render_subdaily_tab(station_id: str, year: int, rh_data=None, comparison_data=None):
     """Render the subdaily comparison tab."""
     st.header("Subdaily Comparison")
+    st.warning(
+        "**This tab is deprecated.** "
+        "Use **Data Quality** and **Validation** instead. "
+        "This tab will be removed in a future update."
+    )
 
     # Get station metadata
     ref_info = get_reference_source_info(station_id)

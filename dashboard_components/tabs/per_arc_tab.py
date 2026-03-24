@@ -10,6 +10,11 @@ import matplotlib.colors as mcolors
 from pathlib import Path
 
 from dashboard_components.data_loader import load_per_arc, load_enriched
+from dashboard_components.s1_helpers import (
+    load_s1_index,
+    find_nearest_s1_scene,
+    load_s1_matched,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -18,24 +23,6 @@ AZ_BIN_LABELS = {0: "0-90 (N-E)", 1: "90-180 (E-S)", 2: "180-270 (S-W)", 3: "270
 # amp_cv thresholds for ice/water classification
 AMP_CV_ICE = 0.20
 AMP_CV_WATER = 0.35
-
-
-def _load_s1_index(station):
-    """Load S1 Fresnel index if it exists."""
-    path = PROJECT_ROOT / "data" / station / "s1_fresnel" / f"{station}_s1_fresnel_index.csv"
-    if not path.exists():
-        return None
-    return pd.read_csv(path)
-
-
-def _load_s1_matched(station, year):
-    """Load S1-GNSSIR matched parquet if it exists."""
-    path = (
-        PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_s1_gnssir_matched.parquet"
-    )
-    if not path.exists():
-        return None
-    return pd.read_parquet(path)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -651,16 +638,6 @@ def _render_panel3_amplitude(per_arc, enriched, selected_date, station_id):
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def _find_nearest_s1_scene(station_id, target_date, s1_index):
-    """Find the S1 scene closest to target_date. Returns (row, days_offset) or (None, None)."""
-    s1 = s1_index.copy()
-    s1["date_dt"] = pd.to_datetime(s1["acquisition_date"])
-    target_dt = pd.Timestamp(target_date)
-    s1["offset"] = (s1["date_dt"] - target_dt).abs().dt.days
-    best = s1.loc[s1["offset"].idxmin()]
-    return best, int(best["offset"])
-
-
 def _get_s1_pass_utc(scene_name):
     """Extract UTC hour from scene name."""
     import re
@@ -674,7 +651,7 @@ def _render_panel4_s1_map(station_id, selected_date, s1_index, per_arc):
     """Two-scale S1 view: regional context (5km) + zoomed Fresnel neighborhood (~500m)."""
     from scripts.s1_fresnel_utils import compute_sector_stats, get_s1_fresnel_dir, get_station_s1_config
 
-    best_scene, days_offset = _find_nearest_s1_scene(station_id, selected_date, s1_index)
+    best_scene, days_offset = find_nearest_s1_scene(station_id, selected_date, s1_index)
     tif_name = best_scene["file_path"]
     tif_path = get_s1_fresnel_dir(station_id) / tif_name
 
@@ -903,7 +880,7 @@ def _render_panel5_s1_timeseries(s1_index, enriched, station_id, year):
     s1 = s1[s1["date_dt"].dt.year == year].sort_values("date_dt")
 
     # Load matched data if available (has time-windowed amp_cv)
-    matched = _load_s1_matched(station_id, year)
+    matched = load_s1_matched(station_id, year)
 
     # Fall back to enriched pooled daily
     pooled = pd.DataFrame()
@@ -1162,7 +1139,7 @@ def render_per_arc_tab(station_id, year):
 
     # ── Phase B: S1 Panels (conditional) ──
     st.markdown("---")
-    s1_index = _load_s1_index(station_id)
+    s1_index = load_s1_index(station_id)
 
     if s1_index is not None and len(s1_index) > 0:
         s1_year = s1_index[pd.to_datetime(s1_index["acquisition_date"]).dt.year == year]

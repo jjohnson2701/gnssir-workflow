@@ -591,6 +591,11 @@ def _render_filter_analysis(per_arc, station_id):
 def render_diagnostics_tab(station_id="UMNQ", year=2025, data_dict=None):
     """Render data-driven diagnostics tab."""
     st.header("Diagnostics")
+    st.warning(
+        "**This tab is deprecated.** "
+        "Use **Data Quality** and **Validation** instead. "
+        "This tab will be removed in a future update."
+    )
 
     enriched = load_enriched(station_id, year)
     per_arc = load_per_arc(station_id, year)

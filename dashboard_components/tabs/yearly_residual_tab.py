@@ -714,6 +714,11 @@ def render_yearly_residual_tab(
         ERDDAP water level data (for co-located sensor stations)
     """
     st.header("Yearly Time Series & Residual Analysis")
+    st.warning(
+        "**This tab is deprecated.** "
+        "Use **Data Quality** and **Validation** instead. "
+        "This tab will be removed in a future update."
+    )
 
     st.markdown(
         """

@@ -53,6 +53,11 @@ def render_monthly_data_tab(
         Whether CO-OPS data is included
     """
     st.header("📊 Monthly Data Analysis")
+    st.warning(
+        "**This tab is deprecated.** "
+        "Use **Data Quality** and **Validation** instead. "
+        "This tab will be removed in a future update."
+    )
 
     if not DASHBOARD_PLOTS_AVAILABLE:
         st.error("Dashboard plotting functions not available. Please check installation.")
