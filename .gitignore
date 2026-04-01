@@ -104,3 +104,21 @@ processing_session_log.md
 bartlett_cove_*.csv
 *_coops_*.csv
 !tests/fixtures/*.csv
+
+# Binary tools (platform-specific, not portable)
+tools/gnssir
+tools/quickLook
+tools/rinex2snr
+
+# Archives and backups
+*.tgz
+*.tuned_backup
+
+# Staging directories
+new_station_configs/
+
+# Conda environment exports (use environment.yml instead)
+environment_py39.yml
+
+# Working analysis documents
+docs/gnssrefl_upgrade_analysis.md

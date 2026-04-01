@@ -153,12 +153,13 @@ def _normalize_features_per_satellite(per_arc, feature_cols, ice_free_months=Non
         )
 
 
-def _extract_indicators(per_arc, dates, sector_thresholds, has_snr_features):
+def _extract_indicators(per_arc, dates, sector_thresholds, has_snr_features,
+                        min_arcs=3):
     """Pass 1: Extract raw indicator values per (date, sector).
 
     Returns DataFrame with columns: date, sector, n_arcs, land,
     amp_mean, amp_cv, rh_std, and optionally clr_med, af_med, pr_med, gamma_med.
-    Sectors with <3 arcs have indicator values set to NaN.
+    Sectors with fewer than min_arcs have indicator values set to NaN.
     """
     rows = []
     for date in dates:
@@ -172,7 +173,7 @@ def _extract_indicators(per_arc, dates, sector_thresholds, has_snr_features):
                 "land": thresh["land_flag"],
             }
 
-            if n < 3 or thresh["land_flag"]:
+            if n < min_arcs or thresh["land_flag"]:
                 rows.append(entry)
                 continue
 
@@ -306,11 +307,14 @@ def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
         "n_arcs": len(sector),
     }
 
-    # SNR feature thresholds (if features are merged into per_arc)
+    # SNR feature thresholds — always use full-year data.
+    # These features are already z-scored per satellite using ice-free months
+    # as reference, so full-year percentiles capture the seasonal range.
+    # Summer-anchoring would collapse thresholds around the normalized mean.
     for feat_col in ["CLR", "AF", "PR", "gamma"]:
-        if feat_col not in thresh_source.columns:
+        if feat_col not in sector_copy.columns:
             continue
-        daily_feat = thresh_source.groupby("date")[feat_col].median().dropna()
+        daily_feat = sector_copy.groupby("date")[feat_col].median().dropna()
         if len(daily_feat) >= 10:
             result[f"{feat_col}_ice"] = float(daily_feat.quantile(0.70))
             result[f"{feat_col}_water"] = float(daily_feat.quantile(0.30))
@@ -320,7 +324,7 @@ def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
 
 def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
                    station=None, snr_features=None, ice_free_months=None,
-                   smoothing_window=3):
+                   smoothing_window=3, min_arcs=3):
     """Classify each day per azimuth sector, then compute station-level consensus.
 
     Three-pass architecture:
@@ -329,6 +333,7 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
       3. Vote on smoothed values, compute sector and station-level scores
 
     Setting smoothing_window=1 disables smoothing (pass-through).
+    min_arcs: minimum arcs per sector per day for classification (default 3).
 
     Returns DataFrame with per-date, per-sector classifications and overall score.
     """
@@ -408,8 +413,10 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
 
     # --- Pass 1: Extract raw indicator values per (date, sector) ---
     indicators = _extract_indicators(
-        per_arc, dates, sector_thresholds, has_snr_features
+        per_arc, dates, sector_thresholds, has_snr_features,
+        min_arcs=min_arcs,
     )
+    logger.info(f"Min arcs per sector: {min_arcs}, smoothing window: {smoothing_window}")
     logger.info(
         f"Extracted indicators: {len(indicators)} (date, sector) entries"
     )
@@ -439,6 +446,22 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
         ("gamma_med", "gamma_ice", "gamma_water", False, 1.0, "gamma"),
     ]
 
+    # Apply station-specific feature overrides from config
+    # Supports: polarity inversion (high_is_ice), weight adjustment, disable (weight=0)
+    feature_overrides = station_cfg.get("feature_overrides", {})
+    if feature_overrides:
+        logger.info(f"Applying feature overrides: {feature_overrides}")
+        for indicators in [base_indicators, snr_indicators]:
+            for i, (ind_key, ice_key, water_key, high_ice, weight, suffix) in enumerate(indicators):
+                if suffix in feature_overrides:
+                    ovr = feature_overrides[suffix]
+                    if "high_is_ice" in ovr:
+                        high_ice = ovr["high_is_ice"]
+                    if "weight" in ovr:
+                        weight = ovr["weight"]
+                    indicators[i] = (ind_key, ice_key, water_key, high_ice, weight, suffix)
+                    logger.info(f"  {suffix}: high_is_ice={high_ice}, weight={weight}")
+
     rows = []
     for date in dates:
         row = {"date": date}
@@ -450,7 +473,7 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
             prefix = f"az{b}"
             ind = ind_lookup.get((date, b))
 
-            if ind is None or ind["n_arcs"] < 3:
+            if ind is None or ind["n_arcs"] < min_arcs:
                 row[f"{prefix}_class"] = None
                 row[f"{prefix}_score"] = np.nan
                 continue
@@ -626,9 +649,15 @@ def classify_station(station, year, include_s1=True):
         if t is not None:
             sector_thresholds[b] = t
 
+    # Configurable classifier parameters from station config
+    smoothing_window = station_cfg.get("smoothing_window", 3)
+    min_arcs = station_cfg.get("min_arcs_per_sector", 3)
+
     result = classify_daily(per_arc, enriched, s1_matched, s1_index,
                             station=station, snr_features=snr_features,
-                            ice_free_months=ice_free_months)
+                            ice_free_months=ice_free_months,
+                            smoothing_window=smoothing_window,
+                            min_arcs=min_arcs)
 
     return result, sector_thresholds
 

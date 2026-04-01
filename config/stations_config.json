@@ -341,6 +341,10 @@
     "gnssir_json_params_path": "config/niaq.json",
     "reference_gauge_id": null,
     "ice_free_months": [7, 8],
+    "suspect_azimuths": {
+      "70-100": "inverted_seasonal",
+      "notes": "Sectors 70-90 show inverted seasonal behavior: water-like scores in winter, ice-like in summer. Sector 70 has 1.07x seasonal ratio. Likely land or fjord-edge geometry."
+    },
     "usgs_comparison": {
       "search_radius_km": 100,
       "priority_param_codes": [
@@ -391,6 +395,178 @@
         "62611",
         "62620"
       ],
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "CBRG": {
+    "station_id_4char_lower": "cbrg",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 42.469,
+    "latitude_deg": 43.956469883,
+    "longitude_deg": -78.164386572,
+    "gnssir_json_params_path": "config/cbrg.json",
+    "reference_gauge_id": null,
+    "data_availability": "2012-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "CLWD": {
+    "station_id_4char_lower": "clwd",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 144.78,
+    "latitude_deg": 44.508356439,
+    "longitude_deg": -80.220072889,
+    "gnssir_json_params_path": "config/clwd.json",
+    "reference_gauge_id": null,
+    "data_availability": "2017-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "GOD2": {
+    "station_id_4char_lower": "god2",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 144.78,
+    "latitude_deg": 43.745362806,
+    "longitude_deg": -81.727891083,
+    "gnssir_json_params_path": "config/god2.json",
+    "reference_gauge_id": null,
+    "data_availability": "2008-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "KNGV": {
+    "station_id_4char_lower": "kngv",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 142.36,
+    "latitude_deg": 42.026906111,
+    "longitude_deg": -82.734903889,
+    "gnssir_json_params_path": "config/kngv.json",
+    "reference_gauge_id": null,
+    "data_availability": "2013-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "MCHN": {
+    "station_id_4char_lower": "mchn",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 152.02,
+    "latitude_deg": 47.961338056,
+    "longitude_deg": -84.900938056,
+    "gnssir_json_params_path": "config/mchn.json",
+    "reference_gauge_id": null,
+    "data_availability": "2010-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "PARY": {
+    "station_id_4char_lower": "pary",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 145.02,
+    "latitude_deg": 45.338641167,
+    "longitude_deg": -80.035889583,
+    "gnssir_json_params_path": "config/pary.json",
+    "reference_gauge_id": null,
+    "data_availability": "2003-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "PSTA": {
+    "station_id_4char_lower": "psta",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 145.02,
+    "latitude_deg": 42.657893028,
+    "longitude_deg": -81.213844833,
+    "gnssir_json_params_path": "config/psta.json",
+    "reference_gauge_id": null,
+    "data_availability": "2017-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "PWEL": {
+    "station_id_4char_lower": "pwel",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 43.90,
+    "latitude_deg": 43.236668694,
+    "longitude_deg": -79.219728306,
+    "gnssir_json_params_path": "config/pwel.json",
+    "reference_gauge_id": null,
+    "data_availability": "2003-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "ROSS": {
+    "station_id_4char_lower": "ross",
+    "data_source": "nrcan",
+    "orbit_type": "nav",
+    "ellipsoidal_height_m": 149.84,
+    "latitude_deg": 48.833659722,
+    "longitude_deg": -87.519585972,
+    "gnssir_json_params_path": "config/ross.json",
+    "reference_gauge_id": null,
+    "ice_free_months": [6, 7, 8, 9, 10],
+    "smoothing_window": 5,
+    "min_arcs_per_sector": 4,
+    "feature_overrides": {
+      "gamma": {"high_is_ice": true, "weight": 1.5},
+      "clr": {"high_is_ice": false, "weight": 1.0},
+      "pr": {"high_is_ice": false, "weight": 1.0},
+      "af": {"weight": 2.0},
+      "amp": {"weight": 2.0},
+      "_notes": "v6: All roughness-sensitive features inverted for Great Lakes. Rough/ridged wind-piled ice produces: HIGH gamma (fast envelope decay), LOW CLR (scattered LSP peaks), LOW PR (competing reflections). AF and Amp upweighted as strongest discriminators. Optimized against GLERL az-filtered truth: F1=0.83."
+    },
+    "data_availability": "2003-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
+      "target_usgs_site": null,
+      "usgs_parameter_code_to_use": "00065",
+      "usgs_gauge_stated_datum": "Unknown"
+    }
+  },
+  "TOBY": {
+    "station_id_4char_lower": "toby",
+    "data_source": "unknown",
+    "ellipsoidal_height_m": 143.845,
+    "latitude_deg": 45.256779392,
+    "longitude_deg": -81.662830938,
+    "gnssir_json_params_path": "config/toby.json",
+    "reference_gauge_id": null,
+    "data_availability": "2017-present",
+    "usgs_comparison": {
+      "search_radius_km": 100,
       "target_usgs_site": null,
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
