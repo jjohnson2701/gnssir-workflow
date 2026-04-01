@@ -78,6 +78,10 @@ def execute_rinex2snr(
         my_env = os.environ.copy()
         my_env["REFL_CODE"] = str(refl_code_base)
         my_env["ORBITS"] = str(orbits_base)
+        # EXE tells gnssrefl where to find CRX2RNX and other binaries
+        if "EXE" not in my_env:
+            exe_dir = shutil.which("CRX2RNX") or shutil.which("crx2rnx")
+            my_env["EXE"] = str(Path(exe_dir).parent) if exe_dir else str(refl_code_base)
 
         # Working directory
         cwd_for_rinex2snr = str(refl_code_base)
@@ -181,6 +185,9 @@ def execute_gnssir(
         my_env = os.environ.copy()
         my_env["REFL_CODE"] = str(refl_code_base)
         my_env["ORBITS"] = str(orbits_base)
+        if "EXE" not in my_env:
+            exe_dir = shutil.which("CRX2RNX") or shutil.which("crx2rnx")
+            my_env["EXE"] = str(Path(exe_dir).parent) if exe_dir else str(refl_code_base)
 
         # Working directory
         cwd_for_gnssir = str(refl_code_base)
@@ -364,6 +371,9 @@ def execute_quicklook(
         my_env = os.environ.copy()
         my_env["REFL_CODE"] = str(refl_code_base)
         my_env["ORBITS"] = str(orbits_base)
+        if "EXE" not in my_env:
+            exe_dir = shutil.which("CRX2RNX") or shutil.which("crx2rnx")
+            my_env["EXE"] = str(Path(exe_dir).parent) if exe_dir else str(refl_code_base)
 
         # Working directory
         cwd_for_quicklook = str(refl_code_base)

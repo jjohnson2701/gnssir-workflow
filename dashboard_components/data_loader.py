@@ -28,20 +28,28 @@ except ImportError as e:
     NOAACOOPSClient = None
 
 
+def safe_read_parquet(path):
+    """Read a parquet file, returning None if corrupt or missing."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception as e:
+        st.warning(f"Corrupt parquet file skipped: {path.name} ({e})")
+        return None
+
+
 def load_per_arc(station, year):
     """Load per-arc parquet for a station/year, return DataFrame or None."""
     path = project_root / "results_annual" / station / f"{station}_{year}_per_arc.parquet"
-    if not path.exists():
-        return None
-    return pd.read_parquet(path)
+    return safe_read_parquet(path)
 
 
 def load_enriched(station, year):
     """Load daily enriched parquet for a station/year, return DataFrame or None."""
     path = project_root / "results_annual" / station / f"{station}_{year}_daily_enriched.parquet"
-    if not path.exists():
-        return None
-    return pd.read_parquet(path)
+    return safe_read_parquet(path)
 
 
 def get_preferred_coops_stations(station_id):

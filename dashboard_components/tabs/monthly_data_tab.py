@@ -14,6 +14,7 @@ sys.path.append(str(project_root))
 
 # Import station metadata helper
 from dashboard_components.station_metadata import get_antenna_height  # noqa: E402
+from dashboard_components.data_loader import safe_read_parquet  # noqa: E402
 
 # Import visualization functions
 try:
@@ -353,7 +354,10 @@ def _render_monthly_quality(station_id, year):
         st.caption("Run `python scripts/backfill_enriched.py` for signal quality analysis.")
         return
 
-    enriched = pd.read_parquet(enriched_path)
+    enriched = safe_read_parquet(enriched_path)
+    if enriched is None:
+        st.caption("Enriched parquet is corrupt or unreadable — re-run `backfill_enriched.py`.")
+        return
     pooled = enriched[
         (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
     ].copy()

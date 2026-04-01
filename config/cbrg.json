@@ -1,16 +1,16 @@
 {
-    "station": "nkar",
-    "lat": 64.177355,
-    "lon": -51.746608,
-    "ht": 40.8208,
-    "Hortho": 12.6808,
-    "minH": 5.0,
-    "maxH": 25.0,
+    "station": "cbrg",
+    "lat": 43.956469883,
+    "lon": -78.164386572,
+    "ht": 42.4690373,
+    "Hortho": 79.399,
+    "minH": 2.0,
+    "maxH": 8.0,
     "e1": 5.0,
-    "e2": 25.0,
+    "e2": 10.0,
     "NReg": [
-        5.0,
-        25.0
+        2.0,
+        8.0
     ],
     "PkNoise": 3.0,
     "polyV": 4,
@@ -21,8 +21,8 @@
     "ediff": 2.0,
     "desiredP": 0.005,
     "azval2": [
-        210.0,
-        360.0
+        185.0,
+        220.0
     ],
     "freqs": [
         1,
@@ -59,7 +59,7 @@
     "plt_screen": false,
     "onesat": null,
     "screenstats": false,
-    "pltname": "nkar_lsp.png",
+    "pltname": "cbrg_lsp.png",
     "delTmax": 75.0,
     "gzip": false,
     "ellist": [],

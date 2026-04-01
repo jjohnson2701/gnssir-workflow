@@ -18,6 +18,7 @@ sys.path.append(str(project_root))
 
 # Import station metadata helper
 from dashboard_components.station_metadata import get_antenna_height  # noqa: E402
+from dashboard_components.data_loader import safe_read_parquet  # noqa: E402
 
 # Import visualization functions
 try:
@@ -44,10 +45,9 @@ def _render_yearly_quality_context(station_id, year):
     enriched_path = project_root / "results_annual" / station_id / f"{station_id}_{year}_daily_enriched.parquet"
     per_arc_path = project_root / "results_annual" / station_id / f"{station_id}_{year}_per_arc.parquet"
 
-    if not enriched_path.exists():
+    enriched = safe_read_parquet(enriched_path)
+    if enriched is None:
         return
-
-    enriched = pd.read_parquet(enriched_path)
     pooled = enriched[
         (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] == "ALL")
     ].copy()
@@ -89,8 +89,8 @@ def _render_yearly_quality_context(station_id, year):
     plt.close(fig)
 
     # Per-azimuth RH bias check
-    if per_arc_path.exists():
-        per_arc = pd.read_parquet(per_arc_path)
+    per_arc = safe_read_parquet(per_arc_path) if per_arc_path.exists() else None
+    if per_arc is not None:
         az_step = 10
         per_arc_c = per_arc.copy()
         per_arc_c["az_10"] = (per_arc_c["Azim"] // az_step * az_step).astype(int)

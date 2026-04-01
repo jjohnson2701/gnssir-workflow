@@ -17,6 +17,7 @@ sys.path.append(str(project_root))
 
 # Import station metadata helper
 from dashboard_components.station_metadata import get_reference_source_info  # noqa: E402
+from dashboard_components.data_loader import safe_read_parquet  # noqa: E402
 
 AZ_BIN_LABELS = {0: "0-90 (N-E)", 1: "90-180 (E-S)", 2: "180-270 (S-W)", 3: "270-360 (W-N)"}
 
@@ -34,8 +35,8 @@ def _render_quality_summary(station_id, year):
         st.caption("Run `python scripts/backfill_enriched.py` to enable signal quality analysis.")
         return
 
-    enriched = pd.read_parquet(enriched_path) if enriched_path.exists() else None
-    per_arc = pd.read_parquet(per_arc_path) if per_arc_path.exists() else None
+    enriched = safe_read_parquet(enriched_path)
+    per_arc = safe_read_parquet(per_arc_path)
 
     # --- Per-azimuth quality summary ---
     if enriched is not None:

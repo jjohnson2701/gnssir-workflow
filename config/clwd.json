@@ -1,16 +1,16 @@
 {
-    "station": "nkar",
-    "lat": 64.177355,
-    "lon": -51.746608,
-    "ht": 40.8208,
-    "Hortho": 12.6808,
-    "minH": 5.0,
-    "maxH": 25.0,
+    "station": "clwd",
+    "lat": 44.508413147,
+    "lon": -80.220116142,
+    "ht": 144.7817227,
+    "Hortho": 181.5117,
+    "minH": 3.0,
+    "maxH": 9.0,
     "e1": 5.0,
     "e2": 25.0,
     "NReg": [
-        5.0,
-        25.0
+        3.0,
+        9.0
     ],
     "PkNoise": 3.0,
     "polyV": 4,
@@ -22,7 +22,7 @@
     "desiredP": 0.005,
     "azval2": [
         210.0,
-        360.0
+        290.0
     ],
     "freqs": [
         1,
@@ -59,7 +59,7 @@
     "plt_screen": false,
     "onesat": null,
     "screenstats": false,
-    "pltname": "nkar_lsp.png",
+    "pltname": "clwd_lsp.png",
     "delTmax": 75.0,
     "gzip": false,
     "ellist": [],

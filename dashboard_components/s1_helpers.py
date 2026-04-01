@@ -51,8 +51,13 @@ def compute_fresnel_radii(station: str, year: int):
     """
     # Try per-arc data first (actual observed reflection distances)
     pa_path = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_per_arc.parquet"
+    pa = None
     if pa_path.exists():
-        pa = pd.read_parquet(pa_path)
+        try:
+            pa = pd.read_parquet(pa_path)
+        except Exception:
+            pass
+    if pa is not None:
         elev_mid = (pa["eminO"] + pa["emaxO"]) / 2.0
         refl_dist = pa["RH"] / np.tan(np.radians(elev_mid))
         # Use p2-p98 with 30m buffer (1 S1 pixel) on each side
@@ -78,4 +83,7 @@ def load_s1_matched(station: str, year: int) -> pd.DataFrame | None:
     path = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_s1_gnssir_matched.parquet"
     if not path.exists():
         return None
-    return pd.read_parquet(path)
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        return None

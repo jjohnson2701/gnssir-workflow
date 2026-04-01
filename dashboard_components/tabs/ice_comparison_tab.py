@@ -44,6 +44,20 @@ def _load_classification(station, year):
     return df
 
 
+def _load_glerl_ice(station, year):
+    """Load cached GLERL gridded ice concentration for a station-year.
+
+    Looks for cached CSV in data/.cache/glerl_ice/{station}_ice_{year}.csv.
+    Returns DataFrame with columns [datetime, ice_concentration, n_cells] or None.
+    """
+    cache_path = PROJECT_ROOT / "data" / ".cache" / "glerl_ice" / f"{station.lower()}_ice_{year}.csv"
+    if not cache_path.exists():
+        return None
+    df = pd.read_csv(cache_path, parse_dates=["datetime"])
+    df["date_dt"] = df["datetime"].dt.tz_localize(None).dt.normalize()
+    return df
+
+
 def _load_met_data(station, year, project_root=None):
     """Load cached met data CSV. Returns DataFrame or None."""
     root = project_root or PROJECT_ROOT
@@ -583,7 +597,8 @@ def _render_wavelet_comparison(station, year):
 
 
 def _render_score_timeseries(clf, station_id=None, year=None):
-    """Ice score time series with classification zone shading and optional temperature overlay."""
+    """Ice score time series with classification zone shading, optional
+    GLERL ice concentration overlay, and optional temperature overlay."""
     fig = go.Figure()
 
     # Shaded classification zones
@@ -612,11 +627,13 @@ def _render_score_timeseries(clf, station_id=None, year=None):
             hovertemplate="%{x|%b %d}: %{y:.2f}<extra></extra>",
         ))
 
-    # Temperature overlay on secondary y-axis
+    # GLERL ice concentration overlay on secondary y-axis
+    glerl = _load_glerl_ice(station_id, year) if station_id and year else None
+    # Temperature overlay
     met = _load_met_data(station_id, year) if station_id and year else None
 
     layout_kwargs = dict(
-        height=320, margin=dict(l=50, r=60, t=30, b=30),
+        height=360, margin=dict(l=50, r=60, t=30, b=30),
         yaxis=dict(title="Ice Score", range=[-1.1, 1.1]),
         xaxis=dict(title=""),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
@@ -628,8 +645,40 @@ def _render_score_timeseries(clf, station_id=None, year=None):
         ],
     )
 
+    if glerl is not None:
+        # Filter to the year's date range
+        year_start = clf["date_dt"].min()
+        year_end = clf["date_dt"].max()
+        glerl_yr = glerl[(glerl["date_dt"] >= year_start) & (glerl["date_dt"] <= year_end)]
+
+        if not glerl_yr.empty:
+            fig.add_trace(go.Scatter(
+                x=glerl_yr["date_dt"],
+                y=glerl_yr["ice_concentration"],
+                mode="lines",
+                line=dict(color="#90caf9", width=2),
+                fill="tozeroy",
+                fillcolor="rgba(144, 202, 249, 0.15)",
+                opacity=0.8,
+                name="GLERL Ice %",
+                yaxis="y2",
+                hovertemplate="%{x|%b %d}: %{y:.0f}% ice<extra></extra>",
+            ))
+
+            layout_kwargs["yaxis2"] = dict(
+                title=dict(text="GLERL Ice Conc. (%)", font=dict(color="#64b5f6")),
+                overlaying="y",
+                side="right",
+                range=[0, 105],
+                showgrid=False,
+                tickfont=dict(color="#64b5f6"),
+            )
+
     if met is not None:
         freezing_pt = _get_freezing_point(station_id)
+
+        # Use y3 if GLERL already took y2, otherwise y2
+        temp_yaxis = "y3" if glerl is not None and not glerl.empty else "y2"
 
         fig.add_trace(go.Scatter(
             x=met["date"],
@@ -638,7 +687,7 @@ def _render_score_timeseries(clf, station_id=None, year=None):
             line=dict(color="#ff7f0e", width=1.5),
             opacity=0.6,
             name="Air Temp (\u00b0C)",
-            yaxis="y2",
+            yaxis=temp_yaxis,
             hovertemplate="%{x|%b %d}: %{y:.1f}\u00b0C<extra></extra>",
         ))
 
@@ -653,34 +702,53 @@ def _render_score_timeseries(clf, station_id=None, year=None):
                     line=dict(color="#1f77b4", width=2),
                     opacity=0.7,
                     name="SST (\u00b0C)",
-                    yaxis="y2",
+                    yaxis=temp_yaxis,
                     hovertemplate="%{x|%b %d}: SST %{y:.1f}\u00b0C<extra></extra>",
                 ))
 
         # Freezing point reference line
         fig.add_shape(
             type="line", y0=freezing_pt, y1=freezing_pt,
-            x0=0, x1=1, xref="paper", yref="y2",
+            x0=0, x1=1, xref="paper", yref=temp_yaxis,
             line=dict(color="#ff7f0e", width=1, dash="dash"),
             opacity=0.4,
         )
         fig.add_annotation(
-            x=1.0, y=freezing_pt, xref="paper", yref="y2",
+            x=1.0, y=freezing_pt, xref="paper", yref=temp_yaxis,
             text=f"Freezing ({freezing_pt}\u00b0C)",
             showarrow=False, font=dict(color="#ff7f0e", size=9),
             xanchor="right", yanchor="bottom",
         )
 
-        layout_kwargs["yaxis2"] = dict(
+        temp_axis_def = dict(
             title=dict(text="Temperature (\u00b0C)", font=dict(color="#ff7f0e")),
             overlaying="y",
             side="right",
             showgrid=False,
             tickfont=dict(color="#ff7f0e"),
         )
+        if temp_yaxis == "y3":
+            temp_axis_def["anchor"] = "free"
+            temp_axis_def["position"] = 0.95
+            layout_kwargs["yaxis3"] = temp_axis_def
+        else:
+            layout_kwargs["yaxis2"] = temp_axis_def
 
     fig.update_layout(**layout_kwargs)
     st.plotly_chart(fig, use_container_width=True)
+
+    if glerl is None and station_id:
+        # Check if station is in Great Lakes coverage
+        try:
+            from scripts.external_apis.glerl_ice import GLERLIceClient
+            client = GLERLIceClient()
+            if client.station_in_coverage(station_id):
+                st.caption(
+                    f"GLERL ice reference available. Fetch with: "
+                    f"`python scripts/external_apis/glerl_ice.py --station {station_id} --year {year}`"
+                )
+        except Exception:
+            pass
 
     if met is None and station_id:
         st.caption(
@@ -931,8 +999,8 @@ def _render_sector_heatmap(clf):
     plt.close(fig)
 
 
-def _render_monthly_summary(clf):
-    """Monthly summary table with optional SNR feature columns."""
+def _render_monthly_summary(clf, station_id=None, year=None):
+    """Monthly summary table with optional SNR feature and GLERL columns."""
     has_features = _has_snr_features(clf)
     clf = clf.copy()
     clf["month"] = clf["date_dt"].dt.month
@@ -940,6 +1008,17 @@ def _render_monthly_summary(clf):
     if has_features:
         clf["clr_med"] = _median_across_sectors(clf, "clr")
         clf["af_med"] = _median_across_sectors(clf, "af")
+
+    # Load GLERL ice data if available
+    glerl = _load_glerl_ice(station_id, year) if station_id and year else None
+    glerl_monthly = {}
+    if glerl is not None:
+        glerl["month"] = glerl["date_dt"].dt.month
+        # Filter to the classification year
+        clf_year = clf["date_dt"].dt.year.mode().iloc[0] if len(clf) > 0 else year
+        glerl_yr = glerl[glerl["date_dt"].dt.year == clf_year]
+        for m, grp in glerl_yr.groupby("month"):
+            glerl_monthly[m] = grp["ice_concentration"].mean()
 
     rows = []
     for m in sorted(clf["month"].unique()):
@@ -957,6 +1036,9 @@ def _render_monthly_summary(clf):
         if has_features:
             row["CLR"] = f"{md['clr_med'].mean():.1f}"
             row["AF"] = f"{md['af_med'].mean():.0f}"
+        if glerl_monthly:
+            ice_pct = glerl_monthly.get(m)
+            row["GLERL %"] = f"{ice_pct:.0f}" if ice_pct is not None else ""
         rows.append(row)
 
     table_df = pd.DataFrame(rows)
@@ -972,7 +1054,24 @@ def _render_monthly_summary(clf):
             return "background-color: #c8e6c9; color: #1a1a1a"
         return "background-color: #fff9c4; color: #1a1a1a"
 
-    styled = table_df.style.map(_score_color, subset=["Score"])
+    def _glerl_color(val):
+        try:
+            v = float(val)
+        except (ValueError, TypeError):
+            return ""
+        if v >= 30:
+            return "background-color: #bbdefb; color: #1a1a1a"
+        elif v <= 5:
+            return "background-color: #c8e6c9; color: #1a1a1a"
+        return "background-color: #fff9c4; color: #1a1a1a"
+
+    style_subsets = [("Score", _score_color)]
+    if "GLERL %" in table_df.columns:
+        style_subsets.append(("GLERL %", _glerl_color))
+
+    styled = table_df.style
+    for col, fn in style_subsets:
+        styled = styled.map(fn, subset=[col])
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
@@ -1487,4 +1586,4 @@ def render_ice_comparison_tab(station_id, year):
 
     # --- Section 8: Summary ---
     st.subheader("Summary")
-    _render_monthly_summary(clf)
+    _render_monthly_summary(clf, station_id=station_id, year=year)
