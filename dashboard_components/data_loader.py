@@ -41,15 +41,40 @@ def safe_read_parquet(path):
 
 
 def load_per_arc(station, year):
-    """Load per-arc parquet for a station/year, return DataFrame or None."""
-    path = project_root / "results_annual" / station / f"{station}_{year}_per_arc.parquet"
-    return safe_read_parquet(path)
+    """Load Layer 1 arc-level data (arc_table preferred, per_arc fallback)."""
+    for name in ["arc_table", "per_arc"]:
+        path = project_root / "results_annual" / station / f"{station}_{year}_{name}.parquet"
+        result = safe_read_parquet(path)
+        if result is not None:
+            return result
+    return None
 
 
 def load_enriched(station, year):
     """Load daily enriched parquet for a station/year, return DataFrame or None."""
     path = project_root / "results_annual" / station / f"{station}_{year}_daily_enriched.parquet"
     return safe_read_parquet(path)
+
+
+def load_arc_table(station, year):
+    """Load Layer 1 arc table — same as load_per_arc (arc_table preferred, per_arc fallback)."""
+    return load_per_arc(station, year)
+
+
+def load_daily_features(station, year):
+    """Load daily feature table (Layer 2 output) for a station/year, return DataFrame or None."""
+    path = project_root / "results_annual" / station / f"{station}_{year}_daily_features.parquet"
+    return safe_read_parquet(path)
+
+
+def load_ice_classification(station, year):
+    """Load Layer 3 ice state (ice_state preferred, legacy fallback)."""
+    for name in ["ice_state", "ice_classification", "ice_classification_v3"]:
+        path = project_root / "results_annual" / station / f"{station}_{year}_{name}.parquet"
+        result = safe_read_parquet(path)
+        if result is not None:
+            return result
+    return None
 
 
 def get_preferred_coops_stations(station_id):
@@ -413,6 +438,9 @@ def date_to_doy(date):
 __all__ = [
     "load_per_arc",
     "load_enriched",
+    "load_arc_table",
+    "load_daily_features",
+    "load_ice_classification",
     "load_station_data",
     "load_available_stations",
     "get_station_coordinates",

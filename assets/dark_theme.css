@@ -1,0 +1,89 @@
+/* Dark theme overrides for Dash components — high specificity */
+
+/* ---- Slider ---- */
+/* Rail (background track) */
+.dash-slider .rc-slider-rail,
+.rc-slider .rc-slider-rail {
+    background-color: #484f58 !important;
+    height: 6px !important;
+}
+
+/* Active track */
+.dash-slider .rc-slider-track,
+.rc-slider .rc-slider-track {
+    background-color: #58a6ff !important;
+    height: 6px !important;
+}
+
+/* Handle (draggable circle) */
+.dash-slider .rc-slider-handle,
+.rc-slider .rc-slider-handle {
+    background-color: #f0f0f0 !important;
+    border: 2px solid #58a6ff !important;
+    width: 18px !important;
+    height: 18px !important;
+    margin-top: -7px !important;
+    opacity: 1 !important;
+}
+.dash-slider .rc-slider-handle:hover,
+.dash-slider .rc-slider-handle:active,
+.dash-slider .rc-slider-handle:focus,
+.rc-slider .rc-slider-handle:hover,
+.rc-slider .rc-slider-handle:active,
+.rc-slider .rc-slider-handle:focus {
+    border-color: #79c0ff !important;
+    box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.4) !important;
+}
+
+/* Mark text (the 0.1, 0.2, ... labels) */
+.dash-slider .rc-slider-mark-text,
+.rc-slider .rc-slider-mark-text {
+    color: #c9d1d9 !important;
+    font-size: 12px !important;
+}
+
+/* Tooltip */
+.rc-slider-tooltip-inner {
+    background-color: #21262d !important;
+    color: #f0f0f0 !important;
+    border: 1px solid #484f58 !important;
+    font-size: 13px !important;
+    font-weight: bold !important;
+    padding: 4px 8px !important;
+}
+.rc-slider-tooltip-placement-bottom .rc-slider-tooltip-arrow,
+.rc-slider-tooltip-arrow {
+    border-bottom-color: #21262d !important;
+}
+
+/* Dots at marks */
+.dash-slider .rc-slider-dot,
+.rc-slider .rc-slider-dot {
+    background-color: #484f58 !important;
+    border-color: #6e7681 !important;
+}
+.dash-slider .rc-slider-dot-active,
+.rc-slider .rc-slider-dot-active {
+    border-color: #58a6ff !important;
+}
+
+/* ---- Radio items ---- */
+/* Target all radio labels in the app */
+.dash-radioitems label,
+div[id="cluster-metric"] label {
+    color: #e0e0e0 !important;
+    font-size: 0.9rem !important;
+}
+
+/* Radio button accent */
+.dash-radioitems input[type="radio"],
+div[id="cluster-metric"] input[type="radio"] {
+    accent-color: #58a6ff !important;
+    width: 16px !important;
+    height: 16px !important;
+}
+
+/* ---- Tabs ---- */
+.tab--selected {
+    color: #e0e0e0 !important;
+}

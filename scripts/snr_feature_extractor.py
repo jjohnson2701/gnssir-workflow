@@ -447,6 +447,58 @@ def compute_damping(elevation_deg, detrended, wavelength):
 
 
 # ---------------------------------------------------------------------------
+# Phase extraction (Strandberg et al. 2017, Muñoz-Martín et al. 2020)
+# ---------------------------------------------------------------------------
+
+def compute_phase(sin_elev, detrended, wavelength, rh):
+    """Extract reflection phase from detrended SNR at known RH.
+
+    Uses matched-filter (inner product) approach: project dSNR onto
+    cos and sin reference signals at the known oscillation frequency
+    ω = 4πRH/λ in the sin(ε) domain.
+
+    The SNR model is:
+        dSNR(ε) = A · exp(−γ·sin²ε) · cos(ω·sin(ε) + φ)
+
+    Phase responds to the dielectric properties of the reflecting surface.
+    A permittivity change (water→ice, dry ice→wet melt) shifts the Fresnel
+    reflection coefficient phase.
+
+    Args:
+        sin_elev: sin(elevation) array
+        detrended: detrended SNR array (same length)
+        wavelength: carrier wavelength in meters
+        rh: reflector height from LSP (meters)
+
+    Returns:
+        float: phase in radians, wrapped to [−π, π]
+    """
+    if len(detrended) < 10 or rh <= 0:
+        return np.nan
+
+    # Oscillation frequency in the sin(ε) domain
+    omega = 4 * np.pi * rh / wavelength
+
+    # Reference signals at the known frequency
+    arg = omega * sin_elev
+    cos_ref = np.cos(arg)
+    sin_ref = np.sin(arg)
+
+    # Inner products (matched filter projection)
+    # dSNR ≈ A·cos(ω·sin(ε) + φ)
+    #       = A·cos(φ)·cos(ω·sin(ε)) − A·sin(φ)·sin(ω·sin(ε))
+    # So: a ∝ A·cos(φ),  b ∝ A·sin(φ)
+    a = np.sum(detrended * cos_ref)
+    b = np.sum(detrended * sin_ref)
+
+    if a == 0 and b == 0:
+        return np.nan
+
+    phase = np.arctan2(-b, a)
+    return float(phase)
+
+
+# ---------------------------------------------------------------------------
 # Full per-arc feature extraction
 # ---------------------------------------------------------------------------
 
@@ -468,7 +520,7 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
         af_baseline_sin_grid: sin(ε) grid the baseline is defined on
 
     Returns:
-        dict with CLR, PR, AF, gamma, MS, VS, SP, RH, full_arc
+        dict with CLR, PR, AF, gamma, phase, MS, VS, SP, RH, full_arc
     """
     # Window to [e1, e2]
     mask = (elevation >= e1) & (elevation <= e2)
@@ -499,6 +551,9 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
     # Damping
     gamma = compute_damping(ele_w, dsnr, wavelength)
 
+    # Phase (matched filter at LSP-derived RH)
+    phase = compute_phase(sin_e, dsnr, wavelength, lsp["RH"])
+
     # MS (mean raw SNR in dB) and VS (variance of detrended)
     ms = float(np.mean(snr_db_w))
     vs = float(np.var(dsnr))
@@ -510,6 +565,7 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
         "RH": lsp["RH"],
         "AF": af,
         "gamma": gamma,
+        "phase": phase,
         "MS": ms,
         "VS": vs,
         "full_arc": full_arc,
@@ -708,8 +764,10 @@ def _process_day_worker(args):
 def extract_features(station, year, num_cores=1):
     """Extract SNR features for a full station-year.
 
-    Reads per-arc parquet as index, processes each day's SNR file,
-    and outputs {station}_{year}_snr_features.parquet.
+    Reads arc_table.parquet (Layer 1) as index, processes each day's SNR
+    file, and merges features back into arc_table.parquet.
+
+    Falls back to per_arc.parquet for legacy stations.
 
     If AF baselines exist (from compute_af_baselines.py), applies per-PRN
     power curve correction when computing area factors.
@@ -719,13 +777,15 @@ def extract_features(station, year, num_cores=1):
         logger.error(f"No config found for {station}")
         return None
 
-    per_arc_path = (PROJECT_ROOT / "results_annual" / station
-                    / f"{station}_{year}_per_arc.parquet")
-    if not per_arc_path.exists():
-        logger.error(f"Per-arc parquet not found: {per_arc_path}")
+    # Resolve Layer 1 file (arc_table preferred, per_arc fallback)
+    from scripts.results_handler import resolve_layer1
+    layer1_path = resolve_layer1(station, year)
+    if layer1_path is None:
+        logger.error(f"No per-arc data found for {station} {year}")
         return None
+    logger.info(f"Reading Layer 1 from {layer1_path.name}")
 
-    per_arc = pd.read_parquet(per_arc_path)
+    per_arc = pd.read_parquet(layer1_path)
     doys = sorted(per_arc["doy"].unique())
     logger.info(f"Processing {station} {year}: {len(doys)} days, {len(per_arc)} arcs")
 
@@ -767,20 +827,47 @@ def extract_features(station, year, num_cores=1):
         return None
 
     df = pd.DataFrame(all_results)
-    out_path = (PROJECT_ROOT / "results_annual" / station
-                / f"{station}_{year}_snr_features.parquet")
-    df.to_parquet(out_path, index=False)
-    logger.info(f"Saved {len(df)} feature rows to {out_path}")
 
     # Summary
+    logger.info(f"Extracted {len(df)} feature rows")
     logger.info(f"Features: CLR={df['CLR'].median():.2f}, "
                 f"AF={df['AF'].median():.2f}, "
-                f"gamma={df['gamma'].median():.4f}")
+                f"gamma={df['gamma'].median():.4f}, "
+                f"phase={df['phase'].median():.3f} rad")
     full_pct = df["full_arc"].mean() * 100
     logger.info(f"Full arcs: {full_pct:.1f}%")
 
     # Save example arcs for dashboard single-arc display
     _save_example_arcs(df, station, year, config)
+
+    # --- Merge features into arc_table (Layer 1) ---
+    results_dir = PROJECT_ROOT / "results_annual" / station
+    arc_table_path = results_dir / f"{station}_{year}_arc_table.parquet"
+
+    # Join keys shared between arc_table and feature rows
+    join_cols = ["doy", "sat", "UTCtime", "rise", "freq"]
+
+    # Rename feature RH to avoid collision with gnssrefl RH
+    df_feat = df.rename(columns={"RH": "RH_snr"})
+    # Only bring in feature columns (not join keys duplicated in arc_table)
+    feat_cols = [c for c in df_feat.columns
+                 if c not in per_arc.columns or c in join_cols]
+
+    arc_table = per_arc.merge(df_feat[feat_cols], on=join_cols, how="left")
+
+    # Log match rate
+    if "CLR" in arc_table.columns:
+        n_matched = int(arc_table["CLR"].notna().sum())
+        logger.info(
+            f"arc_table merge: {n_matched}/{len(arc_table)} arcs "
+            f"have SNR features ({n_matched / len(arc_table) * 100:.1f}%)"
+        )
+
+    arc_table.to_parquet(arc_table_path, index=False, engine="pyarrow")
+    logger.info(
+        f"arc_table (Layer 1) updated: {arc_table_path} "
+        f"({len(arc_table)} arcs, {arc_table_path.stat().st_size / 1024:.0f} KB)"
+    )
 
     return df
 
@@ -933,7 +1020,7 @@ def main():
     print(f"Full arcs: {df['full_arc'].sum()} / {len(df)} "
           f"({df['full_arc'].mean()*100:.1f}%)")
     print(f"\nFeature medians:")
-    for col in ["CLR", "PR", "AF", "gamma", "MS", "VS"]:
+    for col in ["CLR", "PR", "AF", "gamma", "phase", "MS", "VS"]:
         if col in df.columns:
             print(f"  {col:>6s}: {df[col].median():.4f}")
 

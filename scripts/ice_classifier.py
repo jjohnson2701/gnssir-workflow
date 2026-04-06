@@ -1,19 +1,23 @@
 # ABOUTME: Per-azimuth-sector ice/water/transition classifier for GNSS-IR stations
-# ABOUTME: Classifies each azimuth sector independently, flags land contamination
+# ABOUTME: Reads daily_features.parquet (Layer 2) and applies threshold voting per sector
 
 """
-Per-sector ice classifier.
+Per-sector ice classifier (v2 — reads daily_features.parquet).
 
 Classifies each azimuth sector independently rather than pooling all azimuths.
 This prevents land-contaminated sectors (e.g., 50-60 deg at UMNQ) from drowning
 out genuine ice signals in other sectors.
 
-Thresholds are computed per-sector from the sector's own amplitude range.
+Thresholds are computed per-sector from the sector's own daily feature values.
 Sectors with no seasonal amplitude change are flagged as potential land.
+
+Input: daily_features.parquet (produced by feature_aggregator.py — Layer 2)
+Output: ice_state.parquet (Layer 3)
 
 Usage:
     python scripts/ice_classifier.py --station UMNQ --year 2025
     python scripts/ice_classifier.py --station NKAR --year 2025 --no-s1
+    python scripts/ice_classifier.py --all
 """
 
 import argparse
@@ -90,17 +94,12 @@ def _load_suspect_azimuths(station_cfg):
     return flagged_bins
 
 
-def _normalize_features_per_satellite(per_arc, feature_cols, ice_free_months=None):
-    """Z-score normalize SNR features per satellite PRN.
+def _normalize_features_in_place(per_arc, feature_cols, ice_free_months=None):
+    """Z-score normalize SNR features per satellite PRN (v1-compatible).
 
-    For each feature column, compute mean and std per satellite from
-    the ice-free months (or full year if not specified), then apply
-    (value - mean) / std.
-
-    Satellites that only appear during ice months fall back to full-year
-    stats. Satellites with <10 reference arcs are left unnormalized.
-
-    Modifies per_arc in place.
+    Modifies per_arc in place. Satellites with < 10 reference arcs keep
+    their raw values (not set to NaN). This matches the original v1
+    classifier behavior for threshold computation.
     """
     if ice_free_months:
         months = pd.to_datetime(per_arc["date"]).dt.month
@@ -115,126 +114,56 @@ def _normalize_features_per_satellite(per_arc, feature_cols, ice_free_months=Non
 
         sat_stats = ref_data.groupby("sat")[col].agg(["mean", "std", "count"])
 
-        # Satellites only seen during ice months: fall back to full-year stats
         if ice_free_months:
             all_sats = per_arc["sat"].unique()
             missing_sats = set(all_sats) - set(sat_stats.index)
             if missing_sats:
-                fallback_stats = per_arc.groupby("sat")[col].agg(
-                    ["mean", "std", "count"]
-                )
+                fallback = per_arc.groupby("sat")[col].agg(["mean", "std", "count"])
                 for sat in missing_sats:
-                    if sat in fallback_stats.index:
-                        sat_stats.loc[sat] = fallback_stats.loc[sat]
+                    if sat in fallback.index:
+                        sat_stats.loc[sat] = fallback.loc[sat]
                         logger.warning(
                             f"Satellite {sat}: no ice-free data for {col}, "
                             f"using full-year stats"
                         )
 
-        normalized_count = 0
-        skipped_count = 0
         for sat, row in sat_stats.iterrows():
             mask = per_arc["sat"] == sat
             if row["count"] < 10:
-                skipped_count += 1
-                continue
+                continue  # keep raw values
             if row["std"] > 0:
                 per_arc.loc[mask, col] = (
                     (per_arc.loc[mask, col] - row["mean"]) / row["std"]
                 )
-                normalized_count += 1
             else:
                 per_arc.loc[mask, col] = 0.0
-                normalized_count += 1
-
-        logger.debug(
-            f"Normalized {col}: {normalized_count} satellites, "
-            f"{skipped_count} skipped (<10 arcs)"
-        )
 
 
-def _extract_indicators(per_arc, dates, sector_thresholds, has_snr_features,
-                        min_arcs=3):
-    """Pass 1: Extract raw indicator values per (date, sector).
-
-    Returns DataFrame with columns: date, sector, n_arcs, land,
-    amp_mean, amp_cv, rh_std, and optionally clr_med, af_med, pr_med, gamma_med.
-    Sectors with fewer than min_arcs have indicator values set to NaN.
-    """
-    rows = []
-    for date in dates:
-        day_arcs = per_arc[per_arc["date"] == date]
-        for b, thresh in sector_thresholds.items():
-            sector_arcs = day_arcs[day_arcs["azimuth_bin"] == b]
-            n = len(sector_arcs)
-
-            entry = {
-                "date": date, "sector": b, "n_arcs": n,
-                "land": thresh["land_flag"],
-            }
-
-            if n < min_arcs or thresh["land_flag"]:
-                rows.append(entry)
-                continue
-
-            amp_mean = sector_arcs["Amp"].mean()
-            entry["amp_mean"] = amp_mean
-            entry["amp_cv"] = (
-                sector_arcs["Amp"].std() / amp_mean if amp_mean > 0 else np.nan
-            )
-            entry["rh_std"] = sector_arcs["RH"].std()
-
-            if has_snr_features:
-                for feat in ["CLR", "AF", "PR", "gamma"]:
-                    if feat in sector_arcs.columns:
-                        entry[f"{feat.lower()}_med"] = sector_arcs[feat].median()
-
-            rows.append(entry)
-
-    return pd.DataFrame(rows)
+# Frequency code → band group (for per-sector ΔRH in threshold computation)
+_FREQ_TO_BAND = {
+    1: "L1", 2: "L2", 20: "L2C", 5: "L5",          # GPS
+    101: "E1", 102: "E5a", 105: "E5a",               # Galileo (E1≈L1, E5a≈L5)
+    201: "G1", 205: "G2",                             # GLONASS
+    206: "E5b", 207: "E5", 208: "E6",                 # Galileo cont.
+    301: "B1", 302: "B1", 306: "B3", 307: "B2a",     # BeiDou
+}
 
 
-def _smooth_indicators(indicators_df, window=3):
-    """Pass 2: Apply centered rolling median to indicator values per sector.
-
-    n_arcs and land flag are not smoothed. Only numeric indicator columns
-    are smoothed. Setting window=1 returns the input unchanged.
-    """
-    if window <= 1:
-        return indicators_df
-
-    smoothed = indicators_df.copy()
-    smoothed["_date_dt"] = pd.to_datetime(smoothed["date"])
-    smoothed = smoothed.sort_values(["sector", "_date_dt"])
-
-    value_cols = ["amp_mean", "amp_cv", "rh_std",
-                  "clr_med", "af_med", "pr_med", "gamma_med"]
-    value_cols = [c for c in value_cols if c in smoothed.columns]
-
-    for sector in smoothed["sector"].unique():
-        mask = smoothed["sector"] == sector
-        sector_data = smoothed.loc[mask]
-        for col in value_cols:
-            smoothed.loc[mask, col] = (
-                sector_data[col]
-                .rolling(window, min_periods=1, center=True)
-                .median()
-            )
-
-    smoothed = smoothed.drop(columns=["_date_dt"])
-    return smoothed
-
+# ---------------------------------------------------------------------------
+# Threshold computation from arc_table (Option B — preserves exact v1 thresholds)
+# ---------------------------------------------------------------------------
 
 def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
                               ice_free_months=None):
-    """Compute thresholds for a single azimuth sector from its own data.
+    """Compute thresholds for a single azimuth sector from per-arc data.
+
+    Uses arc_table (per-arc data) for threshold computation to produce
+    identical thresholds to the v1 classifier. The voting and smoothing
+    stages use daily_features.parquet instead.
 
     When ice_free_months is provided, thresholds are anchored to the summer
-    (ice-free) window. This prevents bias at stations with long ice seasons
-    where full-year percentiles are dominated by ice values.
-
-    Returns dict with amp/cv/rh thresholds, optional SNR feature thresholds,
-    plus a land_flag.
+    (ice-free) window. SNR feature thresholds use full-year data since
+    features are already z-scored per satellite.
     """
     sector = per_arc[per_arc["azimuth_bin"] == az_bin]
     if len(sector) < 100:
@@ -258,7 +187,6 @@ def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
     # Choose threshold source: summer anchor or full-year percentiles
     if ice_free_months and len(ice_free_months) > 0:
         summer = sector_copy[sector_copy["month"].isin(ice_free_months)]
-        # Fall back to full sector if insufficient summer data
         thresh_source = summer if len(summer) >= 50 else sector_copy
         if len(summer) >= 50:
             logger.debug(f"  Sector {az_bin}: using summer-anchored thresholds "
@@ -308,10 +236,9 @@ def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
     }
 
     # SNR feature thresholds — always use full-year data.
-    # These features are already z-scored per satellite using ice-free months
-    # as reference, so full-year percentiles capture the seasonal range.
-    # Summer-anchoring would collapse thresholds around the normalized mean.
-    for feat_col in ["CLR", "AF", "PR", "gamma"]:
+    # Features are already z-scored per satellite using ice-free months,
+    # so full-year percentiles capture the seasonal range.
+    for feat_col in ["CLR", "AF", "PR", "gamma", "phase"]:
         if feat_col not in sector_copy.columns:
             continue
         daily_feat = sector_copy.groupby("date")[feat_col].median().dropna()
@@ -319,136 +246,158 @@ def compute_sector_thresholds(per_arc, az_bin, suspect_bins=None,
             result[f"{feat_col}_ice"] = float(daily_feat.quantile(0.70))
             result[f"{feat_col}_water"] = float(daily_feat.quantile(0.30))
 
+    # Per-sector ΔRH thresholds (interfrequency spread)
+    if "freq" in sector_copy.columns and "RH" in sector_copy.columns:
+        sc = sector_copy.copy()
+        sc["_band"] = sc["freq"].map(_FREQ_TO_BAND)
+        daily_drh = []
+        for date, grp in sc.groupby("date"):
+            band_rh = grp.groupby("_band")["RH"].median()
+            if len(band_rh) >= 2:
+                daily_drh.append(float(band_rh.std()))
+        if len(daily_drh) >= 10:
+            drh_series = pd.Series(daily_drh)
+            result["delta_rh_ice"] = float(drh_series.quantile(0.70))
+            result["delta_rh_water"] = float(drh_series.quantile(0.30))
+
     return result
 
 
-def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
-                   station=None, snr_features=None, ice_free_months=None,
-                   smoothing_window=3, min_arcs=3):
-    """Classify each day per azimuth sector, then compute station-level consensus.
+# ---------------------------------------------------------------------------
+# Smoothing
+# ---------------------------------------------------------------------------
 
-    Three-pass architecture:
-      1. Extract raw indicator values per (date, sector)
-      2. Apply centered rolling median (smoothing_window days) per sector
-      3. Vote on smoothed values, compute sector and station-level scores
+def _smooth_daily_features(df, window=3):
+    """Apply centered rolling median to daily feature values per sector.
 
-    Setting smoothing_window=1 disables smoothing (pass-through).
-    min_arcs: minimum arcs per sector per day for classification (default 3).
-
-    Returns DataFrame with per-date, per-sector classifications and overall score.
+    n_arcs and metadata columns are not smoothed. Only numeric feature
+    columns are smoothed. Setting window=1 returns the input unchanged.
     """
-    # Merge SNR features into per_arc if available
-    if snr_features is not None and len(snr_features) > 0:
-        join_cols = ["doy", "sat", "UTCtime", "rise", "freq"]
-        # Avoid duplicate columns
-        feat_cols = [c for c in snr_features.columns
-                     if c not in per_arc.columns or c in join_cols]
-        per_arc = per_arc.merge(snr_features[feat_cols], on=join_cols, how="left")
-        n_matched = per_arc["CLR"].notna().sum() if "CLR" in per_arc.columns else 0
-        logger.info(f"Merged SNR features: {n_matched}/{len(per_arc)} arcs matched")
+    if window <= 1:
+        return df
 
-    dates = sorted(per_arc["date"].unique())
-    az_bins = sorted(per_arc["azimuth_bin"].unique())
+    smoothed = df.copy()
+    smoothed["_date_dt"] = pd.to_datetime(smoothed["date"])
+    smoothed = smoothed.sort_values(["azimuth_bin", "_date_dt"])
 
-    # Load station config
-    station_cfg = _load_station_config(station) if station else {}
-    suspect_bins = _load_suspect_azimuths(station_cfg)
-    if ice_free_months is None:
-        ice_free_months = station_cfg.get("ice_free_months", [])
-    if suspect_bins:
-        logger.info(f"Suspect azimuths from config: {sorted(suspect_bins)}")
-    if ice_free_months:
-        logger.info(f"Summer-anchored thresholds using months: {ice_free_months}")
+    value_cols = [
+        "amp_mean", "amp_cv", "rh_std",
+        "clr_med", "af_med", "pr_med", "gamma_med",
+        "clr_z", "af_z", "pr_z", "gamma_z",
+        "delta_rh_mean", "phase_circ_mean", "phase_circ_std",
+        "diff_phase_L1_L2",
+    ]
+    value_cols = [c for c in value_cols if c in smoothed.columns]
 
-    has_snr_features = "CLR" in per_arc.columns
-
-    # Per-satellite z-score normalization (Purnell 2024)
-    if has_snr_features:
-        _normalize_features_per_satellite(
-            per_arc,
-            feature_cols=["CLR", "AF", "PR", "gamma"],
-            ice_free_months=ice_free_months,
-        )
-
-    # Compute per-sector thresholds
-    sector_thresholds = {}
-    for b in az_bins:
-        t = compute_sector_thresholds(per_arc, b, suspect_bins=suspect_bins,
-                                      ice_free_months=ice_free_months)
-        if t is not None:
-            sector_thresholds[b] = t
-            flag = " [LAND?]" if t["land_flag"] else ""
-            snr_info = ""
-            if "CLR_ice" in t:
-                snr_info = (f", CLR [{t['CLR_water']:.1f},{t['CLR_ice']:.1f}]"
-                            f", AF [{t['AF_water']:.0f},{t['AF_ice']:.0f}]")
-            logger.info(
-                f"  Sector {AZ_BIN_LABELS.get(b, str(b))}: "
-                f"amp ice>{t['amp_mean_ice']:.1f} water<{t['amp_mean_water']:.1f}, "
-                f"cv ice<{t['amp_cv_ice']:.3f} water>{t['amp_cv_water']:.3f}, "
-                f"seasonal ratio={t['seasonal_ratio']:.2f}x, n={t['n_arcs']}" if t["seasonal_ratio"] is not None else
-                f"seasonal ratio=N/A, n={t['n_arcs']}"
-                f"{snr_info}{flag}"
+    for sector in smoothed["azimuth_bin"].unique():
+        mask = smoothed["azimuth_bin"] == sector
+        sector_data = smoothed.loc[mask]
+        for col in value_cols:
+            smoothed.loc[mask, col] = (
+                sector_data[col]
+                .rolling(window, min_periods=1, center=True)
+                .median()
             )
 
+    smoothed = smoothed.drop(columns=["_date_dt"])
+    return smoothed
+
+
+# ---------------------------------------------------------------------------
+# Classification
+# ---------------------------------------------------------------------------
+
+def classify_daily(daily_features, sector_thresholds, station=None,
+                   s1_index=None, smoothing_window=3, min_arcs=3):
+    """Classify each day per azimuth sector from pre-computed daily features.
+
+    Reads daily_features.parquet (Layer 2 output). Thresholds are computed
+    externally from arc_table (Option B) and passed in.
+
+    Three-pass architecture:
+      1. Thresholds computed externally from arc_table (passed in)
+      2. Apply centered rolling median (smoothing_window days) per sector
+      3. Vote on smoothed values, compute sector and station-level scores
+    """
+    station_cfg = _load_station_config(station) if station else {}
+    feature_overrides = station_cfg.get("feature_overrides", {})
+
+    # Separate sector rows from pooled rows
+    sector_features = daily_features[daily_features["azimuth_bin"] >= 0].copy()
+    pooled_features = daily_features[daily_features["azimuth_bin"] == -1].copy()
+
+    has_snr = "clr_z" in sector_features.columns
+
+    dates = sorted(sector_features["date"].unique())
+
     if not sector_thresholds:
-        logger.error("No sectors with enough data")
+        logger.error("No sectors with enough data for thresholds")
         return None
 
-    # S1 HH lookup (same for all sectors — regional context)
+    # --- Pass 2: Temporal smoothing ---
+    # Mask feature values for days below min_arcs or flagged as land
+    # (matches v1 behavior: _extract_indicators set NaN for these)
+    value_cols_to_mask = [
+        "amp_mean", "amp_cv", "rh_std",
+        "clr_med", "af_med", "pr_med", "gamma_med",
+        "clr_z", "af_z", "pr_z", "gamma_z",
+        "delta_rh_mean", "phase_circ_mean", "phase_circ_std",
+        "diff_phase_L1_L2",
+    ]
+    value_cols_to_mask = [c for c in value_cols_to_mask if c in sector_features.columns]
+    for b, thresh in sector_thresholds.items():
+        mask = (sector_features["azimuth_bin"] == b)
+        low_arcs = mask & (sector_features["n_arcs"] < min_arcs)
+        land = mask & thresh["land_flag"]
+        null_mask = low_arcs | land
+        if null_mask.any():
+            sector_features.loc[null_mask, value_cols_to_mask] = np.nan
+
+    sector_features = _smooth_daily_features(sector_features, window=smoothing_window)
+    logger.info(f"Min arcs per sector: {min_arcs}, smoothing window: {smoothing_window}")
+    if smoothing_window > 1:
+        logger.info(f"Applied {smoothing_window}-day rolling median smoothing")
+
+    # Build lookups
+    # Sector features: (date, azimuth_bin) → row
+    sf_lookup = {}
+    for _, row in sector_features.iterrows():
+        sf_lookup[(row["date"], int(row["azimuth_bin"]))] = row
+
+    # Interfreq spread from pooled rows
+    interfreq = {}
+    if "interfreq_spread" in pooled_features.columns:
+        for _, row in pooled_features.iterrows():
+            val = row["interfreq_spread"]
+            if pd.notna(val):
+                interfreq[row["date"]] = val
+
+    # S1 HH lookup
     s1_lookup = {}
     if s1_index is not None and "water_az_mean_hh_db" in s1_index.columns:
         for _, row in s1_index.iterrows():
             s1_lookup[row["acquisition_date"]] = row["water_az_mean_hh_db"]
 
-    # Interfreq spread from enriched
-    interfreq = {}
-    if enriched is not None and len(enriched) > 0:
-        freq_daily = enriched[
-            (enriched["azimuth_bin"] == -1) & (enriched["freq_group"] != "ALL")
-        ]
-        for date, grp in freq_daily.groupby("date"):
-            if len(grp) >= 2:
-                interfreq[date] = grp["rh_mean"].max() - grp["rh_mean"].min()
-
-    # --- Pass 1: Extract raw indicator values per (date, sector) ---
-    indicators = _extract_indicators(
-        per_arc, dates, sector_thresholds, has_snr_features,
-        min_arcs=min_arcs,
-    )
-    logger.info(f"Min arcs per sector: {min_arcs}, smoothing window: {smoothing_window}")
-    logger.info(
-        f"Extracted indicators: {len(indicators)} (date, sector) entries"
-    )
-
-    # --- Pass 2: Temporal smoothing ---
-    indicators = _smooth_indicators(indicators, window=smoothing_window)
-    if smoothing_window > 1:
-        logger.info(f"Applied {smoothing_window}-day rolling median smoothing")
-
-    # Build lookup: (date, sector) → indicator row
-    ind_lookup = {}
-    for _, irow in indicators.iterrows():
-        ind_lookup[(irow["date"], int(irow["sector"]))] = irow
-
-    # --- Pass 3: Vote on smoothed indicator values ---
-    # Indicator voting config: (indicator_key, thresh_ice_key, thresh_water_key,
-    #                           high_is_ice, weight, output_suffix)
+    # --- Indicator voting config ---
+    # (feature_col_in_daily_features, thresh_ice_key, thresh_water_key,
+    #  high_is_ice, weight, output_suffix)
+    # Threshold keys match compute_sector_thresholds() output (arc_table based).
+    # Feature cols read from daily_features (z-scored medians for SNR features).
     base_indicators = [
         ("amp_mean", "amp_mean_ice", "amp_mean_water", True, 2.0, "amp"),
         ("amp_cv", "amp_cv_ice", "amp_cv_water", False, 1.5, "cv"),
         ("rh_std", "rh_std_ice", "rh_std_water", False, 1.0, "rh"),
     ]
     snr_indicators = [
-        ("clr_med", "CLR_ice", "CLR_water", True, 2.0, "clr"),
-        ("af_med", "AF_ice", "AF_water", True, 1.5, "af"),
-        ("pr_med", "PR_ice", "PR_water", True, 1.0, "pr"),
-        ("gamma_med", "gamma_ice", "gamma_water", False, 1.0, "gamma"),
+        ("clr_z", "CLR_ice", "CLR_water", True, 2.0, "clr"),
+        ("af_z", "AF_ice", "AF_water", True, 1.5, "af"),
+        ("pr_z", "PR_ice", "PR_water", True, 1.0, "pr"),
+        ("gamma_z", "gamma_ice", "gamma_water", False, 1.0, "gamma"),
+        ("phase_circ_mean", "phase_ice", "phase_water", True, 0.5, "phase"),
+        ("delta_rh_mean", "delta_rh_ice", "delta_rh_water", True, 0.5, "delta_rh"),
     ]
 
-    # Apply station-specific feature overrides from config
-    # Supports: polarity inversion (high_is_ice), weight adjustment, disable (weight=0)
-    feature_overrides = station_cfg.get("feature_overrides", {})
+    # Apply station-specific feature overrides
     if feature_overrides:
         logger.info(f"Applying feature overrides: {feature_overrides}")
         for indicators in [base_indicators, snr_indicators]:
@@ -462,23 +411,29 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
                     indicators[i] = (ind_key, ice_key, water_key, high_ice, weight, suffix)
                     logger.info(f"  {suffix}: high_is_ice={high_ice}, weight={weight}")
 
+    # --- Pass 3: Vote on smoothed features ---
     rows = []
     for date in dates:
         row = {"date": date}
-
         sector_scores = []
         sector_weights = []
 
         for b, thresh in sector_thresholds.items():
             prefix = f"az{b}"
-            ind = ind_lookup.get((date, b))
+            sr = sf_lookup.get((date, b))
 
-            if ind is None or ind["n_arcs"] < min_arcs:
+            if sr is None:
                 row[f"{prefix}_class"] = None
                 row[f"{prefix}_score"] = np.nan
                 continue
 
-            if ind["land"]:
+            n_arcs = sr.get("n_arcs", 0)
+            if n_arcs < min_arcs:
+                row[f"{prefix}_class"] = None
+                row[f"{prefix}_score"] = np.nan
+                continue
+
+            if thresh["land_flag"]:
                 row[f"{prefix}_class"] = "land"
                 row[f"{prefix}_score"] = np.nan
                 continue
@@ -488,7 +443,7 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
 
             # Vote on base indicators
             for ind_key, ice_key, water_key, high_ice, weight, suffix in base_indicators:
-                val = ind.get(ind_key, np.nan)
+                val = sr.get(ind_key, np.nan)
                 if np.isnan(val) if isinstance(val, float) else pd.isna(val):
                     continue
                 row[f"{prefix}_{suffix}"] = val
@@ -500,11 +455,11 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
                     weights_i.append(weight)
 
             # Vote on SNR-derived indicators
-            if has_snr_features:
+            if has_snr:
                 for ind_key, ice_key, water_key, high_ice, weight, suffix in snr_indicators:
                     if ice_key not in thresh:
                         continue
-                    val = ind.get(ind_key, np.nan)
+                    val = sr.get(ind_key, np.nan)
                     if np.isnan(val) if isinstance(val, float) else pd.isna(val):
                         continue
                     row[f"{prefix}_{suffix}"] = val
@@ -531,33 +486,36 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
             else:
                 row[f"{prefix}_class"] = TRANSITION
 
-            # Contribute to station-level, weighted by arc count
             if not np.isnan(sector_score):
                 sector_scores.append(sector_score)
-                sector_weights.append(int(ind["n_arcs"]))
+                sector_weights.append(int(n_arcs))
 
         # Interfreq spread (station-level indicator)
-        row["interfreq_spread"] = interfreq.get(date, np.nan)
+        ifs = interfreq.get(date, np.nan)
+        row["interfreq_spread"] = ifs if not pd.isna(ifs) else np.nan
+        if pd.notna(ifs):
+            v = _vote(ifs, 0.03, 0.08, high_is_ice=False)
+            row["interfreq_vote"] = v
+        else:
+            row["interfreq_vote"] = None
 
         # S1 HH (station-level indicator)
-        row["s1_hh"] = s1_lookup.get(date, np.nan)
+        s1 = s1_lookup.get(date, np.nan)
+        row["s1_hh"] = s1 if not pd.isna(s1) else np.nan
 
-        # Station-level consensus from sector scores + station-level indicators
+        # Station-level consensus
         all_scores = list(sector_scores)
         all_weights = list(sector_weights)
 
         # Add interfreq spread vote
-        ifs = row["interfreq_spread"]
-        if not np.isnan(ifs):
+        if pd.notna(ifs):
             v = _vote(ifs, 0.03, 0.08, high_is_ice=False)
-            row["interfreq_vote"] = v
             if v:
                 all_scores.append(_score(v))
                 all_weights.append(sum(sector_weights) * 0.3 if sector_weights else 1.0)
 
         # Add S1 HH vote
-        s1 = row["s1_hh"]
-        if not np.isnan(s1):
+        if pd.notna(s1):
             v = _vote(s1, -17.0, -20.0, high_is_ice=True)
             row["s1_vote"] = v
             if v:
@@ -580,14 +538,17 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
             row["ice_score"] = np.nan
             row["classification"] = None
 
-        # Pooled station-level stats
-        day_arcs = per_arc[per_arc["date"] == date]
-        row["amp_mean"] = day_arcs["Amp"].mean()
-        day_amp_mean = day_arcs["Amp"].mean()
-        row["amp_cv"] = (
-            day_arcs["Amp"].std() / day_amp_mean if day_amp_mean > 0 else np.nan
-        )
-        row["rh_std"] = day_arcs["RH"].std()
+        # Pooled station-level stats from pooled row
+        pooled_row = pooled_features[pooled_features["date"] == date]
+        if len(pooled_row) > 0:
+            pr = pooled_row.iloc[0]
+            row["amp_mean"] = pr.get("amp_mean", np.nan)
+            row["amp_cv"] = pr.get("amp_cv", np.nan)
+            row["rh_std"] = pr.get("rh_std", np.nan)
+        else:
+            row["amp_mean"] = np.nan
+            row["amp_cv"] = np.nan
+            row["rh_std"] = np.nan
 
         rows.append(row)
 
@@ -601,132 +562,178 @@ def classify_daily(per_arc, enriched, s1_matched=None, s1_index=None,
 
 
 def classify_station(station, year, include_s1=True):
-    """Load data and classify a station-year.
+    """Load daily_features + arc_table and classify a station-year.
 
-    Automatically loads SNR features and ice_free_months if available.
+    Uses arc_table for threshold computation (preserves v1 thresholds)
+    and daily_features for smoothing and voting (Layer 2 aggregates).
 
     Returns (classification_df, sector_thresholds).
     """
     results_dir = PROJECT_ROOT / "results_annual" / station
 
-    pa_path = results_dir / f"{station}_{year}_per_arc.parquet"
-    if not pa_path.exists():
-        logger.error(f"Per-arc not found: {pa_path}")
+    # Load daily features (Layer 2 — used for smoothing and voting)
+    df_path = results_dir / f"{station}_{year}_daily_features.parquet"
+    if not df_path.exists():
+        logger.error(f"daily_features not found: {df_path}")
+        logger.error(
+            "Run feature_aggregator.py first: "
+            f"python scripts/feature_aggregator.py --station {station} --year {year}"
+        )
         return None, None
-    per_arc = pd.read_parquet(pa_path)
-    logger.info(f"Loaded {len(per_arc)} arcs for {station} {year}")
+    daily_features = pd.read_parquet(df_path)
+    logger.info(f"Loaded {len(daily_features)} daily feature rows for {station} {year}")
 
-    en_path = results_dir / f"{station}_{year}_daily_enriched.parquet"
-    enriched = pd.read_parquet(en_path) if en_path.exists() else pd.DataFrame()
+    # Load arc_table (Layer 1 — used for threshold computation)
+    at_path = results_dir / f"{station}_{year}_arc_table.parquet"
+    if not at_path.exists():
+        logger.error(f"arc_table not found: {at_path}")
+        return None, None
+    arc_table = pd.read_parquet(at_path)
+    logger.info(f"Loaded {len(arc_table)} arcs for threshold computation")
 
-    s1_matched = None
+    # S1 data
     s1_index = None
     if include_s1:
-        m_path = results_dir / f"{station}_{year}_s1_gnssir_matched.parquet"
-        if m_path.exists():
-            s1_matched = pd.read_parquet(m_path)
-        idx_path = PROJECT_ROOT / "data" / station / "s1_fresnel" / f"{station}_s1_fresnel_index.csv"
+        idx_path = (PROJECT_ROOT / "data" / station / "s1_fresnel"
+                    / f"{station}_s1_fresnel_index.csv")
         if idx_path.exists():
             s1_index = pd.read_csv(idx_path)
 
-    # Load SNR features if available
-    snr_features = None
-    feat_path = results_dir / f"{station}_{year}_snr_features.parquet"
-    if feat_path.exists():
-        snr_features = pd.read_parquet(feat_path)
-        logger.info(f"Loaded {len(snr_features)} SNR feature rows from {feat_path.name}")
-
-    # Load ice_free_months from station config
     station_cfg = _load_station_config(station)
     ice_free_months = station_cfg.get("ice_free_months", [])
-
-    # Compute sector thresholds for reporting (before merge, for display)
-    az_bins = sorted(per_arc["azimuth_bin"].unique())
-    sector_thresholds = {}
-    for b in az_bins:
-        t = compute_sector_thresholds(per_arc, b,
-                                      ice_free_months=ice_free_months)
-        if t is not None:
-            sector_thresholds[b] = t
-
-    # Configurable classifier parameters from station config
     smoothing_window = station_cfg.get("smoothing_window", 3)
     min_arcs = station_cfg.get("min_arcs_per_sector", 3)
+    suspect_bins = _load_suspect_azimuths(station_cfg)
 
-    result = classify_daily(per_arc, enriched, s1_matched, s1_index,
-                            station=station, snr_features=snr_features,
-                            ice_free_months=ice_free_months,
-                            smoothing_window=smoothing_window,
-                            min_arcs=min_arcs)
+    # Z-score normalize SNR features in arc_table (v1-compatible: in-place)
+    # Satellites with < 10 reference arcs keep their raw values (v1 behavior).
+    has_snr = "CLR" in arc_table.columns
+    if has_snr:
+        _normalize_features_in_place(
+            arc_table,
+            feature_cols=["CLR", "AF", "PR", "gamma"],
+            ice_free_months=ice_free_months,
+        )
+
+    # Compute per-sector thresholds from arc_table (preserves v1 thresholds)
+    az_bins = sorted(arc_table["azimuth_bin"].unique())
+    sector_thresholds = {}
+    for b in az_bins:
+        t = compute_sector_thresholds(
+            arc_table, b,
+            suspect_bins=suspect_bins,
+            ice_free_months=ice_free_months,
+        )
+        if t is not None:
+            sector_thresholds[b] = t
+            flag = " [LAND?]" if t["land_flag"] else ""
+            snr_info = ""
+            if "CLR_ice" in t:
+                snr_info = f", CLR [{t['CLR_water']:.1f},{t['CLR_ice']:.1f}]"
+                if "AF_ice" in t:
+                    snr_info += f", AF [{t['AF_water']:.0f},{t['AF_ice']:.0f}]"
+            ratio_str = (f"{t['seasonal_ratio']:.2f}x"
+                         if t["seasonal_ratio"] is not None else "N/A")
+            logger.info(
+                f"  Sector {AZ_BIN_LABELS.get(b, str(b))}: "
+                f"amp [{t['amp_mean_water']:.1f},{t['amp_mean_ice']:.1f}], "
+                f"cv [{t['amp_cv_ice']:.3f},{t['amp_cv_water']:.3f}], "
+                f"ratio={ratio_str}, n={t['n_arcs']}"
+                f"{snr_info}{flag}"
+            )
+
+    result = classify_daily(
+        daily_features, sector_thresholds,
+        station=station, s1_index=s1_index,
+        smoothing_window=smoothing_window, min_arcs=min_arcs,
+    )
 
     return result, sector_thresholds
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main():
-    parser = argparse.ArgumentParser(description="Per-sector ice classifier")
-    parser.add_argument("--station", required=True, help="Station ID")
-    parser.add_argument("--year", required=True, type=int)
+    parser = argparse.ArgumentParser(description="Per-sector ice classifier (v2)")
+    parser.add_argument("--station", help="Station ID")
+    parser.add_argument("--year", type=int, help="Year")
     parser.add_argument("--no-s1", action="store_true", help="Exclude S1 data")
+    parser.add_argument("--all", action="store_true",
+                        help="Classify all station-years with daily_features")
+    parser.add_argument("--force", action="store_true",
+                        help="Overwrite existing classification")
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level),
-                        format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+                        format="%(asctime)s %(levelname)s %(message)s",
+                        datefmt="%H:%M:%S")
 
-    result, sector_thresholds = classify_station(
-        args.station, args.year, include_s1=not args.no_s1
-    )
-    if result is None:
-        sys.exit(1)
+    if args.all:
+        from scripts.results_handler import discover_station_years
+        targets = discover_station_years(require_file="daily_features.parquet")
+        logger.info(f"Found {len(targets)} station-years with daily_features")
+    elif args.station and args.year:
+        targets = [(args.station, args.year)]
+    else:
+        parser.error("Specify --station and --year, or use --all")
 
-    # Save
-    out_path = (PROJECT_ROOT / "results_annual" / args.station
-                / f"{args.station}_{args.year}_ice_classification.parquet")
-    result.to_parquet(out_path, index=False)
-    logger.info(f"Saved: {out_path}")
+    for station, year in targets:
+        out_path = (PROJECT_ROOT / "results_annual" / station
+                    / f"{station}_{year}_ice_state.parquet")
+        if out_path.exists() and not args.force and args.all:
+            continue
 
-    # Print summary
-    print(f"\n{'='*60}")
-    print(f"Ice Classification: {args.station} {args.year}")
-    print(f"{'='*60}")
+        result, sector_thresholds = classify_station(
+            station, year, include_s1=not args.no_s1
+        )
+        if result is None:
+            continue
 
-    print(f"\nSector thresholds:")
-    for b, t in sector_thresholds.items():
-        flag = " ** LAND **" if t["land_flag"] else ""
-        ratio_str = f"{t['seasonal_ratio']:.2f}x" if t["seasonal_ratio"] is not None else "N/A"
-        print(f"  {AZ_BIN_LABELS.get(b, str(b))} deg: "
-              f"amp [{t['amp_mean_water']:.1f}, {t['amp_mean_ice']:.1f}], "
-              f"cv [{t['amp_cv_ice']:.3f}, {t['amp_cv_water']:.3f}], "
-              f"ratio={ratio_str}, n={t['n_arcs']}{flag}")
+        result.to_parquet(out_path, index=False)
+        logger.info(f"Saved: {out_path} (Layer 3)")
 
-    print(f"\nDays classified: {len(result)}")
-    print(f"\n{result['classification'].value_counts().to_string()}")
+        if not args.all:
+            # Print summary for single station
+            print(f"\n{'='*60}")
+            print(f"Ice Classification: {station} {year}")
+            print(f"{'='*60}")
 
-    # Per-sector classification counts
-    az_class_cols = [c for c in result.columns if c.endswith("_class")]
-    for col in sorted(az_class_cols):
-        counts = result[col].value_counts()
-        print(f"\n  {col}: {dict(counts)}")
+            print(f"\nSector thresholds:")
+            for b, t in sector_thresholds.items():
+                flag = " ** LAND **" if t["land_flag"] else ""
+                ratio_str = (f"{t['seasonal_ratio']:.2f}x"
+                             if t["seasonal_ratio"] is not None else "N/A")
+                print(f"  {AZ_BIN_LABELS.get(b, str(b))} deg: "
+                      f"amp [{t['amp_mean_water']:.1f}, {t['amp_mean_ice']:.1f}], "
+                      f"cv [{t['amp_cv_ice']:.3f}, {t['amp_cv_water']:.3f}], "
+                      f"ratio={ratio_str}, n={t['n_arcs']}{flag}")
 
-    # Monthly breakdown
-    result["month"] = result["date_dt"].dt.month
-    print(f"\nMonthly breakdown:")
-    for m in sorted(result["month"].unique()):
-        md = result[result["month"] == m]
-        counts = md["classification"].value_counts()
-        score = md["ice_score"].mean()
+            print(f"\nDays classified: {len(result)}")
+            print(f"\n{result['classification'].value_counts().to_string()}")
 
-        # Per-sector scores
-        sector_scores = []
-        for col in sorted(az_class_cols):
-            sector_counts = md[col].value_counts()
-            ice_n = sector_counts.get("ice", 0)
-            if ice_n > 0:
-                sector_scores.append(f"{col.replace('_class', '')}:{ice_n}ice")
+            az_class_cols = [c for c in result.columns if c.endswith("_class")]
+            for col in sorted(az_class_cols):
+                counts = result[col].value_counts()
+                print(f"\n  {col}: {dict(counts)}")
 
-        sector_text = f" [{', '.join(sector_scores)}]" if sector_scores else ""
-        print(f"  Month {m:2d}: score={score:+.2f}  {dict(counts)}{sector_text}")
+            result["month"] = result["date_dt"].dt.month
+            print(f"\nMonthly breakdown:")
+            for m in sorted(result["month"].unique()):
+                md = result[result["month"] == m]
+                counts = md["classification"].value_counts()
+                score = md["ice_score"].mean()
+                sector_scores = []
+                for col in sorted(az_class_cols):
+                    sector_counts = md[col].value_counts()
+                    ice_n = sector_counts.get("ice", 0)
+                    if ice_n > 0:
+                        sector_scores.append(f"{col.replace('_class', '')}:{ice_n}ice")
+                sector_text = f" [{', '.join(sector_scores)}]" if sector_scores else ""
+                print(f"  Month {m:2d}: score={score:+.2f}  {dict(counts)}{sector_text}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,68 @@
+{
+    "station": "ross",
+    "lat": 48.833729447,
+    "lon": -87.519598801,
+    "ht": 149.8350237,
+    "Hortho": 186.725,
+    "minH": 2.0,
+    "maxH": 8.0,
+    "e1": 5.0,
+    "e2": 25.0,
+    "NReg": [
+        2.0,
+        8.0
+    ],
+    "PkNoise": 3.0,
+    "polyV": 4,
+    "pele": [
+        5,
+        30
+    ],
+    "ediff": 2.0,
+    "desiredP": 0.005,
+    "azval2": [
+        0.0,
+        360.0
+    ],
+    "freqs": [
+        1,
+        20,
+        5,
+        101,
+        102,
+        201,
+        205,
+        206,
+        207,
+        208,
+        302,
+        306
+    ],
+    "reqAmp": [
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+    ],
+    "refraction": true,
+    "overwriteResults": true,
+    "seekRinex": false,
+    "wantCompression": false,
+    "plt_screen": false,
+    "onesat": null,
+    "screenstats": false,
+    "pltname": "ross_land_lsp.png",
+    "delTmax": 75.0,
+    "gzip": false,
+    "ellist": [],
+    "refr_model": 1,
+    "_notes": "Full-azimuth config for land-sector atmospheric comparison (v7). Identical to ross.json except azval2=[0,360]. Land-facing arcs (N/W/E) provide an atmospheric reference; water-facing arcs (110-190) remain the primary science channel."
+}

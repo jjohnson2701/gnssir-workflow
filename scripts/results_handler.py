@@ -1,11 +1,14 @@
 # ABOUTME: Results aggregator for daily GNSS-IR reflector height files
 # ABOUTME: Combines daily outputs into annual datasets with enriched per-arc and daily statistics
+# ABOUTME: Produces arc_table.parquet (Layer 1) — canonical per-arc file for the 4-layer architecture
 
 import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Canonical gnssir v3 output column names (17 columns)
 # Based on gnssrefl v3.10.0 output format
@@ -227,10 +230,11 @@ def combine_daily_rh_results(
     """
     Combine daily reflector height results into annual datasets.
 
-    Produces three outputs:
-      1. {STATION}_{year}_combined_rh.csv    -- backward-compatible daily RH stats
-      2. {STATION}_{year}_per_arc.parquet     -- all per-arc data with derived columns
-      3. {STATION}_{year}_daily_enriched.parquet -- daily stats by azimuth_bin x freq_group
+    Produces:
+      1. {STATION}_{year}_arc_table.parquet   -- Layer 1: all per-arc data with derived columns
+      2. {STATION}_{year}_daily_enriched.parquet -- daily stats by azimuth_bin x freq_group
+      3. {STATION}_{year}_combined_interfreq.parquet -- interfrequency divergence
+      4. {STATION}_{year}_combined_rh.csv     -- backward-compatible daily RH stats
 
     Args:
         station_id_4char_lower (str): Station ID in 4-character lowercase
@@ -431,40 +435,35 @@ def combine_daily_rh_results(
         logging.info("Added derived columns: azimuth_bin, freq_group"
                       + (", wse" if antenna_height_m is not None else ""))
 
-        # --- Save per-arc parquet (all columns, typed efficiently) ---
+        # --- Save arc_table (Layer 1) — canonical per-arc file ---
+        # SNR feature columns are added later by snr_feature_extractor
         try:
-            per_arc_path = (
+            station_upper = station_id_4char_lower.upper()
+            arc_table_path = (
                 annual_results_dir
-                / f"{station_id_4char_lower.upper()}_{year}_per_arc.parquet"
+                / f"{station_upper}_{year}_arc_table.parquet"
             )
-            combined_df.to_parquet(per_arc_path, index=False, engine="pyarrow")
+            combined_df.to_parquet(arc_table_path, index=False, engine="pyarrow")
             logging.info(
-                f"Per-arc parquet saved to {per_arc_path} "
+                f"arc_table (Layer 1) saved to {arc_table_path} "
                 f"({len(combined_df)} arcs, "
-                f"{per_arc_path.stat().st_size / 1024:.0f} KB)"
+                f"{arc_table_path.stat().st_size / 1024:.0f} KB)"
             )
         except Exception as e:
-            logging.warning(f"Could not write per-arc parquet: {e}")
+            logging.warning(f"Could not write arc_table parquet: {e}")
 
         # --- Compute enriched daily stats (by azimuth_bin x freq_group) ---
         try:
             enriched = compute_enriched_daily(combined_df)
             if enriched is not None:
-                station_upper = station_id_4char_lower.upper()
-                # Primary output: combined_enriched.parquet
                 enriched_path = (
-                    annual_results_dir / f"{station_upper}_{year}_combined_enriched.parquet"
-                )
-                enriched.to_parquet(enriched_path, index=False, engine="pyarrow")
-                # Backward-compatible alias for dashboard (reads daily_enriched.parquet)
-                compat_path = (
                     annual_results_dir / f"{station_upper}_{year}_daily_enriched.parquet"
                 )
-                enriched.to_parquet(compat_path, index=False, engine="pyarrow")
+                enriched.to_parquet(enriched_path, index=False, engine="pyarrow")
                 n_groups = len(enriched)
                 n_days = enriched["date"].nunique()
                 logging.info(
-                    f"Enriched parquet saved to {enriched_path} "
+                    f"daily_enriched saved to {enriched_path} "
                     f"({n_groups} rows across {n_days} days)"
                 )
         except Exception as e:
@@ -516,17 +515,6 @@ def combine_daily_rh_results(
         except Exception as e:
             logging.error(f"Error during daily CSV aggregation: {e}")
             combined_df.to_csv(output_csv_path, index=False)
-
-        # --- Also keep combined_raw.csv for existing consumers ---
-        try:
-            raw_csv_path = (
-                annual_results_dir
-                / f"{station_id_4char_lower.upper()}_{year}_combined_raw.csv"
-            )
-            combined_df.to_csv(raw_csv_path, index=False)
-            logging.info(f"Raw CSV saved to {raw_csv_path} ({len(combined_df)} rows)")
-        except Exception as e:
-            logging.warning(f"Could not write raw CSV: {e}")
 
         if processing_errors:
             logging.warning(f"Completed with {len(processing_errors)} processing errors")
@@ -585,26 +573,22 @@ def backfill_from_raw_csv(raw_csv_path, annual_results_dir, antenna_height_m=Non
 
     annual_results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Per-arc parquet
-    per_arc_path = annual_results_dir / f"{station}_{year}_per_arc.parquet"
-    df.to_parquet(per_arc_path, index=False, engine="pyarrow")
+    # arc_table (Layer 1)
+    arc_table_path = annual_results_dir / f"{station}_{year}_arc_table.parquet"
+    df.to_parquet(arc_table_path, index=False, engine="pyarrow")
     logging.info(
-        f"Per-arc: {len(df)} arcs -> {per_arc_path} "
-        f"({per_arc_path.stat().st_size / 1024:.0f} KB)"
+        f"arc_table (Layer 1): {len(df)} arcs -> {arc_table_path} "
+        f"({arc_table_path.stat().st_size / 1024:.0f} KB)"
     )
 
     # Enriched daily parquet
     enriched = compute_enriched_daily(df)
     enriched_path = None
     if enriched is not None:
-        # Primary output
-        enriched_path = annual_results_dir / f"{station}_{year}_combined_enriched.parquet"
+        enriched_path = annual_results_dir / f"{station}_{year}_daily_enriched.parquet"
         enriched.to_parquet(enriched_path, index=False, engine="pyarrow")
-        # Backward-compatible alias for dashboard
-        compat_path = annual_results_dir / f"{station}_{year}_daily_enriched.parquet"
-        enriched.to_parquet(compat_path, index=False, engine="pyarrow")
         logging.info(
-            f"Enriched: {len(enriched)} rows across "
+            f"daily_enriched: {len(enriched)} rows across "
             f"{enriched['date'].nunique()} days -> {enriched_path}"
         )
 
@@ -617,4 +601,88 @@ def backfill_from_raw_csv(raw_csv_path, annual_results_dir, antenna_height_m=Non
             f"Interfreq: {len(interfreq)} rows -> {interfreq_path}"
         )
 
-    return per_arc_path, enriched_path
+    return arc_table_path, enriched_path
+
+
+# ---------------------------------------------------------------------------
+# Layer resolution helpers — find the right parquet with fallback
+# ---------------------------------------------------------------------------
+
+def resolve_layer1(station, year, results_dir=None):
+    """Resolve the Layer 1 per-arc parquet path.
+
+    Prefers arc_table.parquet (current). Falls back to per_arc.parquet
+    (legacy) for stations processed before the 4-layer consolidation.
+
+    Returns Path or None if neither exists.
+    """
+    if results_dir is None:
+        results_dir = PROJECT_ROOT / "results_annual" / station
+    results_dir = Path(results_dir)
+
+    arc_table = results_dir / f"{station}_{year}_arc_table.parquet"
+    if arc_table.exists():
+        return arc_table
+
+    per_arc = results_dir / f"{station}_{year}_per_arc.parquet"
+    if per_arc.exists():
+        return per_arc
+
+    return None
+
+
+def resolve_snr_features(station, year, results_dir=None):
+    """Resolve SNR features — either embedded in arc_table or standalone.
+
+    Returns (path, embedded: bool). If embedded=True, features are columns
+    in arc_table.parquet. If embedded=False, path is to snr_features.parquet.
+    Returns (None, False) if neither exists.
+    """
+    if results_dir is None:
+        results_dir = PROJECT_ROOT / "results_annual" / station
+    results_dir = Path(results_dir)
+
+    arc_table = results_dir / f"{station}_{year}_arc_table.parquet"
+    if arc_table.exists():
+        # Quick check: does arc_table have SNR columns?
+        import pyarrow.parquet as pq
+        schema = pq.read_schema(arc_table)
+        if "CLR" in schema.names:
+            return arc_table, True
+
+    feat_path = results_dir / f"{station}_{year}_snr_features.parquet"
+    if feat_path.exists():
+        return feat_path, False
+
+    return None, False
+
+
+def discover_station_years(results_base=None, require_file="arc_table.parquet"):
+    """Scan results_annual/ for available station-years.
+
+    Args:
+        results_base: Path to results_annual directory (default: PROJECT_ROOT/results_annual)
+        require_file: Suffix pattern — only return station-years that have this file.
+            e.g. "arc_table.parquet", "per_arc.parquet", "daily_features.parquet"
+
+    Returns:
+        list of (station, year) tuples sorted by station then year.
+    """
+    if results_base is None:
+        results_base = PROJECT_ROOT / "results_annual"
+    results_base = Path(results_base)
+
+    found = []
+    for f in sorted(results_base.glob(f"*/*_{require_file}")):
+        # Filename pattern: {STATION}_{YEAR}_{suffix}
+        parts = f.stem.split("_")
+        if len(parts) >= 2:
+            station = parts[0]
+            try:
+                year = int(parts[1])
+                found.append((station, year))
+            except ValueError:
+                continue
+    return sorted(set(found))
+
+

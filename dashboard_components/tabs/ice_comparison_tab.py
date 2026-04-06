@@ -21,7 +21,11 @@ from dashboard_components.s1_helpers import (
     get_thumb_path,
     compute_fresnel_radii,
 )
-from dashboard_components.data_loader import safe_read_parquet
+from dashboard_components.data_loader import (
+    safe_read_parquet,
+    load_daily_features,
+    load_ice_classification,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -33,11 +37,7 @@ MONTH_NAMES = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
 
 
 def _load_classification(station, year):
-    path = (PROJECT_ROOT / "results_annual" / station
-            / f"{station}_{year}_ice_classification.parquet")
-    if not path.exists():
-        return None
-    df = safe_read_parquet(path)
+    df = load_ice_classification(station, year)
     if df is None:
         return None
     df["date_dt"] = pd.to_datetime(df["date"])

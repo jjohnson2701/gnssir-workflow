@@ -49,6 +49,8 @@ from dashboard_components.tabs import (
     render_diagnostics_tab,
     render_per_arc_tab,
     render_ice_comparison_tab,
+    render_feature_explorer_tab,
+    has_feature_data,
     render_validation_tab,
     has_validation_data,
     render_data_quality_tab,
@@ -295,6 +297,7 @@ def main():
         # Build tab list: new tabs first, then old tabs (pending removal)
         show_quality = has_quality_data(selected_station, selected_year)
         show_validation = has_validation_data(selected_station, selected_year)
+        show_features = has_feature_data(selected_station, selected_year)
 
         tab_names = ["🏠 Overview"]
         if show_quality:
@@ -303,6 +306,8 @@ def main():
             tab_names.append("✅ Validation")
         tab_names.append("🛰️ Arc-Level Analysis")
         tab_names.append("🧊 Ice Classification")
+        if show_features:
+            tab_names.append("📊 Feature Explorer")
         # Old tabs — kept during transition
         tab_names.extend([
             "📊 Monthly Data",
@@ -338,6 +343,10 @@ def main():
 
         with tab_map["🧊 Ice Classification"]:
             render_ice_comparison_tab(selected_station, selected_year)
+
+        if show_features:
+            with tab_map["📊 Feature Explorer"]:
+                render_feature_explorer_tab(selected_station, selected_year)
 
         # --- Old tabs (pending removal) ---
         with tab_map["📊 Monthly Data"]:

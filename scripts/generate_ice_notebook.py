@@ -70,6 +70,10 @@ The analysis investigates:
 
 Each section builds toward understanding the physical signals in the data
 and how they relate to actual ice presence.
+
+**Notebook version:** v8 — refactored to consume `arc_table.parquet` (Layer 1)
+and `daily_features.parquet` (Layer 2) instead of computing features inline.
+Prior versions: v7/v7.1 (multi-observable analysis), v1–v6 (incremental ice classifier tuning).
 """))
 
     # =====================================================================
@@ -156,35 +160,68 @@ MONTH_NAMES = {{1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
     cells.append(_md("""
 ## 1. Data Loading
 
-Load the per-arc retrievals, SNR features, classification results, and GLERL ground truth.
+Load the arc-level data, daily aggregated features, classification results, and GLERL ground truth.
+
+**v8 data architecture:**
+- `arc_table.parquet` — Layer 1: merged per-arc + SNR features (replaces per_arc + snr_features merge)
+- `daily_features.parquet` — Layer 2: daily × sector aggregated features (replaces inline computation)
+- `ice_classification.parquet` — Layer 3: classification output
+
+Falls back to legacy `per_arc.parquet` + `snr_features.parquet` if Layer 1-2 files don't exist.
 """))
 
     cells.append(_code(f"""
-# Per-arc data (individual GNSS-IR retrievals)
+# --- v8 data loading: prefer arc_table + daily_features, fall back to per_arc ---
+arc_table_path = results_dir / f"{{STATION}}_{{YEAR}}_arc_table.parquet"
+daily_features_path = results_dir / f"{{STATION}}_{{YEAR}}_daily_features.parquet"
 pa_path = results_dir / f"{{STATION}}_{{YEAR}}_per_arc.parquet"
-per_arc = pd.read_parquet(pa_path)
+
+has_arc_table = arc_table_path.exists()
+has_daily_features = daily_features_path.exists()
+
+if has_arc_table:
+    per_arc = pd.read_parquet(arc_table_path)
+    print(f"arc_table (Layer 1): {{len(per_arc):,}} arcs across {{per_arc['date'].nunique()}} days")
+    has_snr = "CLR" in per_arc.columns
+    if has_snr:
+        print(f"  SNR features: CLR, AF, PR, gamma (pre-merged)")
+    if "freq_group" in per_arc.columns:
+        print(f"  Frequency groups: {{sorted(per_arc['freq_group'].unique())}}")
+else:
+    # Legacy fallback: load per_arc + snr_features and merge
+    print("arc_table not found — falling back to legacy per_arc + snr_features")
+    per_arc = pd.read_parquet(pa_path)
+    feat_path = results_dir / f"{{STATION}}_{{YEAR}}_snr_features.parquet"
+    has_snr = feat_path.exists()
+    if has_snr:
+        snr_feat = pd.read_parquet(feat_path)
+        join_cols = ["doy", "sat", "UTCtime", "rise", "freq"]
+        feat_cols = [c for c in snr_feat.columns if c not in per_arc.columns or c in join_cols]
+        per_arc = per_arc.merge(snr_feat[feat_cols], on=join_cols, how="left")
+        n_matched = per_arc["CLR"].notna().sum()
+        print(f"  SNR features merged: {{n_matched}}/{{len(per_arc)}} arcs matched")
+    print(f"Per-arc (legacy): {{len(per_arc):,}} arcs across {{per_arc['date'].nunique()}} days")
+
 per_arc["date_dt"] = pd.to_datetime(per_arc["date"])
 per_arc["month"] = per_arc["date_dt"].dt.month
-print(f"Per-arc: {{len(per_arc):,}} arcs across {{per_arc['date'].nunique()}} days")
 print(f"  Azimuth sectors: {{sorted(per_arc['azimuth_bin'].unique())}}")
-print(f"  Frequencies: {{sorted(per_arc['freq'].unique())}}")
 
-# SNR features
-feat_path = results_dir / f"{{STATION}}_{{YEAR}}_snr_features.parquet"
-has_snr = feat_path.exists()
-if has_snr:
-    snr_feat = pd.read_parquet(feat_path)
-    # Merge features into per_arc
-    join_cols = ["doy", "sat", "UTCtime", "rise", "freq"]
-    feat_cols = [c for c in snr_feat.columns if c not in per_arc.columns or c in join_cols]
-    per_arc = per_arc.merge(snr_feat[feat_cols], on=join_cols, how="left")
-    n_matched = per_arc["CLR"].notna().sum()
-    print(f"  SNR features merged: {{n_matched}}/{{len(per_arc)}} arcs matched")
-    print(f"  Features: CLR, AF, PR, gamma")
+# Daily features (Layer 2)
+daily_features = None
+if has_daily_features:
+    daily_features = pd.read_parquet(daily_features_path)
+    daily_features["date_dt"] = pd.to_datetime(daily_features["date"])
+    n_sector_rows = (daily_features["azimuth_bin"] >= 0).sum()
+    n_pooled_rows = (daily_features["azimuth_bin"] == -1).sum()
+    print(f"\\ndaily_features (Layer 2): {{len(daily_features)}} rows "
+          f"({{n_sector_rows}} sector + {{n_pooled_rows}} pooled)")
+    feat_cols = [c for c in daily_features.columns
+                 if c not in ("date", "azimuth_bin", "date_dt") and daily_features[c].notna().any()]
+    print(f"  Available features: {{len(feat_cols)}}")
 else:
-    print("  No SNR features found. Run snr_feature_extractor.py first.")
+    print("\\nNo daily_features — inline computation will be used where needed")
 
-# Classification results
+# Classification results (Layer 3)
 clf_path = results_dir / f"{{STATION}}_{{YEAR}}_ice_classification.parquet"
 clf = pd.read_parquet(clf_path)
 clf["date_dt"] = pd.to_datetime(clf["date"])
@@ -537,12 +574,25 @@ if has_snr:
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 8))
 
+    # Use daily_features pooled medians if available, otherwise compute from per_arc
+    if daily_features is not None:
+        pooled = daily_features[daily_features["azimuth_bin"] == -1].copy()
+        pooled["month"] = pd.to_datetime(pooled["date"]).dt.month
+        feat_source = "daily_features"
+    else:
+        pooled = None
+        feat_source = "per_arc"
+
     for ax, (feat, (label, high_ice, note)) in zip(axes.flat, features.items()):
-        if feat not in per_arc.columns:
+        feat_lower = feat.lower()
+
+        if pooled is not None and f"{feat_lower}_med" in pooled.columns:
+            monthly = pooled.groupby("month")[f"{feat_lower}_med"].median()
+        elif feat in per_arc.columns:
+            monthly = per_arc.groupby("month")[feat].median()
+        else:
             ax.set_visible(False)
             continue
-
-        monthly = per_arc.groupby("month")[feat].median()
 
         # Color bars by GLERL ice
         if glerl is not None:
@@ -572,7 +622,7 @@ if has_snr:
             if m in monthly.index:
                 ax.axvline(m, color="green", ls=":", alpha=0.3)
 
-    fig.suptitle(f"{STATION} {YEAR} — Monthly SNR Feature Medians\\n"
+    fig.suptitle(f"{STATION} {YEAR} — Monthly SNR Feature Medians (from {feat_source})\\n"
                  f"(Blue bars = GLERL >30% ice, Green = <5%, Yellow = marginal)",
                  fontsize=11)
     fig.tight_layout()
@@ -598,13 +648,26 @@ A negative correlation means it **decreases** with ice.
 
     cells.append(_code("""
 if glerl is not None:
-    # Compute daily feature medians
-    daily_features = per_arc.groupby("date_dt").agg({
-        "Amp": "mean",
-        **({feat: "median" for feat in ["CLR", "AF", "PR", "gamma"] if feat in per_arc.columns})
-    }).reset_index()
+    # Use daily_features (pooled) if available, otherwise compute from per_arc
+    if daily_features is not None:
+        pooled = daily_features[daily_features["azimuth_bin"] == -1].copy()
+        pooled["date_dt"] = pd.to_datetime(pooled["date"])
+        # Map feature names: daily_features uses amp_mean, clr_med, etc.
+        feat_map = {"Amp": "amp_mean", "CLR": "clr_med", "AF": "af_med",
+                    "PR": "pr_med", "gamma": "gamma_med"}
+        corr_df = pooled[["date_dt"] + [v for v in feat_map.values() if v in pooled.columns]].copy()
+        # Rename to standard names for plotting
+        reverse_map = {v: k for k, v in feat_map.items() if v in corr_df.columns}
+        corr_df = corr_df.rename(columns=reverse_map)
+        print("Using daily_features (Layer 2) for correlation analysis")
+    else:
+        corr_df = per_arc.groupby("date_dt").agg({
+            "Amp": "mean",
+            **({feat: "median" for feat in ["CLR", "AF", "PR", "gamma"] if feat in per_arc.columns})
+        }).reset_index()
+        print("Using per_arc inline aggregation for correlation analysis")
 
-    merged = daily_features.merge(glerl[["date_dt", "ice_concentration"]], on="date_dt", how="inner")
+    merged = corr_df.merge(glerl[["date_dt", "ice_concentration"]], on="date_dt", how="inner")
 
     print(f"{'Feature':>10} | {'Corr (r)':>8} | {'Expected':>10} | {'Actual':>10} | {'Match?':>6}")
     print("-" * 60)
@@ -1420,37 +1483,34 @@ if overrides:
 
     cells.append(_code(f"""
 # Simulate default vs overridden classification
-# Re-run the classifier with default settings for comparison
+# v8: Use classify_station() from the refactored classifier
 import sys
 sys.path.insert(0, str(PROJECT_ROOT))
-from scripts.ice_classifier import classify_daily
-
-# Load fresh data
-pa_fresh = pd.read_parquet(results_dir / f"{{STATION}}_{{YEAR}}_per_arc.parquet")
-en_fresh = pd.read_parquet(results_dir / f"{{STATION}}_{{YEAR}}_daily_enriched.parquet")
-feat_fresh = pd.read_parquet(results_dir / f"{{STATION}}_{{YEAR}}_snr_features.parquet")
+from scripts.ice_classifier import classify_station
+import scripts.ice_classifier as ic_mod
 
 # Run with DEFAULT settings (no overrides): temporarily patch config
-import scripts.ice_classifier as ic_mod
 orig_load = ic_mod._load_station_config
 ic_mod._load_station_config = lambda s: {{
     k: v for k, v in station_cfg.items()
     if k not in ("feature_overrides", "smoothing_window", "min_arcs_per_sector")
 }}
-clf_default = classify_daily(
-    pa_fresh, en_fresh, station=STATION, snr_features=feat_fresh,
-    ice_free_months=ice_free_months, smoothing_window=3, min_arcs=3)
+try:
+    clf_default, _ = classify_station(STATION, YEAR, include_s1=False)
+except Exception as e:
+    print(f"Default classification failed: {{e}}")
+    clf_default = None
 
 # Restore and run with CURRENT settings
 ic_mod._load_station_config = orig_load
-clf_current = classify_daily(
-    pa_fresh, en_fresh, station=STATION, snr_features=feat_fresh,
-    ice_free_months=ice_free_months,
-    smoothing_window=station_cfg.get("smoothing_window", 3),
-    min_arcs=station_cfg.get("min_arcs_per_sector", 3))
+try:
+    clf_current, _ = classify_station(STATION, YEAR, include_s1=False)
+except Exception as e:
+    print(f"Current classification failed: {{e}}")
+    clf_current = None
 
 # Merge both with GLERL
-if glerl is not None:
+if glerl is not None and clf_default is not None and clf_current is not None:
     for label, c in [("default", clf_default), ("current", clf_current)]:
         c["date_dt"] = pd.to_datetime(c["date"])
 
@@ -1515,6 +1575,9 @@ if glerl is not None:
     fig.autofmt_xdate()
     fig.tight_layout()
     plt.show()
+else:
+    print("Before/after comparison requires GLERL data and successful classification runs.")
+    print("Showing current classification only (loaded from ice_classification.parquet).")
 """))
 
     # =====================================================================
@@ -1564,10 +1627,1232 @@ consistent with mechanical ice deformation in the antenna's SSE field of view.
 """))
 
     # =====================================================================
-    # Section 13: Multi-year comparison
+    # Section 15: Phase Observable (v7)
     # =====================================================================
     cells.append(_md("""
-## 15. Multi-Year Overview
+## 15. Phase Observable (v7)
+
+The reflection phase φ is extracted from the detrended SNR model:
+
+$$dSNR(\\varepsilon) = A \\cdot e^{-\\gamma \\sin^2\\varepsilon} \\cdot \\cos\\left(\\frac{4\\pi h}{\\lambda}\\sin\\varepsilon + \\varphi\\right)$$
+
+Phase responds to the **dielectric properties** of the reflecting surface. A permittivity
+change (water→ice, dry ice→wet melt) shifts the Fresnel reflection coefficient phase
+(Strandberg et al. 2017, IEEE GRSL 14(9); Muñoz-Martín et al. 2020).
+
+At coastal/lakeside sites, differential tropospheric delay between land-facing and
+water-facing arcs also contributes a phase offset — this is the basis for the
+atmospheric comparison in Section 18.
+
+The phase is extracted via a matched-filter (inner product) at the LSP-derived RH
+frequency, wrapped to [−π, π].
+"""))
+
+    cells.append(_code("""
+if has_snr and "phase" in per_arc.columns:
+    phase_valid = per_arc["phase"].notna().sum()
+    print(f"Phase values: {phase_valid}/{len(per_arc)} arcs ({100*phase_valid/len(per_arc):.1f}%)")
+
+    # Monthly circular mean
+    from scipy import stats as sp_stats
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+
+    # Top-left: daily circular mean phase time series
+    # Use daily_features if available, otherwise compute from per_arc
+    ax = axes[0, 0]
+    if daily_features is not None and "phase_circ_mean" in daily_features.columns:
+        pooled_phase = daily_features[daily_features["azimuth_bin"] == -1][["date", "phase_circ_mean"]].copy()
+        pooled_phase["date_dt"] = pd.to_datetime(pooled_phase["date"])
+        daily_phase = pooled_phase.rename(columns={"phase_circ_mean": "phase_mean"}).dropna(subset=["phase_mean"])
+        print("  Daily phase from daily_features (Layer 2)")
+    else:
+        daily_phase = per_arc.groupby("date_dt")["phase"].apply(
+            lambda x: np.arctan2(np.sin(x.dropna()).mean(), np.cos(x.dropna()).mean())
+        ).reset_index(name="phase_mean")
+        print("  Daily phase computed inline from per_arc")
+    ax.scatter(daily_phase["date_dt"], daily_phase["phase_mean"], s=8, alpha=0.5, c="#333")
+    if glerl is not None:
+        ax2 = ax.twinx()
+        ax2.fill_between(glerl["date_dt"], glerl["ice_concentration"],
+                         color="#90caf9", alpha=0.2)
+        ax2.set_ylim(0, 105)
+        ax2.set_ylabel("GLERL %", color="#64b5f6", fontsize=8)
+        ax2.tick_params(axis="y", colors="#64b5f6", labelsize=7)
+    ax.set_ylabel("Phase (rad)")
+    ax.set_title("Daily Circular Mean Phase")
+
+    # Top-right: monthly phase distributions
+    ax = axes[0, 1]
+    months = sorted(per_arc["month"].unique())
+    monthly_circ_mean = []
+    monthly_circ_std = []
+    for m in months:
+        mp = per_arc[per_arc["month"] == m]["phase"].dropna()
+        if len(mp) > 5:
+            cm = np.arctan2(np.sin(mp).mean(), np.cos(mp).mean())
+            # Circular std: sqrt(-2 * ln(R)), R = |mean(exp(i*phase))|
+            R = np.abs(np.mean(np.exp(1j * mp.values)))
+            cs = np.sqrt(-2 * np.log(max(R, 1e-10)))
+            monthly_circ_mean.append(cm)
+            monthly_circ_std.append(cs)
+        else:
+            monthly_circ_mean.append(np.nan)
+            monthly_circ_std.append(np.nan)
+
+    # Color by GLERL
+    if glerl is not None:
+        glerl_mon = glerl.groupby("month")["ice_concentration"].mean()
+    else:
+        glerl_mon = pd.Series(dtype=float)
+    bar_colors = []
+    for m in months:
+        g = glerl_mon.get(m, 0)
+        bar_colors.append("#1565c0" if g > 30 else "#f9a825" if g > 5 else "#2e7d32")
+
+    ax.bar(months, monthly_circ_mean, yerr=monthly_circ_std, color=bar_colors,
+           alpha=0.7, edgecolor="white", capsize=3)
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Circular Mean Phase (rad)")
+    ax.set_title("Monthly Phase (blue=ice, green=water)")
+    ax.set_xticks(months)
+    ax.set_xticklabels([MONTH_NAMES.get(m, str(m)) for m in months], fontsize=8)
+
+    # Bottom-left: ice vs water phase distribution
+    ax = axes[1, 0]
+    if glerl is not None:
+        glerl_mon = glerl.groupby("month")["ice_concentration"].mean()
+        ice_m = [m for m in glerl_mon.index if glerl_mon[m] > 30]
+        water_m = [m for m in glerl_mon.index if glerl_mon[m] < 5]
+        phase_ice = per_arc[per_arc["month"].isin(ice_m)]["phase"].dropna()
+        phase_water = per_arc[per_arc["month"].isin(water_m)]["phase"].dropna()
+
+        bins = np.linspace(-np.pi, np.pi, 50)
+        if len(phase_water) > 0:
+            ax.hist(phase_water, bins=bins, alpha=0.6, density=True,
+                    color=CLASS_COLOR["water"], label=f"Water months (n={len(phase_water):,})")
+        if len(phase_ice) > 0:
+            ax.hist(phase_ice, bins=bins, alpha=0.6, density=True,
+                    color=CLASS_COLOR["ice"], label=f"Ice months (n={len(phase_ice):,})")
+        ax.set_xlabel("Phase (rad)")
+        ax.set_ylabel("Density")
+        ax.set_title("Phase Distribution: Ice vs Water")
+        ax.legend(fontsize=8)
+
+    # Bottom-right: phase vs GLERL scatter
+    ax = axes[1, 1]
+    if glerl is not None:
+        dp = daily_phase.copy()
+        dp = dp.merge(glerl[["date_dt", "ice_concentration"]], on="date_dt", how="inner")
+        valid = dp.dropna(subset=["phase_mean", "ice_concentration"])
+        if len(valid) > 20:
+            r = valid["phase_mean"].corr(valid["ice_concentration"])
+            ax.scatter(valid["ice_concentration"], valid["phase_mean"], s=8, alpha=0.4, c="#555")
+            ax.set_xlabel("GLERL Ice %")
+            ax.set_ylabel("Daily Circular Mean Phase (rad)")
+            ax.set_title(f"Phase vs GLERL: r={r:+.3f}")
+            z = np.polyfit(valid["ice_concentration"], valid["phase_mean"], 1)
+            xl = np.linspace(0, 100, 50)
+            ax.plot(xl, np.polyval(z, xl), "r--", alpha=0.5)
+        else:
+            ax.text(0.5, 0.5, "Insufficient data", transform=ax.transAxes, ha="center")
+
+    fig.suptitle(f"{STATION} {YEAR} — Reflection Phase Analysis", fontsize=12)
+    fig.tight_layout()
+    plt.show()
+
+    # Quantitative summary
+    if glerl is not None and len(phase_ice) > 0 and len(phase_water) > 0:
+        cm_ice = np.arctan2(np.sin(phase_ice).mean(), np.cos(phase_ice).mean())
+        cm_water = np.arctan2(np.sin(phase_water).mean(), np.cos(phase_water).mean())
+        delta = np.arctan2(np.sin(cm_ice - cm_water), np.cos(cm_ice - cm_water))
+        print(f"Circular mean phase — ice months: {cm_ice:+.3f} rad, water months: {cm_water:+.3f} rad")
+        print(f"Ice–water phase shift: {delta:+.3f} rad ({np.degrees(delta):+.1f}°)")
+        if abs(delta) > 0.2:
+            print("→ Significant phase shift detected between ice and water seasons.")
+        else:
+            print("→ Minimal phase shift — phase may not be a strong discriminator at this station.")
+else:
+    print("No phase data available. Re-run snr_feature_extractor.py to extract phase.")
+"""))
+
+    # =====================================================================
+    # Section 15a: Per-Satellite Phase Analysis (v7.1)
+    # =====================================================================
+    cells.append(_md("""
+### 15a. Per-Satellite Phase — Unmasking the Signal (v7.1)
+
+The overall ice-water phase shift (~0.1 rad / 5.6° at ROSS) is a station-level average.
+But phase is satellite-geometry-dependent — each PRN has a different elevation profile
+and azimuth, introducing satellite-specific phase biases. Averaging across PRNs may
+wash out the surface-driven shift if it's smaller than the inter-satellite variability.
+
+This section disaggregates phase by:
+1. **Individual satellites** — per-PRN ice vs water phase contrast
+2. **Frequency band** — L1 vs L2C phase behavior (differential penetration?)
+3. **Phase variability** — circular standard deviation as a discriminator
+"""))
+
+    cells.append(_code("""
+if has_snr and "phase" in per_arc.columns and glerl is not None:
+    glerl_mon = glerl.groupby("month")["ice_concentration"].mean()
+    ice_m = [m for m in glerl_mon.index if glerl_mon[m] > 30]
+    water_m = [m for m in glerl_mon.index if glerl_mon[m] < 5]
+
+    # --- Per-satellite phase contrast ---
+    prn_shifts = []
+    for prn in per_arc["sat"].unique():
+        prn_arcs = per_arc[per_arc["sat"] == prn]
+        pi = prn_arcs[prn_arcs["month"].isin(ice_m)]["phase"].dropna()
+        pw = prn_arcs[prn_arcs["month"].isin(water_m)]["phase"].dropna()
+        if len(pi) >= 20 and len(pw) >= 20:
+            cm_i = np.arctan2(np.sin(pi).mean(), np.cos(pi).mean())
+            cm_w = np.arctan2(np.sin(pw).mean(), np.cos(pw).mean())
+            shift = np.arctan2(np.sin(cm_i - cm_w), np.cos(cm_i - cm_w))
+            prn_shifts.append({
+                "sat": prn, "n_ice": len(pi), "n_water": len(pw),
+                "phase_ice": cm_i, "phase_water": cm_w, "shift": shift,
+            })
+
+    if prn_shifts:
+        prn_df = pd.DataFrame(prn_shifts).sort_values("shift")
+        shifts = prn_df["shift"].values
+        median_shift = np.median(shifts)
+
+        print(f"Per-satellite ice-water phase shift ({len(prn_df)} PRNs with >=20 arcs each):")
+        print(f"{'PRN':>5} | {'N_ice':>5} | {'N_water':>7} | {'phi_ice':>8} | {'phi_wat':>8} | {'Shift':>7}")
+        print("-" * 56)
+        for _, row in prn_df.iterrows():
+            print(f"  {int(row['sat']):>3} | {int(row['n_ice']):>5} | {int(row['n_water']):>7} | "
+                  f"{row['phase_ice']:>+8.3f} | {row['phase_water']:>+8.3f} | {row['shift']:>+7.3f}")
+        print(f"\\nMedian per-satellite shift: {median_shift:+.3f} rad ({np.degrees(median_shift):+.1f} deg)")
+
+        fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
+
+        # Left: per-satellite shift distribution
+        ax = axes[0]
+        ax.barh(range(len(prn_df)), prn_df["shift"].values,
+                color=["#1565c0" if s > 0 else "#c62828" for s in prn_df["shift"].values])
+        ax.set_yticks(range(len(prn_df)))
+        ax.set_yticklabels([f"PRN {int(s)}" for s in prn_df["sat"].values], fontsize=8)
+        ax.axvline(0, color="gray", ls="-", alpha=0.5)
+        ax.axvline(median_shift, color="red", ls="--", alpha=0.7,
+                   label=f"Median: {median_shift:+.3f} rad")
+        ax.set_xlabel("Ice - Water Phase Shift (rad)")
+        ax.set_title("Per-Satellite Phase Shift")
+        ax.legend(fontsize=8)
+
+        # Middle: top 4 PRNs phase time series
+        ax = axes[1]
+        top_prns = per_arc.groupby("sat")["phase"].count().nlargest(4).index
+        colors_prn = ["#e53935", "#1e88e5", "#43a047", "#8e24aa"]
+        for prn, clr in zip(top_prns, colors_prn):
+            prn_daily = per_arc[per_arc["sat"] == prn].groupby("date_dt")["phase"].apply(
+                lambda x: np.arctan2(np.sin(x.dropna()).mean(), np.cos(x.dropna()).mean())
+            ).reset_index(name="phase_mean").set_index("date_dt").sort_index()
+            rolling = prn_daily["phase_mean"].rolling("7D", center=True).median()
+            ax.plot(rolling.index, rolling.values, linewidth=1.2, alpha=0.7,
+                    color=clr, label=f"PRN {int(prn)}")
+        if glerl is not None:
+            ax_g = ax.twinx()
+            ax_g.fill_between(glerl["date_dt"], glerl["ice_concentration"],
+                             color="#90caf9", alpha=0.15)
+            ax_g.set_ylim(0, 105)
+            ax_g.set_ylabel("GLERL %", fontsize=8, color="#64b5f6")
+            ax_g.tick_params(axis="y", colors="#64b5f6", labelsize=7)
+        ax.set_ylabel("Phase (rad, 7d median)")
+        ax.set_title("Top-4 PRN Phase Time Series")
+        ax.legend(fontsize=7, loc="upper left")
+
+        # Right: phase by frequency band
+        ax = axes[2]
+        if "freq_group" in per_arc.columns:
+            per_arc["_phband"] = per_arc["freq_group"]
+        else:
+            _PH_BAND = {1: "L1", 2: "L2", 20: "L2", 5: "L5",
+                         101: "L1", 102: "L2", 105: "L5", 201: "L1", 205: "L5"}
+            per_arc["_phband"] = per_arc["freq"].map(_PH_BAND)
+        band_shifts = {}
+        for band, color in [("L1", "#e53935"), ("L2", "#1e88e5"), ("L5", "#43a047")]:
+            bm = per_arc[per_arc["_phband"] == band]
+            if len(bm) < 50:
+                continue
+            daily_b = bm.groupby("date_dt")["phase"].apply(
+                lambda x: np.arctan2(np.sin(x.dropna()).mean(), np.cos(x.dropna()).mean())
+            ).reset_index(name="phase_mean").set_index("date_dt").sort_index()
+            rolling = daily_b["phase_mean"].rolling("7D", center=True).median()
+            ax.plot(rolling.index, rolling.values, linewidth=1.2, alpha=0.7,
+                    color=color, label=band)
+            bm_ice = bm[bm["month"].isin(ice_m)]["phase"].dropna()
+            bm_water = bm[bm["month"].isin(water_m)]["phase"].dropna()
+            if len(bm_ice) > 10 and len(bm_water) > 10:
+                cm_i = np.arctan2(np.sin(bm_ice).mean(), np.cos(bm_ice).mean())
+                cm_w = np.arctan2(np.sin(bm_water).mean(), np.cos(bm_water).mean())
+                bshift = np.arctan2(np.sin(cm_i - cm_w), np.cos(cm_i - cm_w))
+                band_shifts[band] = bshift
+                print(f"  {band} phase shift: {bshift:+.3f} rad ({np.degrees(bshift):+.1f} deg)")
+        ax.set_ylabel("Phase (rad, 7d median)")
+        ax.set_title("Phase by Frequency Band")
+        ax.legend(fontsize=8)
+
+        fig.suptitle(f"{STATION} {YEAR} — Per-Satellite Phase Analysis (v7.1)", fontsize=12)
+        fig.tight_layout()
+        plt.show()
+
+        # Phase stability: circular std per day as discriminator
+        daily_circ_std = per_arc.groupby("date_dt")["phase"].apply(
+            lambda x: np.sqrt(-2 * np.log(max(np.abs(np.mean(np.exp(1j * x.dropna().values))), 1e-10)))
+            if len(x.dropna()) > 3 else np.nan
+        ).reset_index(name="phase_cstd")
+
+        cs_merged = daily_circ_std.merge(glerl[["date_dt", "ice_concentration"]],
+                                          on="date_dt", how="inner")
+        cs_ice = cs_merged[cs_merged["ice_concentration"] > 30]["phase_cstd"].dropna()
+        cs_water = cs_merged[cs_merged["ice_concentration"] < 5]["phase_cstd"].dropna()
+
+        print(f"\\nPhase circular std (variability):")
+        if len(cs_ice) > 5 and len(cs_water) > 5:
+            print(f"  Ice months:   median = {cs_ice.median():.3f} rad")
+            print(f"  Water months: median = {cs_water.median():.3f} rad")
+            r_cs = cs_merged.dropna(subset=["phase_cstd", "ice_concentration"])
+            if len(r_cs) > 20:
+                r_val = r_cs["phase_cstd"].corr(r_cs["ice_concentration"])
+                print(f"  Correlation with GLERL: r = {r_val:+.3f}")
+            if cs_ice.median() > cs_water.median() * 1.1:
+                print("  -> Phase variability INCREASES during ice (multiple reflecting interfaces)")
+            elif cs_water.median() > cs_ice.median() * 1.1:
+                print("  -> Phase variability DECREASES during ice (coherent specular reflection)")
+            else:
+                print("  -> No significant seasonal change in phase variability")
+
+        # Combined summary
+        print(f"\\n{'='*60}")
+        print("Phase Summary (v7.1)")
+        print(f"{'='*60}")
+        print(f"  Per-satellite median shift:     {median_shift:+.3f} rad ({np.degrees(median_shift):+.1f} deg)")
+        if band_shifts:
+            for band, bs in band_shifts.items():
+                print(f"  {band} phase shift:              {bs:+.3f} rad ({np.degrees(bs):+.1f} deg)")
+            if "L1" in band_shifts and "L2" in band_shifts:
+                diff = band_shifts["L1"] - band_shifts["L2"]
+                print(f"  L1-L2 shift difference:         {diff:+.3f} rad ({np.degrees(diff):+.1f} deg)")
+                if abs(diff) > 0.1:
+                    print("  -> Divergent band response supports frequency-dependent penetration")
+                else:
+                    print("  -> Consistent band response — no evidence for differential penetration via phase")
+    else:
+        print("Insufficient per-satellite data (need >=20 arcs per PRN per season)")
+else:
+    print("Per-satellite phase analysis requires SNR features with phase and GLERL data.")
+"""))
+
+    # =====================================================================
+    # Section 16: Interfrequency ΔRH (v7)
+    # =====================================================================
+    cells.append(_md("""
+## 16. Interfrequency ΔRH — Per-Sector Frequency Spread (v7)
+
+When L-band signals hit open water, all frequencies reflect from the surface — tight ΔRH.
+When signals hit freshwater ice, they partially penetrate (Ghiasi 2020), and different
+frequencies penetrate to different depths — ΔRH diverges.
+
+**Important caveat:** ROSS only has **2 GPS frequencies** (L1 and L2C). The frequency spread
+is narrow (L1=1575 MHz, L2=1228 MHz), so ΔRH will be a weak signal at best. This section
+documents the methodology and the ROSS-specific result. The same analysis at multi-GNSS
+stations (UMNQ, Greenland EarthScope) with 6+ frequencies will have more discriminating power.
+
+ΔRH is computed per (date, azimuth sector) as the standard deviation of per-band RH medians.
+"""))
+
+    cells.append(_code("""
+# ΔRH from daily_features (matched-arc method) or computed inline (legacy band-median)
+if daily_features is not None and "delta_rh_mean" in daily_features.columns:
+    # Use pre-computed matched-arc ΔRH from daily_features
+    sector_df = daily_features[daily_features["azimuth_bin"] >= 0].copy()
+    sector_df["date_dt"] = pd.to_datetime(sector_df["date"])
+    drh_df = sector_df[["date_dt", "azimuth_bin", "delta_rh_mean", "delta_rh_std", "delta_rh_n_pairs"]].copy()
+    drh_df = drh_df.rename(columns={"delta_rh_mean": "delta_rh"})
+    drh_df = drh_df.dropna(subset=["delta_rh"])
+    n_bands = len([c for c in daily_features.columns if c.startswith("rh_") and c.endswith("_median")])
+    print(f"ΔRH from daily_features (matched-arc method): {len(drh_df)} (date, sector) rows")
+    print(f"  Per-band RH columns: {n_bands}")
+
+    # Station-level daily ΔRH from pooled rows
+    pooled_drh = daily_features[daily_features["azimuth_bin"] == -1].copy()
+    pooled_drh["date_dt"] = pd.to_datetime(pooled_drh["date"])
+    daily_drh = pooled_drh[["date_dt", "delta_rh_mean"]].rename(
+        columns={"delta_rh_mean": "delta_rh"}).dropna(subset=["delta_rh"])
+else:
+    # Legacy: compute per-sector band-median ΔRH from per_arc
+    FREQ_TO_BAND = {
+        1: "L1", 2: "L2", 20: "L2", 5: "L5",
+        101: "L1", 102: "L2", 105: "L5",
+        201: "L1", 205: "L5", 206: "L5", 207: "L5", 208: "E6",
+        301: "L1", 302: "L1", 306: "B3", 307: "L5",
+    }
+    _band_col = "freq_group" if "freq_group" in per_arc.columns else None
+    if _band_col is None:
+        per_arc["_band"] = per_arc["freq"].map(FREQ_TO_BAND)
+        _band_col = "_band"
+
+    n_bands = per_arc[_band_col].nunique()
+    print(f"ΔRH computed inline (legacy band-median method)")
+    print(f"Frequency bands: {sorted(per_arc[_band_col].dropna().unique())} ({n_bands} bands)")
+
+    drh_rows = []
+    if n_bands >= 2:
+        for (date, az_bin), grp in per_arc.groupby(["date_dt", "azimuth_bin"]):
+            band_rh = grp.groupby(_band_col)["RH"].median()
+            if len(band_rh) >= 2:
+                drh_rows.append({
+                    "date_dt": date, "azimuth_bin": az_bin,
+                    "delta_rh": float(band_rh.std()),
+                    "n_bands": len(band_rh),
+                })
+    drh_df = pd.DataFrame(drh_rows)
+    daily_drh = drh_df.groupby("date_dt")["delta_rh"].median().reset_index() if len(drh_df) > 0 else pd.DataFrame(columns=["date_dt", "delta_rh"])
+    print(f"ΔRH computed for {len(drh_df)} (date, sector) pairs")
+
+if len(daily_drh) > 0:
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+
+    # Top-left: ΔRH time series
+    ax = axes[0, 0]
+    ax.scatter(daily_drh["date_dt"], daily_drh["delta_rh"], s=8, alpha=0.5, c="#333")
+    if glerl is not None:
+        ax2 = ax.twinx()
+        ax2.fill_between(glerl["date_dt"], glerl["ice_concentration"],
+                         color="#90caf9", alpha=0.2)
+        ax2.set_ylim(0, 105)
+        ax2.set_ylabel("GLERL %", color="#64b5f6", fontsize=8)
+        ax2.tick_params(axis="y", colors="#64b5f6", labelsize=7)
+    ax.set_ylabel("ΔRH (m)")
+    ax.set_title("Daily Median ΔRH (interfrequency spread)")
+
+    # Top-right: monthly ΔRH
+    ax = axes[0, 1]
+    daily_drh["month"] = daily_drh["date_dt"].dt.month
+    monthly_drh = daily_drh.groupby("month")["delta_rh"].agg(["median", "std"])
+    bar_colors = []
+    for m in monthly_drh.index:
+        g = glerl_mon.get(m, 0) if glerl is not None else 0
+        bar_colors.append("#1565c0" if g > 30 else "#f9a825" if g > 5 else "#2e7d32")
+    ax.bar(monthly_drh.index, monthly_drh["median"], yerr=monthly_drh["std"],
+           color=bar_colors, alpha=0.7, edgecolor="white", capsize=3)
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Median ΔRH (m)")
+    ax.set_title("Monthly ΔRH")
+    ax.set_xticks(sorted(monthly_drh.index))
+    ax.set_xticklabels([MONTH_NAMES.get(m, str(m)) for m in sorted(monthly_drh.index)], fontsize=8)
+
+    # Bottom-left: ice vs water ΔRH distribution
+    ax = axes[1, 0]
+    if glerl is not None:
+        drh_ice = daily_drh[daily_drh["month"].isin(ice_m := [m for m in glerl.groupby("month")["ice_concentration"].mean().index if glerl.groupby("month")["ice_concentration"].mean()[m] > 30])]["delta_rh"]
+        drh_water = daily_drh[daily_drh["month"].isin(water_m := [m for m in glerl.groupby("month")["ice_concentration"].mean().index if glerl.groupby("month")["ice_concentration"].mean()[m] < 5])]["delta_rh"]
+        bins = np.linspace(0, max(drh_ice.quantile(0.99) if len(drh_ice) > 0 else 0.5,
+                                   drh_water.quantile(0.99) if len(drh_water) > 0 else 0.5), 40)
+        if len(drh_water) > 0:
+            ax.hist(drh_water, bins=bins, alpha=0.6, density=True,
+                    color=CLASS_COLOR["water"], label=f"Water ({len(drh_water)} days)")
+        if len(drh_ice) > 0:
+            ax.hist(drh_ice, bins=bins, alpha=0.6, density=True,
+                    color=CLASS_COLOR["ice"], label=f"Ice ({len(drh_ice)} days)")
+        ax.set_xlabel("ΔRH (m)")
+        ax.set_ylabel("Density")
+        ax.set_title("ΔRH Distribution: Ice vs Water")
+        ax.legend(fontsize=8)
+
+    # Bottom-right: ΔRH vs GLERL scatter
+    ax = axes[1, 1]
+    if glerl is not None:
+        m = daily_drh.merge(glerl[["date_dt", "ice_concentration"]], on="date_dt", how="inner")
+        valid = m.dropna(subset=["delta_rh", "ice_concentration"])
+        if len(valid) > 20:
+            r = valid["delta_rh"].corr(valid["ice_concentration"])
+            ax.scatter(valid["ice_concentration"], valid["delta_rh"], s=8, alpha=0.4, c="#555")
+            ax.set_xlabel("GLERL Ice %")
+            ax.set_ylabel("ΔRH (m)")
+            ax.set_title(f"ΔRH vs GLERL: r={r:+.3f}")
+            z = np.polyfit(valid["ice_concentration"], valid["delta_rh"], 1)
+            xl = np.linspace(0, 100, 50)
+            ax.plot(xl, np.polyval(z, xl), "r--", alpha=0.5)
+
+    # Determine band list for title
+    if "freq_group" in per_arc.columns:
+        _band_list = sorted(per_arc["freq_group"].dropna().unique())
+    elif "_band" in per_arc.columns:
+        _band_list = sorted(per_arc["_band"].dropna().unique())
+    else:
+        _band_list = []
+    fig.suptitle(f"{STATION} {YEAR} — Interfrequency ΔRH Analysis\\n"
+                 f"({n_bands} bands: {_band_list})", fontsize=12)
+    fig.tight_layout()
+    plt.show()
+
+    # Quantitative summary
+    if glerl is not None and len(drh_ice) > 0 and len(drh_water) > 0:
+        print(f"\\nΔRH — ice months: median={drh_ice.median():.4f} m, water months: median={drh_water.median():.4f} m")
+        ratio = drh_ice.median() / max(drh_water.median(), 1e-6)
+        print(f"  Ice/water ratio: {ratio:.2f}x")
+        if ratio > 1.2:
+            print("  → Ice ΔRH is larger — consistent with ice penetration hypothesis.")
+        elif ratio < 0.8:
+            print("  → Ice ΔRH is smaller — unexpected, may reflect frequency-dependent scattering.")
+        else:
+            print("  → Minimal contrast — insufficient frequency diversity at this station (2 bands).")
+            print("  → This is an expected negative result for GPS-only stations.")
+else:
+    print("Insufficient ΔRH data for visualization.")
+"""))
+
+    # =====================================================================
+    # Section 16a: ΔRH Validation — Quality Filters (v7.1)
+    # =====================================================================
+    cells.append(_md("""
+### 16a. ΔRH Validation — Is the ice/water ratio real? (v7.1)
+
+The ice/water ΔRH ratio from Section 16 may be inflated by artifacts. Three concerns:
+
+1. **Bad arcs during ice months** — rough ice may produce poor LSP fits with unreliable
+   RH, inflating the per-band standard deviation that defines ΔRH
+2. **Low arc density** — days with very few arcs per band are noise-dominated
+3. **Systematic L1-L2 offset** — if ice penetration is real, L1 vs L2 RH should show
+   a systematic offset from the 1:1 line during ice months (L2 penetrates deeper)
+
+This section applies quality filters to validate whether the signal survives.
+"""))
+
+    cells.append(_code("""
+# --- L1 vs L2 RH scatter plot ---
+# Use freq_group if available (from arc_table), otherwise map from freq
+if "freq_group" in per_arc.columns:
+    per_arc["_band_v"] = per_arc["freq_group"]
+else:
+    _BAND_V = {
+        1: "L1", 2: "L2", 20: "L2", 5: "L5",
+        101: "L1", 102: "L2", 105: "L5",
+        201: "L1", 205: "L5", 206: "L5", 207: "L5", 208: "E6",
+        301: "L1", 302: "L1", 306: "B3", 307: "L5",
+    }
+    per_arc["_band_v"] = per_arc["freq"].map(_BAND_V)
+
+l1_arcs = per_arc[per_arc["_band_v"] == "L1"][["date", "date_dt", "sat", "RH", "month"]].copy()
+l1_arcs = l1_arcs.rename(columns={"RH": "RH_L1"})
+l2_arcs = per_arc[per_arc["_band_v"] == "L2"][["date", "sat", "RH"]].copy()
+l2_arcs = l2_arcs.rename(columns={"RH": "RH_L2"})
+
+matched = l1_arcs.merge(l2_arcs, on=["date", "sat"])
+print(f"L1-L2 matched pairs: {len(matched)} (by date + satellite)")
+
+if len(matched) > 50 and glerl is not None:
+    glerl_mon_v = glerl.groupby("month")["ice_concentration"].mean()
+    ice_m_v = [m for m in glerl_mon_v.index if glerl_mon_v[m] > 30]
+    water_m_v = [m for m in glerl_mon_v.index if glerl_mon_v[m] < 5]
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # Left: L1 vs L2 RH scatter colored by season
+    ax = axes[0]
+    ice_mask_v = matched["month"].isin(ice_m_v)
+    water_mask_v = matched["month"].isin(water_m_v)
+    other_mask_v = ~ice_mask_v & ~water_mask_v
+
+    if other_mask_v.sum() > 0:
+        ax.scatter(matched.loc[other_mask_v, "RH_L1"], matched.loc[other_mask_v, "RH_L2"],
+                   s=5, alpha=0.15, c="#888", label=f"Other ({other_mask_v.sum()})")
+    if water_mask_v.sum() > 0:
+        ax.scatter(matched.loc[water_mask_v, "RH_L1"], matched.loc[water_mask_v, "RH_L2"],
+                   s=8, alpha=0.3, c=CLASS_COLOR["water"], label=f"Water ({water_mask_v.sum()})")
+    if ice_mask_v.sum() > 0:
+        ax.scatter(matched.loc[ice_mask_v, "RH_L1"], matched.loc[ice_mask_v, "RH_L2"],
+                   s=8, alpha=0.3, c=CLASS_COLOR["ice"], label=f"Ice ({ice_mask_v.sum()})")
+
+    rh_lo = matched[["RH_L1", "RH_L2"]].min().min()
+    rh_hi = matched[["RH_L1", "RH_L2"]].max().max()
+    ax.plot([rh_lo, rh_hi], [rh_lo, rh_hi], "k--", alpha=0.4, label="1:1 line")
+
+    ice_offset = (matched.loc[ice_mask_v, "RH_L2"].median() -
+                  matched.loc[ice_mask_v, "RH_L1"].median()) if ice_mask_v.sum() > 10 else np.nan
+    water_offset = (matched.loc[water_mask_v, "RH_L2"].median() -
+                    matched.loc[water_mask_v, "RH_L1"].median()) if water_mask_v.sum() > 10 else np.nan
+
+    ax.set_xlabel("L1 RH (m)")
+    ax.set_ylabel("L2 RH (m)")
+    ax.set_title("L1 vs L2 RH by Season")
+    ax.legend(fontsize=7)
+    ax.set_aspect("equal")
+
+    # Middle: ΔRH time series with arc count overlay
+    ax = axes[1]
+    drh_v_rows = []
+    for dt_v, grp in per_arc.groupby("date_dt"):
+        band_rh = grp.groupby("_band_v")["RH"].agg(["median", "count"])
+        if len(band_rh) >= 2:
+            drh_v_rows.append({
+                "date_dt": dt_v,
+                "delta_rh": float(band_rh["median"].std()),
+                "min_band_count": int(band_rh["count"].min()),
+                "n_arcs": len(grp),
+            })
+    drh_v = pd.DataFrame(drh_v_rows)
+
+    sc_v = ax.scatter(drh_v["date_dt"], drh_v["delta_rh"],
+                      c=drh_v["min_band_count"].clip(1, 10),
+                      cmap="RdYlGn", s=10, alpha=0.6, vmin=1, vmax=10)
+    ax.set_ylabel("delta_RH (m)")
+    ax.set_title("Daily delta_RH (color = min arcs/band)")
+    plt.colorbar(sc_v, ax=ax, shrink=0.7, label="Min arcs/band")
+
+    # Right: filtered vs unfiltered ratio comparison
+    ax = axes[2]
+    drh_v["month"] = drh_v["date_dt"].dt.month
+
+    drh_ice_uf = drh_v[drh_v["month"].isin(ice_m_v)]["delta_rh"]
+    drh_water_uf = drh_v[drh_v["month"].isin(water_m_v)]["delta_rh"]
+    ratio_uf = drh_ice_uf.median() / max(drh_water_uf.median(), 1e-6) if len(drh_ice_uf) > 0 and len(drh_water_uf) > 0 else np.nan
+
+    drh_filt = drh_v[drh_v["min_band_count"] >= 3]
+    drh_ice_f = drh_filt[drh_filt["month"].isin(ice_m_v)]["delta_rh"]
+    drh_water_f = drh_filt[drh_filt["month"].isin(water_m_v)]["delta_rh"]
+    ratio_f = drh_ice_f.median() / max(drh_water_f.median(), 1e-6) if len(drh_ice_f) > 0 and len(drh_water_f) > 0 else np.nan
+
+    # Arc quality: elevation coverage >= 80% of configured range
+    e1_cfg, e2_cfg = 5.0, 25.0
+    per_arc["_elev_cov"] = (per_arc["emaxO"] - per_arc["eminO"]) / (e2_cfg - e1_cfg)
+    full_arc_mask = per_arc["_elev_cov"] >= 0.8
+    pct_full_ice = full_arc_mask[per_arc["month"].isin(ice_m_v)].mean() * 100
+    pct_full_water = full_arc_mask[per_arc["month"].isin(water_m_v)].mean() * 100
+
+    pa_full = per_arc[full_arc_mask]
+    drh_full_rows = []
+    for dt_v, grp in pa_full.groupby("date_dt"):
+        band_rh = grp.groupby("_band_v")["RH"].agg(["median", "count"])
+        if len(band_rh) >= 2:
+            drh_full_rows.append({
+                "date_dt": dt_v,
+                "delta_rh": float(band_rh["median"].std()),
+                "month": dt_v.month,
+            })
+    drh_full_df = pd.DataFrame(drh_full_rows) if drh_full_rows else pd.DataFrame(columns=["date_dt", "delta_rh", "month"])
+    drh_ice_fa = drh_full_df[drh_full_df["month"].isin(ice_m_v)]["delta_rh"] if len(drh_full_df) > 0 else pd.Series(dtype=float)
+    drh_water_fa = drh_full_df[drh_full_df["month"].isin(water_m_v)]["delta_rh"] if len(drh_full_df) > 0 else pd.Series(dtype=float)
+    ratio_fa = drh_ice_fa.median() / max(drh_water_fa.median(), 1e-6) if len(drh_ice_fa) > 0 and len(drh_water_fa) > 0 else np.nan
+
+    labels_bar = ["Unfiltered", ">=3 arcs/band", "Full arcs (80%)"]
+    ratios_bar = [ratio_uf, ratio_f, ratio_fa]
+    colors_bar = ["#c62828" if r > 10 else "#f9a825" if r > 3 else "#2e7d32" for r in ratios_bar]
+    ax.bar(range(len(labels_bar)), ratios_bar, color=colors_bar, alpha=0.7, edgecolor="white")
+    ax.set_xticks(range(len(labels_bar)))
+    ax.set_xticklabels(labels_bar, fontsize=9)
+    ax.set_ylabel("Ice/Water delta_RH Ratio")
+    ax.set_title("delta_RH Ratio by Quality Filter")
+    for i, r in enumerate(ratios_bar):
+        if not np.isnan(r):
+            ax.text(i, r + 0.3, f"{r:.1f}x", ha="center", fontsize=9, fontweight="bold")
+
+    fig.suptitle(f"{STATION} {YEAR} — delta_RH Validation (v7.1)", fontsize=12)
+    fig.tight_layout()
+    plt.show()
+
+    # Quantitative summary
+    print(f"\\ndelta_RH Validation Summary:")
+    print(f"{'='*60}")
+    print(f"  {'Metric':<40} {'Value':>10}")
+    print(f"  {'-'*55}")
+    print(f"  {'delta_RH ice/water (unfiltered)':<40} {ratio_uf:>10.1f}x")
+    print(f"  {'delta_RH ice/water (>=3 arcs/band)':<40} {ratio_f:>10.1f}x")
+    print(f"  {'delta_RH ice/water (full arcs only)':<40} {ratio_fa:>10.1f}x")
+    if not np.isnan(ice_offset):
+        print(f"  {'L1-L2 RH offset — ice months':<40} {ice_offset:>+10.4f} m")
+    if not np.isnan(water_offset):
+        print(f"  {'L1-L2 RH offset — water months':<40} {water_offset:>+10.4f} m")
+    offset_diff = ice_offset - water_offset if not (np.isnan(ice_offset) or np.isnan(water_offset)) else np.nan
+    if not np.isnan(offset_diff):
+        print(f"  {'Offset difference (ice - water)':<40} {offset_diff:>+10.4f} m")
+        if offset_diff > 0.01:
+            print("  -> Positive = deeper L2 penetration during ice (supports Ghiasi 2020)")
+        elif offset_diff < -0.01:
+            print("  -> Negative = deeper L1 penetration during ice (unexpected)")
+        else:
+            print("  -> No systematic L1-L2 offset difference between seasons")
+    print(f"  {'Full-arc fraction — ice months':<40} {pct_full_ice:>9.1f}%")
+    print(f"  {'Full-arc fraction — water months':<40} {pct_full_water:>9.1f}%")
+    if pct_full_ice < pct_full_water * 0.7:
+        print("  -> Ice months have fewer full arcs — delta_RH may be inflated by partial fits")
+    else:
+        print("  -> Arc quality comparable between seasons — delta_RH contrast not an artifact")
+
+    # Conclusion
+    if ratio_f < ratio_uf * 0.5:
+        print("\\n  CONCLUSION: delta_RH ratio drops significantly with quality filter.")
+        print("  The original ratio was inflated by low-quality arcs during ice months.")
+    elif ratio_f > ratio_uf * 0.7:
+        print("\\n  CONCLUSION: delta_RH ratio survives quality filtering.")
+        print("  The interfrequency spread is a genuine ice signal (even with only 2 bands).")
+    else:
+        print("\\n  CONCLUSION: Moderate reduction with filtering — signal partially real.")
+elif len(matched) > 0:
+    print("L1-L2 scatter requires GLERL data for seasonal labeling.")
+else:
+    print("Insufficient L1-L2 matched pairs for validation.")
+"""))
+
+    # =====================================================================
+    # Section 17: Freeze/Thaw Transition Detection (v7)
+    # =====================================================================
+    cells.append(_md("""
+## 17. Freeze/Thaw Transition Detection — Moving t-Test (v7.1)
+
+Following Ghiasi et al. 2023 (IEEE JSTARS 17), we apply a **Moving t-Test (MTT)**
+changepoint detector on the classification time series. For each position, the MTT
+compares the mean of the preceding *w* days against the following *w* days. Large
+|t| values indicate abrupt transitions.
+
+**v7.1 improvements:**
+- **Climatological search windows:** FUS restricted to DOY 300–60 (Oct–Feb),
+  BUS restricted to DOY 30–150 (Feb–May) for Great Lakes. Eliminates physically
+  impossible mid-summer transition detections.
+- **Data gap detection:** Gaps >7 days flagged on plot; gap-adjacent peaks marked unreliable.
+- **Per-feature constrained detection:** Individual features (γ, AF, amplitude, RH std)
+  run within the same windows to identify which observable is the best leading indicator.
+
+Transition dates:
+- **FUS** (Freeze-Up Start): most negative t-score within the FUS window
+- **BUS** (Break-Up Start): most positive t-score within the BUS window
+"""))
+
+    cells.append(_code("""
+from scipy import stats as sp_stats
+
+def moving_t_test(series, window=30):
+    \"\"\"Detect abrupt changes via consecutive-window t-test.\"\"\"
+    values = np.array(series, dtype=float)
+    t_scores = np.full(len(values), np.nan)
+    for i in range(window, len(values) - window):
+        sub1 = values[i - window:i]
+        sub2 = values[i:i + window]
+        s1 = sub1[~np.isnan(sub1)]
+        s2 = sub2[~np.isnan(sub2)]
+        if len(s1) < 5 or len(s2) < 5:
+            continue
+        n1, n2 = len(s1), len(s2)
+        v1, v2 = s1.var(ddof=1), s2.var(ddof=1)
+        denom = n1 + n2 - 2
+        if denom <= 0:
+            continue
+        s_pooled = np.sqrt((n1 * v1 + n2 * v2) / denom)
+        if s_pooled < 1e-10:
+            continue
+        t = (s2.mean() - s1.mean()) / (s_pooled * np.sqrt(1.0 / n1 + 1.0 / n2))
+        t_scores[i] = t
+    return t_scores
+
+def doy_in_range(doy, lo, hi):
+    \"\"\"Check if DOY is within [lo, hi], handling year-boundary wrap.\"\"\"
+    if lo <= hi:
+        return lo <= doy <= hi
+    else:
+        return doy >= lo or doy <= hi
+
+# Station-specific phenology windows (v7.1)
+PHENOLOGY_WINDOWS = {
+    "ROSS": {"fus_doy_range": (300, 60), "bus_doy_range": (30, 150)},
+    "UMNQ": {"fus_doy_range": (270, 30), "bus_doy_range": (120, 210)},
+}
+phenology = PHENOLOGY_WINDOWS.get(STATION, {"fus_doy_range": (270, 60), "bus_doy_range": (30, 180)})
+fus_lo, fus_hi = phenology["fus_doy_range"]
+bus_lo, bus_hi = phenology["bus_doy_range"]
+
+# Critical t-value
+MTT_WINDOW = 30
+df_approx = 2 * MTT_WINDOW - 2
+t_crit = sp_stats.t.ppf(0.999, df_approx)
+print(f"MTT window: {MTT_WINDOW} days, critical |t| (p<0.001, df={df_approx}): {t_crit:.2f}")
+print(f"FUS search window: DOY {fus_lo}-{fus_hi} (wraps year boundary)" if fus_lo > fus_hi else f"FUS search window: DOY {fus_lo}-{fus_hi}")
+print(f"BUS search window: DOY {bus_lo}-{bus_hi}")
+
+# Sort by date
+clf_sorted = clf.sort_values("date_dt").reset_index(drop=True)
+ice_score_series = clf_sorted["ice_score"].values
+mtt_dates = clf_sorted["date_dt"].values
+mtt_doys = pd.to_datetime(mtt_dates).dayofyear
+
+# --- Data gap detection (v7.1) ---
+date_diffs = np.diff(pd.to_datetime(mtt_dates).astype("int64") // 10**9) / 86400
+gap_indices = np.where(date_diffs > 7)[0]
+gap_ranges = []
+for gi in gap_indices:
+    gap_ranges.append((mtt_dates[gi], mtt_dates[gi + 1], date_diffs[gi]))
+    print(f"  Data gap: {pd.Timestamp(mtt_dates[gi]).strftime('%Y-%m-%d')} to "
+          f"{pd.Timestamp(mtt_dates[gi+1]).strftime('%Y-%m-%d')} ({date_diffs[gi]:.0f} days)")
+if not gap_ranges:
+    print("  No data gaps >7 days detected.")
+
+# Run MTT on ice_score
+t_scores = moving_t_test(ice_score_series, window=MTT_WINDOW)
+
+# Also run on individual features — use daily_features if available, otherwise per_arc
+feature_t = {}
+for feat in ["amp_mean", "rh_std"]:
+    if feat in clf_sorted.columns:
+        feature_t[feat] = moving_t_test(clf_sorted[feat].values, window=MTT_WINDOW)
+
+if has_snr and daily_features is not None:
+    # Use daily_features z-scored/aggregated columns
+    pooled_sorted = daily_features[daily_features["azimuth_bin"] == -1].copy()
+    pooled_sorted["date_dt"] = pd.to_datetime(pooled_sorted["date"])
+    pooled_sorted = pooled_sorted.sort_values("date_dt")
+    for feat_col, feat_name in [("gamma_z", "gamma_z"), ("af_z", "af_z"),
+                                 ("delta_rh_mean", "delta_rh")]:
+        if feat_col in pooled_sorted.columns:
+            # Align to clf dates
+            vals = pooled_sorted.set_index("date_dt")[feat_col].reindex(
+                pd.to_datetime(clf_sorted["date"]))
+            feature_t[feat_name] = moving_t_test(vals.values, window=MTT_WINDOW)
+elif has_snr:
+    for feat in ["gamma", "AF"]:
+        if feat in per_arc.columns:
+            daily_feat = per_arc.groupby("date_dt")[feat].median().reindex(
+                pd.to_datetime(clf_sorted["date"]))
+            feature_t[feat] = moving_t_test(daily_feat.values, window=MTT_WINDOW)
+
+# --- Constrained transition detection (v7.1) ---
+def find_constrained_peak(t_scores, doys, doy_lo, doy_hi, sign="negative"):
+    \"\"\"Find most extreme t-score within a DOY window.\"\"\"
+    best_idx = None
+    best_t = 0
+    for i in range(len(t_scores)):
+        if np.isnan(t_scores[i]):
+            continue
+        if not doy_in_range(int(doys[i]), doy_lo, doy_hi):
+            continue
+        if sign == "negative" and t_scores[i] < -t_crit:
+            if best_idx is None or t_scores[i] < best_t:
+                best_t = t_scores[i]
+                best_idx = i
+        elif sign == "positive" and t_scores[i] > t_crit:
+            if best_idx is None or t_scores[i] > best_t:
+                best_t = t_scores[i]
+                best_idx = i
+    return best_idx, best_t
+
+def near_gap(idx, gap_idxs, tolerance=3):
+    \"\"\"Check if index is within tolerance of a gap boundary.\"\"\"
+    for gi in gap_idxs:
+        if abs(idx - gi) <= tolerance or abs(idx - (gi + 1)) <= tolerance:
+            return True
+    return False
+
+fus_idx, fus_t = find_constrained_peak(t_scores, mtt_doys, fus_lo, fus_hi, "negative")
+bus_idx, bus_t = find_constrained_peak(t_scores, mtt_doys, bus_lo, bus_hi, "positive")
+
+constrained_transitions = []
+if fus_idx is not None:
+    gap_flag = " [GAP-ADJACENT]" if near_gap(fus_idx, gap_indices) else ""
+    constrained_transitions.append(("FUS", mtt_dates[fus_idx], fus_t, gap_flag))
+if bus_idx is not None:
+    gap_flag = " [GAP-ADJACENT]" if near_gap(bus_idx, gap_indices) else ""
+    constrained_transitions.append(("BUS", mtt_dates[bus_idx], bus_t, gap_flag))
+
+# Backward compatibility for Section 18
+detected_transitions = [(label, dt) for label, dt, _, _ in constrained_transitions]
+
+# --- Plotting ---
+n_panels = 2 + len(feature_t)
+fig, axes = plt.subplots(n_panels, 1, figsize=(14, 3 * n_panels), sharex=True)
+if not hasattr(axes, "__len__"):
+    axes = [axes]
+
+# Panel 1: ice score
+ax = axes[0]
+for cls, color in CLASS_COLOR.items():
+    mask = clf_sorted["classification"] == cls
+    idx = np.where(mask.values)[0]
+    if len(idx) > 0:
+        ax.scatter(mtt_dates[idx], ice_score_series[idx], c=color, s=8, alpha=0.5)
+ax.axhline(-0.33, color="gray", ls=":", alpha=0.4)
+ax.axhline(0.33, color="gray", ls=":", alpha=0.4)
+ax.set_ylabel("Ice Score")
+ax.set_title("Classification Time Series")
+if glerl is not None:
+    ax_g = ax.twinx()
+    ax_g.fill_between(glerl["date_dt"], glerl["ice_concentration"], color="#90caf9", alpha=0.15)
+    ax_g.set_ylim(0, 105)
+    ax_g.set_ylabel("GLERL %", fontsize=8, color="#64b5f6")
+    ax_g.tick_params(axis="y", colors="#64b5f6", labelsize=7)
+for g_start, g_end, g_days in gap_ranges:
+    ax.axvspan(g_start, g_end, color="gray", alpha=0.15)
+
+# Panel 2: MTT t-scores with constrained windows
+ax = axes[1]
+valid_mask = ~np.isnan(t_scores)
+ax.plot(mtt_dates[valid_mask], t_scores[valid_mask], "k-", linewidth=0.8, alpha=0.7)
+ax.axhline(t_crit, color="red", ls="--", alpha=0.5, label=f"+t_crit ({t_crit:.1f})")
+ax.axhline(-t_crit, color="blue", ls="--", alpha=0.5, label=f"-t_crit")
+ax.axhline(0, color="gray", ls="-", alpha=0.3)
+
+# Shade search windows
+year_start = pd.Timestamp(f"{YEAR}-01-01")
+for doy in range(1, 367):
+    d = year_start + pd.Timedelta(days=doy - 1)
+    if d > pd.Timestamp(mtt_dates[-1]):
+        break
+    if doy_in_range(doy, fus_lo, fus_hi):
+        ax.axvspan(d, d + pd.Timedelta(days=1), color="blue", alpha=0.02)
+    if doy_in_range(doy, bus_lo, bus_hi):
+        ax.axvspan(d, d + pd.Timedelta(days=1), color="red", alpha=0.02)
+
+# Mark constrained transitions
+for label, dt, t_val, gap_flag in constrained_transitions:
+    c = "blue" if label == "FUS" else "red"
+    ax.axvline(pd.Timestamp(dt), color=c, ls="-", linewidth=2, alpha=0.6)
+    ax.text(pd.Timestamp(dt), ax.get_ylim()[1] * 0.85,
+            f" {label}{gap_flag}", color=c, fontsize=8, fontweight="bold")
+
+for g_start, g_end, g_days in gap_ranges:
+    ax.axvspan(g_start, g_end, color="gray", alpha=0.15)
+
+ax.set_ylabel("t-score")
+ax.set_title(f"MTT on Ice Score (window={MTT_WINDOW}d, constrained windows shaded)")
+ax.legend(fontsize=8)
+
+# Feature panels with per-feature constrained detection
+feat_results = [("ice_score", fus_idx, fus_t, bus_idx, bus_t)]
+for panel_idx, (feat, ft) in enumerate(feature_t.items()):
+    ax = axes[2 + panel_idx]
+    valid_mask = ~np.isnan(ft)
+    ax.plot(mtt_dates[valid_mask], ft[valid_mask], "k-", linewidth=0.8, alpha=0.7)
+    ax.axhline(t_crit, color="red", ls="--", alpha=0.3)
+    ax.axhline(-t_crit, color="blue", ls="--", alpha=0.3)
+    ax.axhline(0, color="gray", ls="-", alpha=0.3)
+    ax.set_ylabel("t-score")
+    ax.set_title(f"MTT on {feat}")
+
+    f_fus_idx, f_fus_t = find_constrained_peak(ft, mtt_doys, fus_lo, fus_hi, "negative")
+    f_bus_idx, f_bus_t = find_constrained_peak(ft, mtt_doys, bus_lo, bus_hi, "positive")
+    feat_results.append((feat, f_fus_idx, f_fus_t, f_bus_idx, f_bus_t))
+
+    if f_fus_idx is not None:
+        ax.axvline(pd.Timestamp(mtt_dates[f_fus_idx]), color="blue", ls="-", alpha=0.4, linewidth=1.5)
+    if f_bus_idx is not None:
+        ax.axvline(pd.Timestamp(mtt_dates[f_bus_idx]), color="red", ls="-", alpha=0.4, linewidth=1.5)
+
+    for g_start, g_end, g_days in gap_ranges:
+        ax.axvspan(g_start, g_end, color="gray", alpha=0.1)
+
+axes[-1].set_xlabel("Date")
+fig.suptitle(f"{STATION} {YEAR} — Freeze/Thaw Transition Detection (MTT, v7.1 constrained)", fontsize=12)
+fig.tight_layout()
+plt.show()
+
+# --- Report (v7.1) ---
+print(f"\\n{'='*60}")
+print("Constrained Transition Detection Results (v7.1)")
+print(f"{'='*60}")
+
+glerl_fus_date = glerl_bue_date = None
+if glerl is not None:
+    ice_days = glerl[glerl["ice_concentration"] > 15].sort_values("date_dt")
+    if len(ice_days) > 0:
+        glerl_fus_date = ice_days["date_dt"].iloc[0]
+        glerl_bue_date = ice_days["date_dt"].iloc[-1]
+        print(f"  GLERL first ice (>15%): {glerl_fus_date.strftime('%Y-%m-%d')} (DOY {glerl_fus_date.dayofyear})")
+        print(f"  GLERL last ice  (>15%): {glerl_bue_date.strftime('%Y-%m-%d')} (DOY {glerl_bue_date.dayofyear})")
+
+for label, dt, t_val, gap_flag in constrained_transitions:
+    dt_pd = pd.Timestamp(dt)
+    print(f"\\n  {label} (constrained): {dt_pd.strftime('%Y-%m-%d')} (DOY {dt_pd.dayofyear}) — t={t_val:+.2f}{gap_flag}")
+    if label == "FUS" and glerl_fus_date is not None:
+        delta = (dt_pd - glerl_fus_date).days
+        sign = "before" if delta < 0 else "after"
+        print(f"    FUS lead/lag vs GLERL: {abs(delta)} days {sign} GLERL first ice")
+    elif label == "BUS" and glerl_bue_date is not None:
+        delta = (dt_pd - glerl_bue_date).days
+        sign = "before" if delta < 0 else "after"
+        print(f"    BUS lead/lag vs GLERL: {abs(delta)} days {sign} GLERL last ice")
+
+if not constrained_transitions:
+    print("\\n  No transitions detected within the constrained windows.")
+    print(f"  This may indicate a mild ice year or insufficient data coverage.")
+
+# Per-feature transition summary table
+print(f"\\nPer-feature transition detection (within constrained windows):")
+print(f"  {'Feature':<12} {'FUS DOY':>8} {'FUS t':>8} {'BUS DOY':>8} {'BUS t':>8}")
+print(f"  {'-'*48}")
+for feat_name, f_idx, f_t, b_idx, b_t in feat_results:
+    fus_str = f"DOY {pd.Timestamp(mtt_dates[f_idx]).dayofyear}" if f_idx is not None else "None"
+    bus_str = f"DOY {pd.Timestamp(mtt_dates[b_idx]).dayofyear}" if b_idx is not None else "None"
+    fus_t_str = f"{f_t:+.2f}" if f_idx is not None else "N/A"
+    bus_t_str = f"{b_t:+.2f}" if b_idx is not None else "N/A"
+    print(f"  {feat_name:<12} {fus_str:>8} {fus_t_str:>8} {bus_str:>8} {bus_t_str:>8}")
+"""))
+
+    # =====================================================================
+    # Section 18: Land-Water Atmospheric Comparison (v7)
+    # =====================================================================
+    cells.append(_md(f"""
+## 18. Land-Water Atmospheric Comparison (v7) — Exploratory
+
+**Hypothesis:** During open water season, water-facing arcs (110°–190°) traverse
+atmosphere with higher moisture content (lake evaporation). Land-facing arcs (N/W/E)
+traverse drier air. This differential should be visible in phase (path length
+difference) and possibly amplitude (attenuation). During freeze-up, evaporation
+stops, the atmospheric contrast collapses, and the land-water differential should
+converge toward zero.
+
+**If this convergence precedes surface-observable ice detection, it's a leading indicator.**
+
+**Prerequisites:** This section requires reprocessing ROSS with expanded azimuths
+(0°–360°) using `config/ross_land.json`. The per-arc parquet must include arcs from
+all azimuths, not just the 110°–190° water window.
+
+To generate the expanded data:
+```bash
+# 1. Set up gnssrefl with expanded config
+cp config/ross.json config/ross.json.bak
+cp config/ross_land.json config/ross.json
+
+# 2. Reprocess (this will include all azimuths)
+python scripts/run_gnssir_processing.py --station ROSS --year {year} --skip_download --skip_conversion --skip_snr
+
+# 3. Extract SNR features for all azimuths
+python scripts/snr_feature_extractor.py --station ROSS --year {year} --num_cores 8
+
+# 4. Restore original config
+cp config/ross.json.bak config/ross.json
+```
+
+**Caveats:**
+- The land surface itself changes seasonally (snow cover, frozen ground) — this confounds
+  the atmospheric differential
+- At ROSS, land sectors look N/W/E (inland, forested terrain) — inherently noisier
+- This is exploratory. A null result is informative.
+"""))
+
+    cells.append(_code(f"""
+# Check if expanded-azimuth data is available
+pa_path_land = results_dir / f"{{STATION}}_{{YEAR}}_per_arc_land.parquet"
+has_land_data = pa_path_land.exists()
+
+# Also check if current per_arc has any land-facing azimuths
+az_range = per_arc["Azim"].agg(["min", "max"])
+has_full_az = az_range["min"] < 90 or az_range["max"] > 200
+
+if has_land_data:
+    pa_land = pd.read_parquet(pa_path_land)
+    print(f"Loaded expanded per-arc: {{len(pa_land)}} arcs, az range: {{pa_land['Azim'].min():.0f}}°–{{pa_land['Azim'].max():.0f}}°")
+elif has_full_az:
+    pa_land = per_arc.copy()
+    print(f"Current per-arc has expanded azimuths: {{az_range['min']:.0f}}°–{{az_range['max']:.0f}}°")
+else:
+    pa_land = None
+    print("No expanded-azimuth data available.")
+    print(f"Current azimuth range: {{az_range['min']:.0f}}°–{{az_range['max']:.0f}}° (water only)")
+    print("\\nTo run this analysis, reprocess ROSS with config/ross_land.json (azval2=[0,360]).")
+    print("See the instructions above for the processing steps.")
+"""))
+
+    cells.append(_code(f"""
+if pa_land is not None:
+    # Classify arcs by surface type
+    def classify_surface(az):
+        if 110 <= az <= 190:
+            return "water"
+        elif 90 <= az < 110 or 190 < az <= 210:
+            return "coastal"
+        else:
+            return "land"
+
+    pa_land["surface"] = pa_land["Azim"].apply(classify_surface)
+    pa_land["date_dt"] = pd.to_datetime(pa_land["date"])
+
+    counts = pa_land["surface"].value_counts()
+    print(f"Surface classification:")
+    for s in ["water", "coastal", "land"]:
+        print(f"  {{s:>8}}: {{counts.get(s, 0):,}} arcs")
+
+    if counts.get("land", 0) < 100:
+        print("\\nInsufficient land arcs for comparison. Need expanded-azimuth reprocessing.")
+    else:
+        # Daily land vs water observables
+        land_arcs = pa_land[pa_land["surface"] == "land"]
+        water_arcs = pa_land[pa_land["surface"] == "water"]
+
+        daily_land = land_arcs.groupby("date_dt").agg(
+            amp_land=("Amp", "median"),
+        )
+        daily_water = water_arcs.groupby("date_dt").agg(
+            amp_water=("Amp", "median"),
+        )
+
+        # Add gamma and phase if available
+        if "gamma" in land_arcs.columns:
+            daily_land["gamma_land"] = land_arcs.groupby("date_dt")["gamma"].median()
+            daily_water["gamma_water"] = water_arcs.groupby("date_dt")["gamma"].median()
+
+        if "phase" in land_arcs.columns:
+            # Circular mean for phase
+            daily_land["phase_land"] = land_arcs.groupby("date_dt")["phase"].apply(
+                lambda x: np.arctan2(np.sin(x.dropna()).mean(), np.cos(x.dropna()).mean()))
+            daily_water["phase_water"] = water_arcs.groupby("date_dt")["phase"].apply(
+                lambda x: np.arctan2(np.sin(x.dropna()).mean(), np.cos(x.dropna()).mean()))
+
+        # Merge
+        diff = daily_water.join(daily_land, how="inner")
+        diff["delta_amp"] = diff["amp_water"] - diff["amp_land"]
+        if "gamma_water" in diff.columns and "gamma_land" in diff.columns:
+            diff["delta_gamma"] = diff["gamma_water"] - diff["gamma_land"]
+        if "phase_water" in diff.columns and "phase_land" in diff.columns:
+            diff["delta_phase"] = np.arctan2(
+                np.sin(diff["phase_water"] - diff["phase_land"]),
+                np.cos(diff["phase_water"] - diff["phase_land"]))
+
+        diff = diff.reset_index()
+        print(f"\\nLand-water differential computed for {{len(diff)}} days")
+
+        # Determine which differential columns exist
+        diff_cols = [c for c in ["delta_amp", "delta_gamma", "delta_phase"] if c in diff.columns]
+        n_panels = len(diff_cols) + 1  # +1 for raw comparison
+
+        fig, axes = plt.subplots(n_panels, 1, figsize=(14, 3.5 * n_panels), sharex=True)
+        if n_panels == 1:
+            axes = [axes]
+
+        # Panel 1: Raw land vs water amplitude
+        ax = axes[0]
+        ax.plot(diff["date_dt"], diff["amp_water"], "b-", linewidth=1, alpha=0.6, label="Water (110°–190°)")
+        ax.plot(diff["date_dt"], diff["amp_land"], "r-", linewidth=1, alpha=0.6, label="Land (other)")
+        ax.set_ylabel("Median Amplitude")
+        ax.set_title("Water-Sector vs Land-Sector Amplitude")
+        ax.legend(fontsize=8)
+        if glerl is not None:
+            ax2 = ax.twinx()
+            ax2.fill_between(glerl["date_dt"], glerl["ice_concentration"],
+                             color="#90caf9", alpha=0.15)
+            ax2.set_ylim(0, 105)
+            ax2.set_ylabel("GLERL %", fontsize=8, color="#64b5f6")
+            ax2.tick_params(axis="y", colors="#64b5f6", labelsize=7)
+
+        # Differential panels
+        labels = {{"delta_amp": "Δ Amplitude (water − land)",
+                  "delta_gamma": "Δ γ (water − land)",
+                  "delta_phase": "Δ Phase (water − land, rad)"}}
+        for idx, col in enumerate(diff_cols):
+            ax = axes[1 + idx]
+            # 7-day rolling median for smoothing
+            rolling = diff.set_index("date_dt")[col].rolling("7D", center=True).median()
+            ax.plot(diff["date_dt"], diff[col], ".", markersize=3, alpha=0.3, color="#888")
+            ax.plot(rolling.index, rolling.values, "k-", linewidth=1.5, label="7-day median")
+            ax.axhline(0, color="gray", ls="-", alpha=0.3)
+            ax.set_ylabel(labels.get(col, col))
+            ax.set_title(labels.get(col, col))
+            ax.legend(fontsize=8)
+
+            # Mark freeze-up/break-up from MTT if available
+            for label, dt in detected_transitions:
+                ax.axvline(pd.Timestamp(dt), color="blue" if label == "FUS" else "red",
+                           ls="--", alpha=0.4, label=label if idx == 0 else "")
+
+            if glerl is not None:
+                ax2 = ax.twinx()
+                ax2.fill_between(glerl["date_dt"], glerl["ice_concentration"],
+                                 color="#90caf9", alpha=0.1)
+                ax2.set_ylim(0, 105)
+                ax2.tick_params(axis="y", colors="#64b5f6", labelsize=7)
+
+        axes[-1].set_xlabel("Date")
+        fig.suptitle(f"{{STATION}} {{YEAR}} — Land-Water Atmospheric Differential", fontsize=12)
+        fig.tight_layout()
+        plt.show()
+
+        # Statistical test: does the differential change before the classifier detects ice?
+        if glerl is not None and "delta_amp" in diff.columns:
+            # Split into pre-ice and ice periods
+            glerl_monthly = glerl.groupby("month")["ice_concentration"].mean()
+            ice_months = [m for m in glerl_monthly.index if glerl_monthly[m] > 30]
+            water_months = [m for m in glerl_monthly.index if glerl_monthly[m] < 5]
+
+            diff["month"] = diff["date_dt"].dt.month
+            d_ice = diff[diff["month"].isin(ice_months)]["delta_amp"]
+            d_water = diff[diff["month"].isin(water_months)]["delta_amp"]
+
+            if len(d_ice) > 10 and len(d_water) > 10:
+                t_stat, p_val = sp_stats.ttest_ind(d_water, d_ice)
+                print(f"\\nAmplitude differential: water months mean={{d_water.mean():.2f}}, "
+                      f"ice months mean={{d_ice.mean():.2f}}")
+                print(f"t-test: t={{t_stat:.2f}}, p={{p_val:.3e}}")
+                if p_val < 0.01:
+                    print("→ Significant difference in land-water differential between seasons.")
+                    if abs(d_water.mean()) > abs(d_ice.mean()):
+                        print("  The differential is larger during open water (evaporation signal?)")
+                        print("  and collapses during ice — consistent with the hypothesis.")
+                    else:
+                        print("  The differential is larger during ice — opposite to the evaporation hypothesis.")
+                        print("  May reflect snow cover / frozen ground changes on land sectors.")
+                else:
+                    print("→ No significant seasonal change in the land-water differential.")
+                    print("  The atmospheric hypothesis is not supported at this station.")
+else:
+    print("Skipping land-water comparison (no expanded-azimuth data).")
+"""))
+
+    # =====================================================================
+    # v7 Addendum to Conclusions
+    # =====================================================================
+    cells.append(_md("""
+## v7/v7.1 Addendum — New Observables and Validation
+
+**Phase (φ):** Extracted via matched filter at the LSP-derived RH frequency.
+The ice-water phase contrast quantifies the permittivity change at the reflecting
+surface. Phase is a new column in the SNR features parquet; its discriminating
+power relative to existing features is quantified in Section 15.
+
+**v7.1 — Per-satellite phase (Section 15a):** Disaggregated phase by PRN and
+frequency band. Tests whether the station-averaged ~5.6° shift was being washed
+out by inter-satellite variability. Phase circular standard deviation tested as
+a complementary discriminator (phase *variability* vs phase *mean*).
+
+**Interfrequency ΔRH:** Per-sector computation of frequency-group RH spread.
+At ROSS with only L1/L2C, this is expected to be a weak discriminator — the
+negative result documents the 2-frequency limitation and establishes the
+methodology for richer multi-GNSS stations (UMNQ, Greenland EarthScope).
+
+**v7.1 — ΔRH validation (Section 16a):** Applied three quality filters:
+(1) full-arc elevation coverage (≥80% of configured range),
+(2) minimum arc count per band (≥3/band/day),
+(3) L1 vs L2 RH scatter with seasonal coloring.
+Validates whether the ice/water ΔRH ratio survives filtering or is an artifact
+of poor LSP fits during rough-ice months.
+
+**Freeze/Thaw transition detection (MTT):** The Moving t-Test identifies
+abrupt state changes in the ice score time series.
+
+**v7.1 — Constrained MTT (Section 17):** Added climatological search windows
+(FUS: DOY 300-60, BUS: DOY 30-150 for Great Lakes). Eliminates physically
+impossible mid-summer detections (e.g., the v7 FUS at DOY 198 = July 17).
+Data gaps >7 days detected and flagged; gap-adjacent peaks marked unreliable.
+Per-feature constrained detection identifies which observable is the earliest
+transition indicator.
+
+**Land-water atmospheric comparison:** Exploratory analysis comparing
+observables in the water-facing (110°-190°) and land-facing sectors. Requires
+expanded-azimuth reprocessing with `config/ross_land.json`. The hypothesis
+is that evaporation cessation at freeze-up creates a detectable convergence in
+the land-water differential. Results are reported as significant or null.
+
+**Version history:**
+- v7: + Phase extraction, per-sector ΔRH, MTT freeze/thaw detection,
+  land-water atmospheric comparison (exploratory)
+- v7.1: + ΔRH quality filters, constrained MTT with phenology windows,
+  per-satellite phase disaggregation, data gap detection
+"""))
+
+    # =====================================================================
+    # Section 19: Multi-year comparison (renumbered from 15)
+    # =====================================================================
+    cells.append(_md("""
+## 19. Multi-Year Overview
 
 Compare ice seasons across all available years with GLERL overlay.
 """))
