@@ -254,6 +254,13 @@ def _aggregate_sector(sector_arcs, has_snr, has_phase, has_zscore):
         row["n_full_arcs"] = np.nan
         row["frac_full_arc"] = np.nan
 
+    # Gamma fit quality (median R² of log-envelope fit)
+    if "gamma_r2" in sector_arcs.columns:
+        gr2 = sector_arcs["gamma_r2"].dropna()
+        row["gamma_r2_med"] = float(gr2.median()) if len(gr2) > 0 else np.nan
+    else:
+        row["gamma_r2_med"] = np.nan
+
     # RH stats
     rh = sector_arcs["RH"]
     row["rh_mean"] = float(rh.mean())
@@ -319,13 +326,22 @@ def _aggregate_sector(sector_arcs, has_snr, has_phase, has_zscore):
         row["delta_rh_std"] = drh_std
         row["delta_rh_n_pairs"] = drh_n
 
-    # Per-band RH medians
+    # Per-band RH medians and amplitude means
+    # amp_L1_mean, amp_L5_mean, etc. expose frequency-specific amplitude signals
+    # that are hidden in the mixed amp_mean. At GLBX, L1 amplitude collapses in
+    # winter (input SNR drops ~15 dBHz) while L5 amplitude is higher in winter
+    # than summer (ice more reflective). The pooled amp_mean is L1-dominated by
+    # arc count, inverting the apparent feature direction for ice classification.
+    # Validate at UMNQ and NIAQ before treating as a general fix — L1 suppression
+    # may be GLBX-specific or antenna/receiver-specific.
     if "freq_group" in sector_arcs.columns:
         for band, band_arcs in sector_arcs.groupby("freq_group"):
             if band == "OTHER":
                 continue
             row[f"rh_{band}_median"] = float(band_arcs["RH"].median())
             row[f"rh_{band}_count"] = len(band_arcs)
+            if len(band_arcs) >= 2:
+                row[f"amp_{band}_mean"] = float(band_arcs["Amp"].mean())
 
     return row
 

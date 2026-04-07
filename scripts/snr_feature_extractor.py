@@ -30,6 +30,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.signal import lombscargle, find_peaks, hilbert
+from scipy.signal.windows import tukey
+from scipy.stats import siegelslopes
 
 
 def _morlet2(M, w, s):
@@ -381,14 +383,26 @@ def compute_area_factor(sin_elev, detrended, wavelength, min_rh, max_rh,
     # Subtract per-PRN baseline if provided (Song 2022)
     if baseline_power_curve is not None and baseline_sin_grid is not None:
         from scipy.interpolate import interp1d
+        # Baseline is stored on a sin(ε) grid — query at sin(ε) coordinates,
+        # NOT sin(ε)/cf. (The power curve has one value per sample; each sample's
+        # sin(ε) coordinate is x, its rescaled coordinate is x/cf.)
         bl_interp = interp1d(
             baseline_sin_grid, baseline_power_curve,
-            bounds_error=False, fill_value=0.0,
-        )(x / cf)
-        power_curve = np.maximum(power_curve - bl_interp, 0.0)
-
-    # Area factor = integral of power curve (trapezoidal)
-    af = float(np.trapz(power_curve, x / cf))
+            bounds_error=False, fill_value=np.nan,
+        )(x)
+        # Check baseline domain coverage
+        valid_bl = ~np.isnan(bl_interp)
+        oob_frac = 1.0 - valid_bl.mean() if len(valid_bl) > 0 else 1.0
+        if oob_frac <= 0.5 and valid_bl.sum() >= 5:
+            # Enough coverage — subtract baseline where defined, keep raw power elsewhere
+            power_curve[valid_bl] = np.maximum(power_curve[valid_bl] - bl_interp[valid_bl], 0.0)
+            if oob_frac > 0.2:
+                log.debug("AF baseline: %.0f%% of arc outside baseline domain", oob_frac * 100)
+        # else: baseline domain too narrow, use uncorrected power curve
+        af = float(np.trapz(power_curve, x / cf))
+    else:
+        # Area factor = integral of power curve (trapezoidal)
+        af = float(np.trapz(power_curve, x / cf))
 
     if return_power:
         power_info = {
@@ -405,45 +419,75 @@ def compute_area_factor(sin_elev, detrended, wavelength, min_rh, max_rh,
 # Damping parameter (Strandberg 2017)
 # ---------------------------------------------------------------------------
 
-def compute_damping(elevation_deg, detrended, wavelength):
+def compute_damping(elevation_deg, detrended, wavelength, taper_frac=0.1):
     """Compute damping parameter γ from envelope of detrended SNR.
 
     Uses Hilbert transform to get the signal envelope, then fits
     log(envelope) = log(A) - 4k²γ sin²(ε) to extract γ.
 
+    A Tukey window is applied before the Hilbert transform to suppress
+    edge artifacts from spectral leakage (the FFT-based Hilbert assumes
+    periodicity). The tapered edges are excluded from the fit.
+
+    The fit uses Siegel repeated-medians regression (scipy.stats.siegelslopes)
+    instead of OLS polyfit, making it robust to near-zero envelope values
+    at destructive interference nodes.
+
     Args:
         elevation_deg: elevation angles in degrees
         detrended: detrended SNR array
         wavelength: carrier wavelength in meters
+        taper_frac: fraction of each edge to taper (default 0.1 = 10%)
 
     Returns:
-        float: damping parameter γ (>=0)
+        tuple: (gamma, gamma_r2) where gamma is the damping parameter (>=0)
+               and gamma_r2 is the R² of the log-envelope fit (0–1).
+               Returns (np.nan, np.nan) on failure.
     """
-    if len(detrended) < 20:
-        return np.nan
+    nan_result = (np.nan, np.nan)
+    n = len(detrended)
+    if n < 20:
+        return nan_result
 
-    # Hilbert envelope
-    analytic = hilbert(detrended)
+    # Tukey window: cosine taper on edges, flat in center
+    window = tukey(n, alpha=2 * taper_frac)
+    tapered = detrended * window
+
+    # Hilbert envelope on tapered signal
+    analytic = hilbert(tapered)
     envelope = np.abs(analytic)
+
+    # Trim tapered edges from the fit (they are artificially suppressed)
+    trim = max(1, int(n * taper_frac))
+    envelope = envelope[trim:-trim]
+    elev_fit = elevation_deg[trim:-trim]
+
+    if len(envelope) < 15:
+        return nan_result
 
     # Avoid log(0)
     envelope = np.maximum(envelope, 1e-10)
 
-    sin2_e = np.sin(np.radians(elevation_deg)) ** 2
+    sin2_e = np.sin(np.radians(elev_fit)) ** 2
     log_env = np.log(envelope)
 
-    # Linear fit: log(env) = intercept + slope * sin²(ε)
+    # Robust linear fit: log(env) = intercept + slope * sin²(ε)
     # slope = -4k²γ → γ = -slope / (4k²)
     k = 2 * np.pi / wavelength
     try:
-        coeffs = np.polyfit(sin2_e, log_env, 1)
-        slope = coeffs[0]
+        slope, intercept = siegelslopes(log_env, sin2_e)
         gamma = -slope / (4 * k**2)
-    except (np.linalg.LinAlgError, ValueError):
-        return np.nan
+    except (ValueError, RuntimeError):
+        return nan_result
+
+    # R² of the fit (on the robust line)
+    predicted = intercept + slope * sin2_e
+    ss_res = np.sum((log_env - predicted) ** 2)
+    ss_tot = np.sum((log_env - np.mean(log_env)) ** 2)
+    gamma_r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
     # Physical damping is non-negative; clamp
-    return max(0.0, float(gamma))
+    return (max(0.0, float(gamma)), float(np.clip(gamma_r2, 0.0, 1.0)))
 
 
 # ---------------------------------------------------------------------------
@@ -541,15 +585,20 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
     # LSP features
     lsp = compute_lsp_features(sin_e, dsnr, wavelength, min_rh, max_rh, precision)
 
-    # Area factor (only meaningful for full arcs, but compute anyway)
-    af = compute_area_factor(
-        sin_e, dsnr, wavelength, min_rh, max_rh,
-        baseline_power_curve=af_baseline,
-        baseline_sin_grid=af_baseline_sin_grid,
-    )
-
-    # Damping
-    gamma = compute_damping(ele_w, dsnr, wavelength)
+    # AF and gamma are mechanically biased by truncated elevation ranges:
+    # AF integrates over a shorter domain, gamma has less lever arm for the fit.
+    # Only compute for full arcs (Song 2022 ≥80% coverage).
+    if full_arc:
+        af = compute_area_factor(
+            sin_e, dsnr, wavelength, min_rh, max_rh,
+            baseline_power_curve=af_baseline,
+            baseline_sin_grid=af_baseline_sin_grid,
+        )
+        gamma, gamma_r2 = compute_damping(ele_w, dsnr, wavelength)
+    else:
+        af = np.nan
+        gamma = np.nan
+        gamma_r2 = np.nan
 
     # Phase (matched filter at LSP-derived RH)
     phase = compute_phase(sin_e, dsnr, wavelength, lsp["RH"])
@@ -565,6 +614,7 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
         "RH": lsp["RH"],
         "AF": af,
         "gamma": gamma,
+        "gamma_r2": gamma_r2,
         "phase": phase,
         "MS": ms,
         "VS": vs,
@@ -831,8 +881,8 @@ def extract_features(station, year, num_cores=1):
     # Summary
     logger.info(f"Extracted {len(df)} feature rows")
     logger.info(f"Features: CLR={df['CLR'].median():.2f}, "
-                f"AF={df['AF'].median():.2f}, "
-                f"gamma={df['gamma'].median():.4f}, "
+                f"AF={df['AF'].dropna().median():.2f}, "
+                f"gamma={df['gamma'].dropna().median():.4f}, "
                 f"phase={df['phase'].median():.3f} rad")
     full_pct = df["full_arc"].mean() * 100
     logger.info(f"Full arcs: {full_pct:.1f}%")
@@ -849,11 +899,18 @@ def extract_features(station, year, num_cores=1):
 
     # Rename feature RH to avoid collision with gnssrefl RH
     df_feat = df.rename(columns={"RH": "RH_snr"})
-    # Only bring in feature columns (not join keys duplicated in arc_table)
-    feat_cols = [c for c in df_feat.columns
-                 if c not in per_arc.columns or c in join_cols]
 
-    arc_table = per_arc.merge(df_feat[feat_cols], on=join_cols, how="left")
+    # Drop any existing feature columns from per_arc so fresh values overwrite them.
+    # Without this, columns already present in arc_table (CLR, AF, gamma, etc.) are
+    # excluded from feat_cols and never updated on re-extraction runs.
+    feat_cols = [c for c in df_feat.columns if c not in join_cols]
+    per_arc_base = per_arc.drop(
+        columns=[c for c in feat_cols if c in per_arc.columns],
+        errors="ignore",
+    )
+    # feat_cols for merge = feature columns + join keys
+    merge_cols = join_cols + [c for c in feat_cols if c not in join_cols]
+    arc_table = per_arc_base.merge(df_feat[merge_cols], on=join_cols, how="left")
 
     # Log match rate
     if "CLR" in arc_table.columns:

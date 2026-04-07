@@ -79,13 +79,14 @@ def compute_baselines(station, year, max_arcs=500):
         return None, None
 
     # Load per-arc parquet to identify summer arcs
-    per_arc_path = (PROJECT_ROOT / "results_annual" / station
-                    / f"{station}_{year}_per_arc.parquet")
-    if not per_arc_path.exists():
-        logger.error(f"Per-arc parquet not found: {per_arc_path}")
+    from scripts.results_handler import resolve_layer1
+    per_arc_path = resolve_layer1(station, year)
+    if per_arc_path is None:
+        logger.error(f"No per-arc parquet found for {station} {year}")
         return None, None
 
     per_arc = pd.read_parquet(per_arc_path)
+    logger.info(f"Reading Layer 1 from {per_arc_path.name}")
     per_arc["month"] = pd.to_datetime(per_arc["date"]).dt.month
     summer_arcs = per_arc[per_arc["month"].isin(ice_free_months)]
 
@@ -208,9 +209,13 @@ def compute_baselines(station, year, max_arcs=500):
                 failed += 1
                 continue
 
-            # Interpolate power curve onto common sin(ε) grid
+            # Interpolate power curve onto common sin(ε) grid.
+            # power_info["sin_elev"] is in sin(ε)/cf domain — convert back
+            # to sin(ε) so it matches sin_grid.
             power_curve = power_info["power"][power_info["dominant_idx"], :]
-            arc_sin_grid = power_info["sin_elev"]
+            arc_sin_cf_grid = power_info["sin_elev"]   # sin(ε)/cf domain
+            cf_local = wavelength / 2
+            arc_sin_grid = arc_sin_cf_grid * cf_local   # back to sin(ε)
 
             from scipy.interpolate import interp1d
             try:
