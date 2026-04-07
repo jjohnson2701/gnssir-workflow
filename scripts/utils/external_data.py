@@ -1,5 +1,5 @@
-# ABOUTME: Shared utilities for external/secondary data sources (ERA5, TEC, SMAP, NDBC)
-# ABOUTME: Standardized config loading, cache/output path helpers, and NDBC wind data fetcher
+# ABOUTME: Shared utilities for external/secondary data sources (HYDAT, EC Climate, ERA5, TEC, SMAP, NDBC)
+# ABOUTME: Standardized config loading, cache/output path helpers, and data fetchers for Canadian/US reference stations
 
 """
 Shared utilities for external data integration.
@@ -7,6 +7,8 @@ Shared utilities for external data integration.
 Provides:
   - Station config loading (lat/lon/height from stations_config.json)
   - Cache and output path helpers (consistent naming across all extractors)
+  - HYDAT daily water level fetcher (Canadian Great Lakes gauges)
+  - EC Climate daily temperature fetcher (Environment Canada stations)
   - NDBC historical wind data fetcher
 
 All external data scripts should import from here instead of
@@ -64,16 +66,31 @@ def load_station_coords(station, project_root=None):
 # Path helpers
 # ---------------------------------------------------------------------------
 
+# Map logical source names to on-disk cache directory names.
+# Matches existing directories in data/.cache/ to avoid orphaning cached data.
+_CACHE_DIR_NAMES = {
+    "era5": "era5",
+    "tec": "ionex",
+    "smap": "smap_ft",
+    "cygnss": "cygnss",
+    "ndbc": "ndbc",
+    "glerl": "glerl_ice",
+    "hydat": "hydat",
+    "ec_climate": "ec_climate",
+}
+
+
 def get_cache_dir(source, project_root=None):
     """Return cache directory for an external data source.
 
     Args:
-        source: one of "era5", "tec", "smap", "cygnss", "ndbc"
+        source: one of "era5", "tec", "smap", "cygnss", "ndbc", "glerl"
 
     Returns Path (created if it doesn't exist).
     """
     root = Path(project_root) if project_root else PROJECT_ROOT
-    cache = root / "data" / ".cache" / source
+    dirname = _CACHE_DIR_NAMES.get(source, source)
+    cache = root / "data" / ".cache" / dirname
     cache.mkdir(parents=True, exist_ok=True)
     return cache
 
@@ -204,6 +221,274 @@ def fetch_ndbc_wind(buoy_id, year, cache_dir=None):
     except Exception as e:
         logger.warning(f"NDBC fetch error for {buoy_id} {year}: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# HYDAT daily water levels (Canadian Great Lakes gauges)
+# ---------------------------------------------------------------------------
+
+HYDAT_API_BASE = "https://api.weather.gc.ca/collections/hydrometric-daily-mean/items"
+
+
+def get_hydat_station_id(station):
+    """Look up the HYDAT station ID from station config.
+
+    Returns station ID string (e.g., "02BA004") or None.
+    """
+    try:
+        cfg = load_station_config(station)
+        ext = cfg.get("external_data_sources", {})
+        hydat = ext.get("hydat", {})
+        if hydat.get("enabled") and hydat.get("station_id"):
+            return hydat["station_id"]
+    except (ValueError, FileNotFoundError):
+        pass
+    return None
+
+
+def fetch_hydat_daily_level(hydat_station_id, year, cache_dir=None):
+    """Fetch HYDAT daily mean water level for one year.
+
+    Uses the MSC GeoMet OGC API (api.weather.gc.ca) to download daily
+    mean water levels from the Water Survey of Canada HYDAT database.
+
+    Args:
+        hydat_station_id: HYDAT station number (e.g., "02BA004")
+        year: calendar year
+        cache_dir: optional cache directory (default: data/.cache/hydat/)
+
+    Returns DataFrame with columns [date, level_m] or None on failure.
+        level_m is daily mean water level in metres (IGLD85 datum).
+    """
+    import requests
+
+    if cache_dir is None:
+        cache_dir = get_cache_dir("hydat")
+    cache_dir = Path(cache_dir)
+
+    cache_path = cache_dir / f"{hydat_station_id}_{year}_daily_level.parquet"
+    if cache_path.exists():
+        logger.debug(f"HYDAT cached: {cache_path}")
+        return pd.read_parquet(cache_path)
+
+    url = (
+        f"{HYDAT_API_BASE}"
+        f"?STATION_NUMBER={hydat_station_id}"
+        f"&datetime={year}-01-01/{year}-12-31"
+        f"&f=json&limit=400"
+    )
+    logger.info(f"Fetching HYDAT {hydat_station_id} {year}")
+
+    try:
+        resp = requests.get(url, timeout=30, headers={"User-Agent": "GNSS-IR/1.0"})
+        if resp.status_code != 200:
+            logger.warning(f"HYDAT fetch failed: HTTP {resp.status_code}")
+            return None
+
+        data = resp.json()
+        features = data.get("features", [])
+        if not features:
+            logger.warning(f"HYDAT {hydat_station_id} {year}: no data returned")
+            return None
+
+        records = []
+        for f in features:
+            props = f["properties"]
+            level = props.get("LEVEL")
+            if level is not None:
+                records.append({
+                    "date": props["DATE"],
+                    "level_m": float(level),
+                })
+
+        if not records:
+            logger.warning(f"HYDAT {hydat_station_id} {year}: all LEVEL values null")
+            return None
+
+        df = pd.DataFrame(records)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
+
+        df.to_parquet(cache_path, index=False)
+        logger.info(
+            f"HYDAT {hydat_station_id} {year}: {len(df)} days "
+            f"({df['level_m'].min():.2f}–{df['level_m'].max():.2f} m) → {cache_path.name}"
+        )
+        return df
+
+    except Exception as e:
+        logger.warning(f"HYDAT fetch error for {hydat_station_id} {year}: {e}")
+        return None
+
+
+def fetch_hydat_for_station(station, year, cache_dir=None):
+    """Convenience: fetch HYDAT water level using a GNSS station name.
+
+    Looks up the HYDAT station ID from config, then fetches.
+    """
+    hydat_id = get_hydat_station_id(station)
+    if hydat_id is None:
+        logger.warning(f"No HYDAT station configured for {station}")
+        return None
+    return fetch_hydat_daily_level(hydat_id, year, cache_dir)
+
+
+# ---------------------------------------------------------------------------
+# Environment Canada daily temperature
+# ---------------------------------------------------------------------------
+
+EC_CLIMATE_BASE = "https://climate.weather.gc.ca/climate_data/bulk_data_e.html"
+
+
+def get_ec_climate_station_id(station):
+    """Look up the EC Climate station ID from station config.
+
+    Returns integer station_id or None.
+    """
+    try:
+        cfg = load_station_config(station)
+        ext = cfg.get("external_data_sources", {})
+        ec = ext.get("ec_climate", {})
+        if ec.get("enabled") and ec.get("station_id"):
+            return int(ec["station_id"])
+    except (ValueError, FileNotFoundError):
+        pass
+    return None
+
+
+def fetch_ec_daily_temperature(ec_station_id, year, cache_dir=None):
+    """Fetch Environment Canada daily temperature data for one year.
+
+    Downloads bulk CSV from climate.weather.gc.ca with daily max, min,
+    and mean temperature.
+
+    Args:
+        ec_station_id: EC Climate station ID (integer, e.g., 7747)
+        year: calendar year
+        cache_dir: optional cache directory (default: data/.cache/ec_climate/)
+
+    Returns DataFrame with columns [date, max_temp_c, min_temp_c, mean_temp_c]
+        or None on failure.
+    """
+    import requests
+
+    if cache_dir is None:
+        cache_dir = get_cache_dir("ec_climate")
+    cache_dir = Path(cache_dir)
+
+    cache_path = cache_dir / f"ec_{ec_station_id}_{year}_daily_temp.parquet"
+    if cache_path.exists():
+        logger.debug(f"EC Climate cached: {cache_path}")
+        return pd.read_parquet(cache_path)
+
+    url = (
+        f"{EC_CLIMATE_BASE}?format=csv"
+        f"&stationID={ec_station_id}"
+        f"&Year={year}&Month=1&Day=1&timeframe=2"
+    )
+    logger.info(f"Fetching EC Climate station {ec_station_id} {year}")
+
+    try:
+        resp = requests.get(url, timeout=30, headers={"User-Agent": "GNSS-IR/1.0"})
+        if resp.status_code != 200:
+            logger.warning(f"EC Climate fetch failed: HTTP {resp.status_code}")
+            return None
+
+        from io import StringIO
+        raw_df = pd.read_csv(StringIO(resp.text))
+
+        # Standardize column names — EC CSV has verbose names with degree symbols
+        col_map = {}
+        for col in raw_df.columns:
+            cl = col.lower()
+            if "date/time" in cl:
+                col_map[col] = "date"
+            elif "max temp" in cl and "flag" not in cl:
+                col_map[col] = "max_temp_c"
+            elif "min temp" in cl and "flag" not in cl:
+                col_map[col] = "min_temp_c"
+            elif "mean temp" in cl and "flag" not in cl:
+                col_map[col] = "mean_temp_c"
+            elif "total precip" in cl and "flag" not in cl:
+                col_map[col] = "total_precip_mm"
+
+        df = raw_df.rename(columns=col_map)
+        keep = [c for c in ["date", "max_temp_c", "min_temp_c", "mean_temp_c",
+                             "total_precip_mm"] if c in df.columns]
+        df = df[keep].copy()
+
+        if "date" not in df.columns:
+            logger.warning(f"EC Climate {ec_station_id} {year}: no date column found")
+            return None
+
+        df["date"] = pd.to_datetime(df["date"])
+        # Coerce to numeric (EC puts empty strings for missing)
+        for col in ["max_temp_c", "min_temp_c", "mean_temp_c", "total_precip_mm"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+
+        df.to_parquet(cache_path, index=False)
+        valid_temp = df["mean_temp_c"].notna().sum() if "mean_temp_c" in df.columns else 0
+        logger.info(
+            f"EC Climate {ec_station_id} {year}: {len(df)} days, "
+            f"{valid_temp} with temperature → {cache_path.name}"
+        )
+        return df
+
+    except Exception as e:
+        logger.warning(f"EC Climate fetch error for {ec_station_id} {year}: {e}")
+        return None
+
+
+def fetch_ec_temperature_for_station(station, year, cache_dir=None):
+    """Convenience: fetch EC temperature using a GNSS station name.
+
+    Looks up the EC Climate station ID from config, then fetches.
+    """
+    ec_id = get_ec_climate_station_id(station)
+    if ec_id is None:
+        logger.warning(f"No EC Climate station configured for {station}")
+        return None
+    return fetch_ec_daily_temperature(ec_id, year, cache_dir)
+
+
+def fetch_ec_ice_season(station, year, months_before=(11, 12),
+                        months_after=(1, 2, 3, 4, 5)):
+    """Fetch EC temperature spanning an ice season (Nov prior → May target year).
+
+    Args:
+        station: GNSS-IR station ID
+        year: the ice-season year (e.g., 2024 means Nov 2023 – May 2024)
+
+    Returns DataFrame with date, mean_temp_c, etc. or None.
+    """
+    ec_id = get_ec_climate_station_id(station)
+    if ec_id is None:
+        logger.warning(f"No EC Climate station configured for {station}")
+        return None
+
+    parts = []
+    t1 = fetch_ec_daily_temperature(ec_id, year - 1)
+    if t1 is not None:
+        mask = t1["date"].dt.month.isin(months_before)
+        if mask.any():
+            parts.append(t1[mask])
+
+    t2 = fetch_ec_daily_temperature(ec_id, year)
+    if t2 is not None:
+        mask = t2["date"].dt.month.isin(months_after)
+        if mask.any():
+            parts.append(t2[mask])
+
+    if not parts:
+        logger.warning(f"No EC temperature data for {station} ice season {year}")
+        return None
+
+    df = pd.concat(parts, ignore_index=True).sort_values("date").reset_index(drop=True)
+    logger.info(f"EC ice season {station} {year}: {len(df)} days")
+    return df
 
 
 def fetch_ndbc_ice_season(station, year, months_before=(11, 12),
