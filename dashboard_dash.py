@@ -49,15 +49,20 @@ FREQ_COLORS = {
 }
 
 V3_COLORS = {
-    "open_water": "#2196F3",
-    "freeze_up": "#64B5F6",
-    "ice_surface": "#F44336",
-    "ice_layered": "#FF9800",
-    "ice_decaying": "#CE93D8",
-    "break_up": "#81C784",
+    "open_water": "#2d9a6b",
+    "freeze_up": "#f0ad4e",
+    "ice_surface": "#4a90d9",
+    "ice_layered": "#7b4fbf",
+    "ice_decaying": "#e07b39",
+    "break_up": "#d94452",
+    # Discovery mode
+    "baseline": "#2d9a6b",
+    "anomalous": "#e07b39",
+    "regime_change": "#f0ad4e",
 }
 
 V3_ORDER = ["open_water", "freeze_up", "ice_surface", "ice_layered", "ice_decaying", "break_up"]
+DISCOVERY_ORDER = ["baseline", "regime_change", "anomalous"]
 
 
 # ---------------------------------------------------------------------------
@@ -104,12 +109,27 @@ def load_per_arc(station, year):
 
 
 def load_v3(station, year):
-    """Load Layer 3 ice state (ice_state preferred, v3/v2 fallback)."""
-    for name in ["ice_state", "ice_classification_v3", "ice_classification_v2"]:
+    """Load Layer 3 ice state (v3 preferred, v2 fallback, v1 legacy)."""
+    for name in ["ice_classification_v3", "ice_classification_v2", "ice_state"]:
         p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_{name}.parquet"
         if p.exists():
             df = pd.read_parquet(p)
             df["date_dt"] = pd.to_datetime(df["date"])
+            # Normalize to v3_state column expected by all callbacks
+            if "v3_state" not in df.columns:
+                if "state" in df.columns:
+                    # v2: water/freeze_up/ice/break_up → map to v3 names
+                    v2_to_v3 = {"water": "open_water", "ice": "ice_surface"}
+                    df["v3_state"] = df["state"].map(
+                        lambda s: v2_to_v3.get(s, s))
+                elif "classification" in df.columns:
+                    # v1: ice/water/transition → map to v3 names
+                    v1_to_v3 = {"water": "open_water", "ice": "ice_surface",
+                                "transition": "freeze_up"}
+                    df["v3_state"] = df["classification"].map(v1_to_v3)
+            # Ensure doy column exists (needed by features panel)
+            if "doy" not in df.columns:
+                df["doy"] = df["date_dt"].dt.dayofyear
             return df
     return None
 
@@ -138,6 +158,37 @@ def load_smap(station, year):
 
 def load_era5(station, year):
     p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_era5.parquet"
+    if not p.exists():
+        return None
+    return pd.read_parquet(p)
+
+
+def load_v2(station, year):
+    """Load v2 classification with Mahalanobis distances."""
+    p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_ice_classification_v2.parquet"
+    if not p.exists():
+        return None
+    df = pd.read_parquet(p)
+    df["date"] = pd.to_datetime(df["date"])
+    if "doy" not in df.columns:
+        df["doy"] = df["date"].dt.dayofyear
+    return df
+
+
+def load_mahal_threshold(station):
+    """Load Mahalanobis threshold from saved model."""
+    import pickle
+    model_path = PROJECT_ROOT / "models" / f"{station}_water_state_model.pkl"
+    if not model_path.exists():
+        return None
+    with open(model_path, "rb") as f:
+        model = pickle.load(f)
+    return model.get("optimal_threshold")
+
+
+def load_cross_station_summary():
+    """Load cross-station summary parquet (if it exists)."""
+    p = PROJECT_ROOT / "results_annual" / "cross_station_summary.parquet"
     if not p.exists():
         return None
     return pd.read_parquet(p)
@@ -268,7 +319,7 @@ def build_timeseries_figure(per_arc, v3=None, station="", year=0, s1_dates=None)
 
     # v3 classification strip
     if v3 is not None and not v3.empty and "v3_state" in v3.columns:
-        for state in V3_ORDER:
+        for state in _state_order(_get_mode(v3)):
             mask = v3["v3_state"] == state
             if mask.sum() > 0:
                 sub = v3[mask]
@@ -294,6 +345,9 @@ def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station=""
     if snr_features is None or v3 is None:
         return go.Figure().update_layout(title="No data")
 
+    mode = _get_mode(v3)
+    order = _state_order(mode)
+
     daily = snr_features.groupby("doy")[["CLR", "AF", "gamma", "VS"]].median().reset_index()
     v3c = v3[["doy", "v3_state"]].copy()
     daily = daily.merge(v3c, on="doy", how="left")
@@ -311,7 +365,7 @@ def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station=""
 
     row = 1
     for feat, label in [("gamma", "Damping (γ)"), ("VS", "SNR Variance"), ("AF", "Area Factor")]:
-        for state in V3_ORDER:
+        for state in order:
             mask = daily["v3_state"] == state
             if mask.sum() > 0:
                 sub = daily[mask]
@@ -328,7 +382,7 @@ def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station=""
         era5m = era5.copy()
         if "doy" in era5m.columns:
             era5m = era5m.merge(v3c, on="doy", how="left")
-            for state in V3_ORDER:
+            for state in order:
                 mask = era5m["v3_state"] == state
                 if mask.sum() > 0:
                     sub = era5m[mask]
@@ -345,7 +399,7 @@ def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station=""
         smapm = smap.copy()
         if "doy" in smapm.columns:
             smapm = smapm.merge(v3c, on="doy", how="left")
-            for state in V3_ORDER:
+            for state in order:
                 mask = smapm["v3_state"] == state
                 if mask.sum() > 0:
                     sub = smapm[mask]
@@ -357,11 +411,269 @@ def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station=""
             fig.update_yaxes(title_text="SMAP TBv-TBh (K)", row=row, col=1)
             row += 1
 
+    tab_title = "Regime Detection Features" if mode == "discovery" else "Ice Classification Features"
     fig.update_xaxes(title_text="Day of Year", row=n_panels, col=1)
     fig.update_layout(
-        title=f"{station} {year}: Ice Classification Features",
+        title=f"{station} {year}: {tab_title}",
         height=200 * n_panels, margin=dict(l=60, r=20, t=50, b=30),
         legend=dict(font=dict(size=9), orientation="h", y=-0.05),
+        **PLOTLY_DARK,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Ice tab: new components
+# ---------------------------------------------------------------------------
+
+ICE_STATES_SET = {"freeze_up", "ice_surface", "ice_layered", "ice_decaying", "break_up"}
+ANOMALOUS_STATES_SET = {"anomalous", "regime_change"}
+
+
+def _get_mode(v3):
+    """Detect classification mode from v3 DataFrame."""
+    if v3 is None:
+        return "validated"
+    if "classification_mode" in v3.columns:
+        return v3["classification_mode"].iloc[0]
+    # Legacy fallback: if any discovery labels present, it's discovery
+    if v3["v3_state"].isin(["baseline", "anomalous", "regime_change"]).any():
+        return "discovery"
+    return "validated"
+
+
+def _state_order(mode):
+    return DISCOVERY_ORDER if mode == "discovery" else V3_ORDER
+
+
+def _non_baseline_states(mode):
+    return ANOMALOUS_STATES_SET if mode == "discovery" else ICE_STATES_SET
+
+
+FEATURE_LABELS = {
+    "amp_mean": "Amplitude", "gamma_med": "Damping γ", "clr_med": "CLR",
+    "af_med": "Area Factor", "pr_med": "Pseudorange", "rh_std": "RH Std",
+    "vs_med": "SNR Variance",
+}
+# Majority directions from cross-station analysis (network consensus)
+MAJORITY_DIRECTION = {
+    "amp_mean": "winter_high", "gamma_med": "summer_high", "clr_med": "summer_high",
+    "af_med": "winter_high", "pr_med": "winter_high", "rh_std": "summer_high",
+    "vs_med": "winter_high",
+}
+
+
+def build_state_timeline(v3, station, year):
+    """Horizontal bar showing v3_state day-by-day across the year."""
+    if v3 is None or "v3_state" not in v3.columns:
+        return html.Div("No classification data", style={"color": DARK_TEXT, "padding": "8px"})
+
+    fig = go.Figure()
+    df = v3.sort_values("doy")
+
+    # Build segments of consecutive same-state days for efficient rendering
+    segments = []
+    prev_state, seg_start = None, None
+    for _, row in df.iterrows():
+        if row["v3_state"] != prev_state:
+            if prev_state is not None:
+                segments.append((seg_start, prev_doy, prev_state))
+            seg_start = row["doy"]
+            prev_state = row["v3_state"]
+        prev_doy = row["doy"]
+    if prev_state is not None:
+        segments.append((seg_start, prev_doy, prev_state))
+
+    for start, end, state in segments:
+        fig.add_trace(go.Bar(
+            x=[end - start + 1], y=[f"{station} {year}"],
+            base=[start - 0.5], orientation="h",
+            marker_color=V3_COLORS.get(state, "#666"),
+            name=state, showlegend=False,
+            hovertemplate=f"{state}<br>DOY {start}–{end}<extra></extra>",
+        ))
+
+    # Add legend entries (one per state that appears)
+    seen = set()
+    for _, _, state in segments:
+        if state not in seen:
+            fig.add_trace(go.Bar(
+                x=[0], y=[f"{station} {year}"], base=[0], orientation="h",
+                marker_color=V3_COLORS.get(state, "#666"),
+                name=state, showlegend=True, legendgroup=state,
+                hoverinfo="skip",
+            ))
+            seen.add(state)
+
+    fig.update_layout(
+        barmode="stack", height=90,
+        margin=dict(l=10, r=10, t=5, b=5),
+        xaxis=dict(range=[0.5, 366.5], title=None, showticklabels=True,
+                   dtick=30, gridcolor="#30363d"),
+        yaxis=dict(showticklabels=False),
+        legend=dict(orientation="h", y=-0.6, font=dict(size=10)),
+        **PLOTLY_DARK,
+    )
+    return dcc.Graph(figure=fig, style={"height": "90px"},
+                     config={"displayModeBar": False})
+
+
+def build_metrics_strip(v3):
+    """Row of summary metric cards, adapting labels to classification mode."""
+    if v3 is None or "v3_state" not in v3.columns:
+        return html.Div()
+
+    mode = _get_mode(v3)
+    counts = v3["v3_state"].value_counts()
+    non_baseline = v3[v3["v3_state"].isin(_non_baseline_states(mode))]
+    total_nb = len(non_baseline)
+
+    if total_nb > 0:
+        first_doy = int(non_baseline["doy"].min())
+        last_doy = int(non_baseline["doy"].max())
+        regime_len = last_doy - first_doy
+    else:
+        first_doy, last_doy, regime_len = None, None, 0
+
+    def card(label, value, color="#c9d1d9"):
+        return html.Div([
+            html.Div(str(value) if value is not None else "—",
+                     style={"fontSize": "1.6rem", "fontWeight": "bold", "color": color}),
+            html.Div(label, style={"fontSize": "0.75rem", "color": "#8b949e"}),
+        ], style={
+            "textAlign": "center", "padding": "8px 16px",
+            "backgroundColor": DARK_CARD, "borderRadius": "6px",
+            "border": f"1px solid {DARK_BORDER}", "minWidth": "100px",
+        })
+
+    if mode == "discovery":
+        n_divergence = int(v3["has_interfreq_divergence"].sum()) if "has_interfreq_divergence" in v3.columns else 0
+        n_above_freeze = int(v3["above_freezing"].sum()) if "above_freezing" in v3.columns else 0
+        cards = [
+            card("Anomalous Days", total_nb, "#e07b39"),
+            card("Regime Length", f"{regime_len}d" if total_nb > 0 else "—", "#e07b39"),
+            card("First Anomaly DOY", first_doy, "#f0ad4e"),
+            card("Last Anomaly DOY", last_doy, "#f0ad4e"),
+            card("IF Divergence Days", n_divergence, "#7b4fbf"),
+            card("Above Freezing Days", n_above_freeze, "#2d9a6b"),
+        ]
+    else:
+        n_layered = int(counts.get("ice_layered", 0))
+        n_decaying = int(counts.get("ice_decaying", 0))
+        cards = [
+            card("Ice Days", total_nb, "#4a90d9"),
+            card("Season Length", f"{regime_len}d" if total_nb > 0 else "—", "#4a90d9"),
+            card("First Freeze DOY", first_doy, "#f0ad4e"),
+            card("Last Ice DOY", last_doy, "#d94452"),
+            card("Layered Days", n_layered, "#7b4fbf"),
+            card("Decaying Days", n_decaying, "#e07b39"),
+        ]
+    return html.Div(cards, style={
+        "display": "flex", "gap": "10px", "flexWrap": "wrap",
+        "justifyContent": "center", "marginBottom": "8px",
+    })
+
+
+def build_feature_direction_summary(station, year):
+    """Show feature seasonal directions with polarity inversion flags."""
+    css = load_cross_station_summary()
+    if css is None:
+        return html.Div("cross_station_summary.parquet not found",
+                         style={"color": "#8b949e", "fontSize": "0.85rem", "padding": "4px"})
+
+    row = css[(css["station"] == station) & (css["year"] == year)]
+    if row.empty:
+        return html.Div(f"No feature summary for {station} {year}",
+                         style={"color": "#8b949e", "fontSize": "0.85rem", "padding": "4px"})
+    row = row.iloc[0]
+
+    cells = []
+    for feat in FEATURE_LABELS:
+        direction = row.get(f"{feat}_direction", "?")
+        d_val = row.get(f"{feat}_separation", np.nan)
+        majority = MAJORITY_DIRECTION.get(feat)
+
+        if direction == "insufficient_data" or pd.isna(d_val):
+            cells.append(html.Td("?", style={"color": "#8b949e", "padding": "4px 8px"}))
+            continue
+
+        arrow = "↑" if direction == "winter_high" else "↓"
+        inverted = majority is not None and direction != majority
+        color = "#e07b39" if inverted else "#2d9a6b"
+        label = f"{arrow} {abs(d_val):.1f}"
+        if inverted:
+            label += " ⚠"
+
+        cells.append(html.Td(label, style={
+            "color": color, "fontWeight": "bold" if inverted else "normal",
+            "padding": "4px 8px", "fontSize": "0.85rem",
+        }))
+
+    header_cells = [html.Th(FEATURE_LABELS[f], style={
+        "padding": "4px 8px", "fontSize": "0.75rem", "color": "#8b949e",
+        "fontWeight": "normal",
+    }) for f in FEATURE_LABELS]
+
+    return html.Div([
+        html.Div("Feature Seasonal Direction (↑ winter-high, ↓ summer-high, ⚠ inverted vs network)",
+                 style={"fontSize": "0.75rem", "color": "#8b949e", "marginBottom": "4px"}),
+        html.Table([
+            html.Tr(header_cells),
+            html.Tr(cells),
+        ], style={"borderCollapse": "collapse"}),
+    ], style={
+        "backgroundColor": DARK_CARD, "borderRadius": "6px",
+        "border": f"1px solid {DARK_BORDER}", "padding": "8px",
+    })
+
+
+def build_mahalanobis_figure(v2, v3, threshold, station, year):
+    """Mahalanobis distance time series with threshold line and v3 state coloring."""
+    if v2 is None or "mahal_dist" not in v2.columns:
+        fig = go.Figure()
+        fig.update_layout(
+            title="Mahalanobis distance: no v2 data",
+            height=200, **PLOTLY_DARK,
+        )
+        return fig
+
+    df = v2.sort_values("doy").copy()
+
+    # Merge v3 states for coloring
+    mode = _get_mode(v3)
+    if v3 is not None and "v3_state" in v3.columns:
+        v3c = v3[["doy", "v3_state"]].drop_duplicates("doy")
+        df = df.merge(v3c, on="doy", how="left")
+    else:
+        df["v3_state"] = np.where(df["above_threshold"], "ice_surface", "open_water")
+
+    fig = go.Figure()
+
+    # Plot points colored by v3 state
+    for state in _state_order(mode):
+        mask = df["v3_state"] == state
+        if mask.sum() == 0:
+            continue
+        sub = df[mask]
+        fig.add_trace(go.Scatter(
+            x=sub["doy"], y=sub["mahal_dist"], mode="markers",
+            marker=dict(size=5, color=V3_COLORS.get(state, "#999"), opacity=0.7),
+            name=state, legendgroup=state, showlegend=False,
+        ))
+
+    # Threshold line
+    if threshold is not None:
+        fig.add_hline(y=threshold, line_dash="dash", line_color="#d94452",
+                      annotation_text=f"threshold = {threshold:.1f}",
+                      annotation_font_color="#d94452",
+                      annotation_font_size=10)
+
+    fig.update_layout(
+        title=f"Mahalanobis Distance from Water-State Baseline",
+        xaxis_title="Day of Year",
+        yaxis_title="Mahalanobis Distance",
+        height=220,
+        margin=dict(l=60, r=20, t=35, b=30),
         **PLOTLY_DARK,
     )
     return fig
@@ -701,6 +1013,11 @@ def create_app():
         from dash import ctx
         if not ctx.triggered_id:
             return no_update
+        # Guard: only respond to real clicks, not marker re-creation.
+        # When the overview tab re-renders, new markers are created with
+        # n_clicks=None, which can fire this callback spuriously.
+        if not any(n and n > 0 for n in n_clicks_list):
+            return no_update
         # ctx.triggered_id is {"type": "station-marker", "index": "ROSS"}
         clicked_station = ctx.triggered_id.get("index")
         if clicked_station:
@@ -903,6 +1220,58 @@ def create_app():
                     color="white", weight=1, opacity=0.7,
                 ))
 
+            # Build reference station markers for the selected station
+            ref_markers = []
+            ref_legend = []
+            ext = station_cfg.get("external_data_sources", {})
+
+            hydat_cfg = ext.get("hydat", {})
+            if hydat_cfg.get("enabled") and hydat_cfg.get("station_id"):
+                # Look up HYDAT station coordinates from the GeoMet API response cache
+                # or use approximate position (same lake, very close)
+                h_name = hydat_cfg.get("station_name", hydat_cfg["station_id"])
+                h_dist = hydat_cfg.get("distance_km", "?")
+                ref_legend.append(html.Div([
+                    html.Span("◆ ", style={"color": "#4FC3F7", "fontSize": "1.2em"}),
+                    f"HYDAT: {h_name} ({h_dist} km)",
+                ], style={"fontSize": "0.75rem", "color": "#ccc"}))
+
+            coops_cfg = ext.get("noaa_coops", {})
+            if coops_cfg.get("enabled") and coops_cfg.get("nearest_station"):
+                ns = coops_cfg["nearest_station"]
+                c_lat = ns.get("latitude")
+                c_lon = ns.get("longitude")
+                c_name = ns.get("name", ns.get("id", ""))
+                c_dist = ns.get("distance_km", "?")
+                if c_lat and c_lon:
+                    ref_markers.append(dl.CircleMarker(
+                        center=[c_lat, c_lon], radius=7,
+                        color="#FF69B4", fillColor="#FF69B4", fillOpacity=0.8,
+                        children=[dl.Tooltip(f"CO-OPS: {c_name} ({c_dist} km)")],
+                    ))
+                ref_legend.append(html.Div([
+                    html.Span("● ", style={"color": "#FF69B4", "fontSize": "1.2em"}),
+                    f"CO-OPS: {c_name} ({c_dist} km)",
+                ], style={"fontSize": "0.75rem", "color": "#ccc"}))
+
+            ec_cfg = ext.get("ec_climate", {})
+            if ec_cfg.get("enabled") and ec_cfg.get("station_id"):
+                e_lat = ec_cfg.get("latitude")
+                e_lon = ec_cfg.get("longitude")
+                e_name = ec_cfg.get("station_name", "EC Climate")
+                e_dist = ec_cfg.get("distance_km", "?")
+                if e_lat and e_lon and (not isinstance(e_dist, (int, float)) or e_dist > 5):
+                    # Only show marker if station is far enough to not overlap GNSS marker
+                    ref_markers.append(dl.CircleMarker(
+                        center=[e_lat, e_lon], radius=7,
+                        color="#FFA726", fillColor="#FFA726", fillOpacity=0.8,
+                        children=[dl.Tooltip(f"Temp: {e_name} ({e_dist} km)")],
+                    ))
+                ref_legend.append(html.Div([
+                    html.Span("● ", style={"color": "#FFA726", "fontSize": "1.2em"}),
+                    f"Temp: {e_name} ({e_dist} km)",
+                ], style={"fontSize": "0.75rem", "color": "#ccc"}))
+
             content = html.Div([
                 # Top row: Map + Polar + Info
                 html.Div([
@@ -915,7 +1284,7 @@ def create_app():
                                 id={"type": "station-marker", "index": name},
                                 children=[dl.Tooltip(name)],
                             ) for name, info in stations.items()
-                        ] + fresnel_layers, center=center, zoom=map_zoom,
+                        ] + fresnel_layers + ref_markers, center=center, zoom=map_zoom,
                            id=f"map-{station}-{year}",
                            style={"height": "400px", "borderRadius": "6px", "width": "100%"}),
                     ], style={"flex": "2"}),
@@ -928,6 +1297,10 @@ def create_app():
                                  children=[
                                      html.H4(f"{station} {year}", style={"margin": "0 0 8px 0", "color": "#e0e0e0"}),
                                      html.Div(v3_lines if v3_lines else [html.P("No v3 data", style={"color": DARK_TEXT})]),
+                                 ] + ([html.Div([
+                                     html.Hr(style={"borderColor": DARK_BORDER, "margin": "6px 0"}),
+                                     html.Span("Reference Stations", style={"color": "#8b949e", "fontSize": "0.75rem", "fontWeight": "bold"}),
+                                 ] + ref_legend, style={"marginTop": "4px"})] if ref_legend else []) + [
                                      html.P("Drag on time series to filter polar diagram",
                                             style={"color": "#8b949e", "fontSize": "0.75rem", "marginTop": "8px"}),
                                  ],
@@ -1041,7 +1414,7 @@ def create_app():
 
             # v3 classification strip
             if has_v3:
-                for state in V3_ORDER:
+                for state in _state_order(_get_mode(v3)):
                     mask = v3["v3_state"] == state
                     if mask.sum() > 0:
                         sub = v3[mask]
@@ -1175,11 +1548,37 @@ def create_app():
 
         elif tab == "ice":
             v3 = load_v3(station, year)
+            v2 = load_v2(station, year)
             snr = load_snr_features(station, year)
             era5 = load_era5(station, year)
             smap = load_smap(station, year)
-            fig = build_ice_features_figure(snr, v3, era5, smap, station, year)
-            content = dcc.Graph(figure=fig)
+            threshold = load_mahal_threshold(station)
+
+            # State timeline strip
+            timeline = build_state_timeline(v3, station, year)
+
+            # Metrics strip
+            metrics = build_metrics_strip(v3)
+
+            # Feature direction summary
+            feat_dir = build_feature_direction_summary(station, year)
+
+            # Mahalanobis distance plot
+            mahal_fig = build_mahalanobis_figure(v2, v3, threshold, station, year)
+
+            # Existing SNR features figure
+            snr_fig = build_ice_features_figure(snr, v3, era5, smap, station, year)
+
+            content = html.Div([
+                timeline,
+                metrics,
+                html.Div([
+                    html.Div([feat_dir], style={"flex": "1", "minWidth": "300px"}),
+                ], style={"display": "flex", "gap": "10px", "marginBottom": "8px"}),
+                dcc.Graph(figure=mahal_fig, style={"height": "220px"},
+                          config={"displayModeBar": True}),
+                dcc.Graph(figure=snr_fig, config={"displayModeBar": True}),
+            ])
 
         elif tab == "imagery":
             s1_images = list_s1_images(station)
