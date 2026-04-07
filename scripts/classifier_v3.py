@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 """
-Ice Classifier v3: v2 Mahalanobis + Sub-State Resolution
+Classifier v3: Mahalanobis Sub-State Resolution (Discovery / Validated)
 
 Builds on v2's water-default Mahalanobis approach and adds:
-1. Ice sub-states: ice_surface vs ice_layered (from interfrequency ΔRH)
-2. Ice_decaying: ice persisting above freezing (ERA5 temperature)
+1. Sub-states: ice_surface vs ice_layered (from interfrequency ΔRH)
+2. Ice_decaying: anomalous regime persisting above freezing (ERA5 temperature)
 3. Preserves v1 and v2 outputs — writes to _ice_classification_v3.parquet
 
-States:
-    open_water    — Mahalanobis < threshold, surface reflection
-    freeze_up     — Mahalanobis rising through threshold (from v2 state machine)
+Two classification modes based on station config:
+
+**Validated mode** (classification.validated=true, use_case="ice"):
+    open_water    — Mahalanobis < threshold
+    freeze_up     — transition into anomalous regime
     ice_surface   — Mahalanobis > threshold, |ΔRH| < 0.3m
     ice_layered   — Mahalanobis > threshold, |ΔRH| >= 0.3m
-    ice_decaying  — Mahalanobis > threshold, ERA5 t2m_mean > 0°C
-    break_up      — Mahalanobis falling through threshold (from v2 state machine)
+    ice_decaying  — Mahalanobis > threshold, ERA5 t2m_mean > freeze_temp
+    break_up      — transition out of anomalous regime
+
+**Discovery mode** (default — no validated reference data):
+    baseline      — Mahalanobis < threshold
+    anomalous     — Mahalanobis > threshold (any sub-type)
+    regime_change — transition into/out of anomalous regime
+    Metadata columns (has_interfreq_divergence, above_freezing) still computed.
 
 Usage:
     python scripts/classifier_v3.py --station ROSS --years 2020-2024
-    python scripts/classifier_v3.py --station ROSS --years 2020-2024 --skip_era5
+    python scripts/classifier_v3.py --station GLBX --years 2023-2024
 """
 
 import argparse
@@ -38,6 +46,18 @@ CONFIG_PATH = PROJECT_ROOT / "config" / "stations_config.json"
 def load_station_config(station):
     with open(CONFIG_PATH) as f:
         return json.load(f).get(station, {})
+
+
+def get_classification_mode(cfg):
+    """Determine classification mode from station config.
+
+    Returns "validated" if classification.validated is True and use_case is set,
+    otherwise "discovery".
+    """
+    cls_cfg = cfg.get("classification", {})
+    if cls_cfg.get("validated", False) and cls_cfg.get("use_case"):
+        return "validated"
+    return "discovery"
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +122,8 @@ def load_v1(station, year):
 # ---------------------------------------------------------------------------
 
 def classify_v3(v2_df, interfreq_df=None, era5_df=None,
-                rh_diff_threshold=0.3, freeze_temp=0.0):
+                rh_diff_threshold=0.3, freeze_temp=0.0,
+                classification_mode="discovery"):
     """Apply v3 sub-state labels on top of v2 results.
 
     Args:
@@ -111,10 +132,11 @@ def classify_v3(v2_df, interfreq_df=None, era5_df=None,
         era5_df: daily ERA5 temperature (optional)
         rh_diff_threshold: |ΔRH| threshold for ice_layered (meters)
         freeze_temp: temperature below which ice can form (°C).
-                     0.0 for freshwater, -1.8 for seawater.
+        classification_mode: "validated" for ice vocabulary, "discovery" for
+                             generic baseline/anomalous labels.
 
     Returns:
-        DataFrame with v3_state and supporting columns added.
+        DataFrame with v3_state, metadata columns, and classification_mode.
     """
     df = v2_df.copy()
 
@@ -131,6 +153,13 @@ def classify_v3(v2_df, interfreq_df=None, era5_df=None,
         df["t2m_mean"] = np.nan
         df["t2m_min"] = np.nan
 
+    # --- Compute metadata flags (always, regardless of mode) ---
+    df["has_interfreq_divergence"] = df["rh_diff_median"].abs() >= rh_diff_threshold
+    df["above_freezing"] = df["t2m_mean"] > freeze_temp
+    # NaN → False for boolean columns
+    df["has_interfreq_divergence"] = df["has_interfreq_divergence"].fillna(False)
+    df["above_freezing"] = df["above_freezing"].fillna(False)
+
     # --- Apply v3 sub-state logic ---
     v3_states = []
     for _, row in df.iterrows():
@@ -138,29 +167,36 @@ def classify_v3(v2_df, interfreq_df=None, era5_df=None,
         rh_diff = row.get("rh_diff_median", np.nan)
         t2m = row.get("t2m_mean", np.nan)
 
-        if v2_state == "water":
-            v3_states.append("open_water")
-
-        elif v2_state in ("freeze_up",):
-            v3_states.append("freeze_up")
-
-        elif v2_state in ("break_up",):
-            v3_states.append("break_up")
-
-        elif v2_state == "ice":
-            # Sub-state 1: is the ice decaying (above freezing)?
-            if not np.isnan(t2m) and t2m > freeze_temp:
-                v3_states.append("ice_decaying")
-            # Sub-state 2: layered vs surface (interfrequency)
-            elif not np.isnan(rh_diff) and abs(rh_diff) > rh_diff_threshold:
-                v3_states.append("ice_layered")
+        if classification_mode == "validated":
+            # Full ice vocabulary
+            if v2_state == "water":
+                v3_states.append("open_water")
+            elif v2_state == "freeze_up":
+                v3_states.append("freeze_up")
+            elif v2_state == "break_up":
+                v3_states.append("break_up")
+            elif v2_state == "ice":
+                if not np.isnan(t2m) and t2m > freeze_temp:
+                    v3_states.append("ice_decaying")
+                elif not np.isnan(rh_diff) and abs(rh_diff) > rh_diff_threshold:
+                    v3_states.append("ice_layered")
+                else:
+                    v3_states.append("ice_surface")
             else:
-                v3_states.append("ice_surface")
-
+                v3_states.append(v2_state if pd.notna(v2_state) else "unknown")
         else:
-            v3_states.append(v2_state if pd.notna(v2_state) else "unknown")
+            # Discovery mode — generic labels
+            if v2_state == "water":
+                v3_states.append("baseline")
+            elif v2_state in ("freeze_up", "break_up"):
+                v3_states.append("regime_change")
+            elif v2_state == "ice":
+                v3_states.append("anomalous")
+            else:
+                v3_states.append(v2_state if pd.notna(v2_state) else "unknown")
 
     df["v3_state"] = v3_states
+    df["classification_mode"] = classification_mode
 
     # Retain v2 state for comparison
     df = df.rename(columns={"state": "v2_state"})
@@ -172,14 +208,22 @@ def classify_v3(v2_df, interfreq_df=None, era5_df=None,
 # Main
 # ---------------------------------------------------------------------------
 
+ALL_V3_STATES = ["open_water", "freeze_up", "ice_surface", "ice_layered",
+                 "ice_decaying", "break_up"]
+DISCOVERY_STATES = ["baseline", "anomalous", "regime_change"]
+
+
 def run_station(station, years, skip_era5=False):
     """Run v3 for one station across multiple years."""
     cfg = load_station_config(station)
     freeze_temp = cfg.get("freeze_temp_c", 0.0)
+    mode = get_classification_mode(cfg)
 
     log.info(f"{'=' * 60}")
-    log.info(f"{station}: v3 classification, years={years}, freeze_temp={freeze_temp}°C")
+    log.info(f"{station}: v3 classification, years={years}, "
+             f"mode={mode}, freeze_temp={freeze_temp}°C")
 
+    state_labels = ALL_V3_STATES if mode == "validated" else DISCOVERY_STATES
     all_results = []
 
     for year in years:
@@ -192,7 +236,8 @@ def run_station(station, years, skip_era5=False):
         era5 = load_era5(station, year) if not skip_era5 else None
         v1 = load_v1(station, year)
 
-        v3 = classify_v3(v2, interfreq, era5, freeze_temp=freeze_temp)
+        v3 = classify_v3(v2, interfreq, era5, freeze_temp=freeze_temp,
+                         classification_mode=mode)
 
         # Add v1 for comparison
         if v1 is not None:
@@ -206,20 +251,19 @@ def run_station(station, years, skip_era5=False):
         state_counts = v3["v3_state"].value_counts()
         total = len(v3)
 
-        log.info(f"  {year}: {total} days → {state_counts.to_dict()}")
+        log.info(f"  {year}: {total} days [{mode}] → {state_counts.to_dict()}")
 
         all_results.append({
             "station": station, "year": year, "n_days": total,
-            **{f"n_{s}": state_counts.get(s, 0) for s in
-               ["open_water", "freeze_up", "ice_surface", "ice_layered",
-                "ice_decaying", "break_up"]},
+            "classification_mode": mode,
+            **{f"n_{s}": state_counts.get(s, 0) for s in state_labels},
         })
 
     return pd.DataFrame(all_results) if all_results else None
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ice Classifier v3")
+    parser = argparse.ArgumentParser(description="Classifier v3")
     parser.add_argument("--station", required=True)
     parser.add_argument("--years", required=True, help="e.g. 2020-2024")
     parser.add_argument("--skip_era5", action="store_true",
@@ -246,14 +290,14 @@ def main():
     results = run_station(args.station, years, skip_era5=args.skip_era5)
 
     if results is not None and len(results) > 0:
+        mode = results["classification_mode"].iloc[0]
+        state_cols = [c for c in results.columns if c.startswith("n_") and c != "n_days"]
         print(f"\n{'=' * 70}")
-        print(f"V3 SUMMARY: {args.station}")
+        print(f"V3 SUMMARY: {args.station} [{mode}]")
         print(f"{'=' * 70}")
         print(results.to_string(index=False))
 
-        # Totals
-        totals = results[["n_open_water", "n_freeze_up", "n_ice_surface",
-                          "n_ice_layered", "n_ice_decaying", "n_break_up"]].sum()
+        totals = results[state_cols].sum()
         total = totals.sum()
         print(f"\nAcross all years ({total} days):")
         for state, count in totals.items():

@@ -40,6 +40,13 @@
       "ndbc_buoys": {
         "enabled": false
       }
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "UMNQ": {
@@ -69,6 +76,22 @@
       "target_usgs_site": null,
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": [],
+      "mahal_features": {
+        "amp_mean":  "winter_high",
+        "rh_std":    "winter_high",
+        "af_med":    "winter_high",
+        "gamma_med": "winter_high",
+        "pr_med":    "winter_high",
+        "p2n_mean":  "winter_high",
+        "_notes": "clr_med excluded: d=0.057 at 70.7N (geometry-driven — all sats in narrow elevation band, CLR structurally high for both states). af_z excluded: r=0.991 with af_med post-baseline-correction."
+      }
     }
   },
   "NKAR": {
@@ -115,6 +138,13 @@
         "datum": "Relative (pressure gauge)",
         "notes": "UHSLC station 820, Nuuk harbour. Fast delivery hourly data, 2014-07 to present. Sea level in mm, converted to m via units_scale."
       }
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "GLBX": {
@@ -187,6 +217,23 @@
         "notes": "Co-located ERDDAP water level station from AOOS (Alaska Ocean Observing System). Much closer than USGS (8.6km) or CO-OPS (39.4km)"
       },
       "last_updated": "2025-06-02T10:48:01.914496"
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": [],
+      "mahal_features": {
+        "amp_mean":  "winter_low",
+        "rh_std":    "winter_high",
+        "clr_med":   "winter_low",
+        "af_med":    "winter_low",
+        "gamma_med": "winter_high",
+        "pr_med":    "winter_low",
+        "p2n_mean":  "winter_high",
+        "_notes": "Tidal station (M2 confirmed, LS power=0.74). Anomalous periods are seasonal (Jan-Apr, amp_mean 22 vs 34 in summer) not ice. amp/clr/af/pr all winter_low — inverted from Great Lakes. Mahalanobis still detects seasonal departure correctly (sign-agnostic). Polarity annotations flag the inversion for validation checks."
+      }
     }
   },
   "DESO": {
@@ -207,6 +254,13 @@
       "target_usgs_site": null,
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "VALR": {
@@ -259,6 +313,13 @@
       "ndbc_buoys": {
         "enabled": false
       }
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "MDAI": {
@@ -297,6 +358,13 @@
       "ndbc_buoys": {
         "enabled": false
       }
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "KEFJ": {
@@ -335,6 +403,13 @@
       "ndbc_buoys": {
         "enabled": false
       }
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "NIAQ": {
@@ -386,6 +461,13 @@
         "datum": "Relative (pressure gauge)",
         "notes": "UHSLC station 817, Upernavik harbour. Fast delivery hourly data, 2024-08 to present. Sea level in mm, converted to m via units_scale. 238 km from NIAQ \u2014 nearest tide gauge with continuous observations."
       }
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "LRSK": {
@@ -407,6 +489,13 @@
       "target_usgs_site": null,
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
+    },
+    "classification": {
+      "validated": false,
+      "use_case": null,
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": []
     }
   },
   "CBRG": {
@@ -435,6 +524,53 @@
       "ndbc_buoy_name": "Rochester Buoy (Lake Ontario)",
       "ndbc_distance_km": 71,
       "freezing_point_c": 0.0
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02HD015",
+        "station_name": "Lake Ontario at Cobourg",
+        "distance_km": 1,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Lake Ontario"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9052058",
+          "9052000"
+        ],
+        "nearest_station": {
+          "id": "9052058",
+          "name": "Rochester",
+          "distance_km": 88,
+          "latitude": 43.269,
+          "longitude": -77.626
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 7870,
+        "climate_id": "6151684",
+        "station_name": "Cobourg (AUT)",
+        "distance_km": 1,
+        "latitude": 43.95,
+        "longitude": -78.17
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 3.0,
+      "threshold_source": "default",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "CLWD": {
@@ -485,6 +621,52 @@
       "amp": {
         "weight": 1.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02ED012",
+        "station_name": "Lake Huron at Collingwood",
+        "distance_km": 1,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Georgian Bay"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9075065"
+        ],
+        "nearest_station": {
+          "id": "9075065",
+          "name": "Alpena",
+          "distance_km": 261,
+          "latitude": 45.063,
+          "longitude": -83.429
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 10955,
+        "climate_id": "6111792",
+        "station_name": "Collingwood",
+        "distance_km": 1,
+        "latitude": 44.5,
+        "longitude": -80.22
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 4.29,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "GOD2": {
@@ -527,6 +709,52 @@
       "amp": {
         "weight": 2.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02FE012",
+        "station_name": "Lake Huron at Goderich",
+        "distance_km": 1,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Lake Huron"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9014098"
+        ],
+        "nearest_station": {
+          "id": "9014098",
+          "name": "Fort Gratiot",
+          "distance_km": 99,
+          "latitude": 43.007,
+          "longitude": -82.423
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 7747,
+        "climate_id": "6122847",
+        "station_name": "Goderich",
+        "distance_km": 1,
+        "latitude": 43.77,
+        "longitude": -81.72
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 3.46,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "KNGV": {
@@ -569,6 +797,53 @@
       "amp": {
         "weight": 2.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02GH010",
+        "station_name": "Lake Erie at Kingsville",
+        "distance_km": 1,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Lake Erie"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9063079",
+          "9063085"
+        ],
+        "nearest_station": {
+          "id": "9063079",
+          "name": "Marblehead",
+          "distance_km": 54,
+          "latitude": 41.544,
+          "longitude": -82.731
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 4647,
+        "climate_id": "6134190",
+        "station_name": "Kingsville MOE",
+        "distance_km": 5,
+        "latitude": 42.04,
+        "longitude": -82.67
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 3.0,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "MCHN": {
@@ -619,6 +894,58 @@
       "amp": {
         "weight": 2.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02BD004",
+        "station_name": "Lake Superior at Michipicoten Harbour",
+        "distance_km": 0.5,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Lake Superior"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9099004"
+        ],
+        "nearest_station": {
+          "id": "9099004",
+          "name": "Point Iroquois",
+          "distance_km": 165,
+          "latitude": 46.484,
+          "longitude": -84.631
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 52998,
+        "climate_id": "6059413",
+        "station_name": "Wawa A",
+        "distance_km": 12,
+        "latitude": 47.97,
+        "longitude": -84.79,
+        "secondary": {
+          "station_id": 51958,
+          "climate_id": "6054425",
+          "station_name": "Lake Superior Provincial Park",
+          "distance_km": 28
+        }
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 4.4,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "PARY": {
@@ -667,6 +994,52 @@
       "amp": {
         "weight": 2.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02EA014",
+        "station_name": "Lake Huron at Parry Sound",
+        "distance_km": 0.5,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Georgian Bay"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9075065"
+        ],
+        "nearest_station": {
+          "id": "9075065",
+          "name": "Alpena",
+          "distance_km": 268,
+          "latitude": 45.063,
+          "longitude": -83.429
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 32128,
+        "climate_id": "6116257",
+        "station_name": "Parry Sound CCG",
+        "distance_km": 0.5,
+        "latitude": 45.34,
+        "longitude": -80.04
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 3.17,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "PSTA": {
@@ -709,6 +1082,54 @@
       "amp": {
         "weight": 2.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02GC027",
+        "station_name": "Lake Erie at Port Stanley",
+        "distance_km": 0.5,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Lake Erie"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9063038",
+          "9063063"
+        ],
+        "nearest_station": {
+          "id": "9063038",
+          "name": "Erie, PA",
+          "distance_km": 109,
+          "latitude": 42.154,
+          "longitude": -80.076
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 50093,
+        "climate_id": "6144473",
+        "station_name": "London A",
+        "distance_km": 40,
+        "latitude": 43.03,
+        "longitude": -81.15,
+        "notes": "Port Stanley EC station (4677) ended 1993; London A is nearest active"
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 3.77,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "PWEL": {
@@ -757,6 +1178,52 @@
       "amp": {
         "weight": 1.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02HA018",
+        "station_name": "Lake Ontario at Port Weller",
+        "distance_km": 1,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Lake Ontario"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9052058"
+        ],
+        "nearest_station": {
+          "id": "9052058",
+          "name": "Rochester",
+          "distance_km": 129,
+          "latitude": 43.269,
+          "longitude": -77.626
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 7790,
+        "climate_id": "6136699",
+        "station_name": "Port Weller (AUT)",
+        "distance_km": 0.5,
+        "latitude": 43.25,
+        "longitude": -79.22
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 2.66,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   },
   "ROSS": {
@@ -810,6 +1277,63 @@
       "ndbc_buoy_name": "Passage Island MI",
       "ndbc_distance_km": 52,
       "freezing_point_c": 0.0
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02BA004",
+        "station_name": "Lake Superior at Rossport",
+        "distance_km": 0.5,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge on Lake Superior"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9099018",
+          "9099064"
+        ],
+        "nearest_station": {
+          "id": "9099018",
+          "name": "Marquette C.G.",
+          "distance_km": 260,
+          "latitude": 46.546,
+          "longitude": -87.379
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 50132,
+        "climate_id": "6048262",
+        "station_name": "Thunder Bay A",
+        "distance_km": 50,
+        "latitude": 48.37,
+        "longitude": -89.32
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 19.84,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ],
+      "mahal_features": {
+        "amp_mean":  "winter_high",
+        "rh_std":    "winter_high",
+        "clr_med":   "winter_high",
+        "af_med":    "winter_high",
+        "gamma_med": "winter_high",
+        "pr_med":    "winter_high",
+        "p2n_mean":  "winter_high",
+        "_notes": "Full DEFAULT_FEATURES. All features confirmed discriminating (Cohen d > 0.7). gamma, clr, pr inverted from naive expectation per feature_overrides — but Mahalanobis distance is sign-agnostic so no changes needed here."
+      }
     }
   },
   "TOBY": {
@@ -859,6 +1383,52 @@
       "amp": {
         "weight": 1.0
       }
+    },
+    "external_data_sources": {
+      "hydat": {
+        "enabled": true,
+        "primary_reference": true,
+        "station_id": "02FA003",
+        "station_name": "Lake Huron at Tobermory",
+        "distance_km": 1,
+        "datum": "IGLD85",
+        "notes": "Co-located HYDAT gauge at Tobermory harbour"
+      },
+      "noaa_coops": {
+        "enabled": true,
+        "preferred_stations": [
+          "9075065"
+        ],
+        "nearest_station": {
+          "id": "9075065",
+          "name": "Alpena",
+          "distance_km": 140,
+          "latitude": 45.063,
+          "longitude": -83.429
+        },
+        "data_products": [
+          "water_level"
+        ],
+        "datum": "IGLD85"
+      },
+      "ec_climate": {
+        "enabled": true,
+        "station_id": 45607,
+        "climate_id": "6128330",
+        "station_name": "Tobermory RCS",
+        "distance_km": 3,
+        "latitude": 45.23,
+        "longitude": -81.63
+      }
+    },
+    "classification": {
+      "validated": true,
+      "use_case": "ice",
+      "threshold": 2.81,
+      "threshold_source": "glerl_optimized",
+      "validated_against": [
+        "GLERL"
+      ]
     }
   }
 }
