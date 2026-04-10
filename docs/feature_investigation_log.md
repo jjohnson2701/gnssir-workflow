@@ -912,3 +912,135 @@ Both the L1 amplitude decoupling and the gamma_r2 sign inversion onset at the sa
 L5 is flat or slightly elevated in winter (40–46) vs summer (41–42). L1 collapses to 8–10 in winter vs 29–31 in summer. E6 is flat at 57–59 year-round. The pooled amp_mean (21–29 in winter) faithfully tracks the L1 suppression because L1 arcs dominate by count. Frequency-split columns are now in the feature table and ready for use in classifier config.
 
 **Implication for C7 implementation:** The bias-correction motivation applies only to GLBX. The GLBX `mahal_features` config should replace `amp_mean` with `amp_L5_mean` and switch its polarity from `"winter_low"` to `"winter_high"`. At UMNQ, `amp_L1_mean` is the preferred amplitude feature for season-aware classification, particularly in the autumn window — the pooled amp_mean under-uses the available L1 sensitivity during freeze-up.
+
+---
+
+## Part 3: Literature Cross-Validation (2026-04-08)
+
+Systematic comparison of our implementation against Strandberg 2017, Song 2022, and Purnell 2024.
+Tested five hypotheses derived from gaps between our pipeline and the published methods.
+Data: UMNQ 2025 (62,079 arcs), ROSS 2024 (8,261 arcs), GLBX 2024.
+
+### C10. γ_rel Reference-Period Normalization (Strandberg 2017)
+
+**Hypothesis:** Strandberg's γ_rel = γ / γ_ice_free cancels antenna gain and local geometry, making γ comparable across sites. Our absolute γ is site-dependent — does normalizing recover discriminability at ROSS?
+
+**Result: γ_rel does not improve Cohen's d.** Dividing every arc's γ by a global scalar (the ice-free median) rescales both the mean difference and the pooled SD identically, so d is mathematically invariant. To make Strandberg's approach useful, you would need per-arc or per-azimuth normalization, not a global divisor.
+
+**Gamma polarity across stations:**
+- Both ROSS and UMNQ show γ **decreasing** during ice — same direction, no inversion
+- ROSS: γ drops 96% (0.0013 → 0.0000), d = 1.40 — strong
+- UMNQ: γ drops 4% (0.0046 → 0.0044), d = 0.04 — negligible
+
+**Implication:** Strandberg's γ_rel worked because their 72-hour pooled NLLS reduced noise enough for the normalized value to be meaningful. Our per-arc γ is too noisy for a simple ratio to help. γ_r2 gating is a better approach than normalization for per-arc extraction.
+
+---
+
+### C11. AF Polarity Disagreement (Purnell 2024 §VIII.C)
+
+**Hypothesis:** Purnell noted AF increases during open water at river sites, opposite to Song's finding at TUKT. Do ROSS and UMNQ agree on AF polarity?
+
+**Result: AF polarity is inverted between stations.**
+- ROSS: AF drops 91% during ice (16,505 → 1,429), d = 1.59 — ice destroys amplitude
+- UMNQ: AF **increases** 37% during ice (7,145 → 9,795), d = −0.19 — ice enhances amplitude
+
+This matches Purnell's finding exactly. The direction of the AF response to ice is site/ice-type dependent:
+- Great Lakes rough freshwater ice (ROSS): scatters signal → AF drops
+- Arctic sea ice (UMNQ): smoother specular reflection → AF rises
+
+**Implication:** The classifier already handles this via Cohen's d sign (feature polarity is learned per station). But AF cannot be used as a universal ice indicator without station-specific calibration. Cross-station transfer learning for AF would require polarity awareness.
+
+Additional UMNQ AF monthly pattern: very high AF in Mar–Apr (~39,000), drops to ~7,000 in summer, climbs to ~13,000 in December. The spring spike may reflect snow/ice melt dynamics.
+
+---
+
+### C12. Per-PRN Systematic Biases (Purnell 2024 Table II)
+
+**Hypothesis:** Purnell found per-satellite normalization improved accuracy ~4%. Are there systematic per-PRN biases in our CLR/amplitude that daily median pooling averages over?
+
+**Result: PRN bias is real, magnitude is feature-dependent.**
+
+| Feature | ICC (variance from PRN identity) | Interpretation |
+|---------|----------------------------------|----------------|
+| CLR     | 11.5%                            | Modest — most variance is surface state |
+| PkNoise | 13.4%                           | Similar to CLR |
+| Amp/SP  | ~33%                             | Substantial — 1/3 of variance is "which PRN" |
+| MS      | **87.8%**                        | Almost entirely PRN-determined (geometry) |
+| VS      | 42.1%                            | Large PRN effect |
+
+Per-PRN median CLR ranges from 6.09 to 12.52 (2x range). The bias is partially persistent across seasons (summer↔winter correlation r = 0.41) but partially state-dependent.
+
+**Key finding: PRNs differ dramatically in state-discriminating power.** Per-PRN Cohen's d for CLR ranges from ~0 to 2.87. 25.8% of PRNs have |d| > 0.5 (medium effect); 10.7% have |d| > 0.8 (large effect). Some PRNs are excellent surface-state sensors; others contribute noise.
+
+**Implication:** Simple per-PRN z-score normalization is warranted for Amp/SP (ICC ~33%) and beneficial for CLR (ICC ~11%). But the heterogeneous discriminating power suggests a weighting scheme (inverse noise or by |d|) would be more effective than uniform normalization.
+
+---
+
+### C13. γ_r2 as Surface Complexity Proxy (Song 2022)
+
+**Hypothesis:** Song found damping had "limited utility in multilayer surface" (snow-on-ice). If γ_r2 systematically drops during snow-on-ice periods, it would be a proxy for surface layer count — more than just a quality gate.
+
+**Result: Hypothesis rejected. γ_r2 behaves opposite to prediction.**
+
+UMNQ monthly γ_r2:
+
+| Surface state | Months | Median γ_r2 |
+|---------------|--------|-------------|
+| Snow-on-ice   | Jan–Apr | **0.199** (highest) |
+| Transition    | May, Sep–Oct | 0.122 |
+| Open water    | Jun–Aug | 0.112 |
+| Clean ice     | Nov–Dec | **0.093** (lowest) |
+
+All differences are highly significant (Mann-Whitney p < 10^-170). Snow-on-ice has the **best** Strandberg model fits, not the worst.
+
+ROSS: universally near zero (overall median = 0.000, 78% of arcs below 0.1), but the same pattern holds — ice-covered months (Feb–Mar, median 0.096) fit better than ice-free (Jun–Sep, median 0.000).
+
+**Revised interpretation:** γ_r2 measures **surface coherence** (how specular/flat the reflecting surface is), not surface complexity. Calm ice/snow produces a clean exponential envelope decay (high R²). Rough open water produces noisy interference that the model cannot fit (low R²). This is consistent with Song's finding — the damping model fails for rough/complex surfaces — but the mechanism is about specularity, not layer count.
+
+Arc-level correlation between γ and γ_r2 at UMNQ: Spearman ρ = 0.77 (substantially correlated but carries independent information). At ROSS: Pearson r = 0.94 (tightly coupled, γ_r2 adds little beyond γ).
+
+**Implication:** Reframe γ_r2 from "quality gate on γ" to "surface coherence metric." It is informative about surface state in its own right, but its meaning is "how specular is the surface" rather than "how trustworthy is γ."
+
+---
+
+### C14. Per-Constellation×Frequency Normalization (Strandberg 2017)
+
+**Hypothesis:** Strandberg normalized amplitude per (constellation × frequency) because it is frequency-dependent. Our AF is baseline-subtracted per-PRN, but other features are not. Does per-combo normalization improve discrimination?
+
+**Result: Feature-dependent — one major win.**
+
+UMNQ ice-free median AF spans 4.7x across (constellation, freq) combos (3,074 to 14,590). Yet only 15.5% of ice-free AF variance is from combo identity (ANOVA η²). Seasonal arc composition is nearly identical between ice-free and winter, so daily median is not biased by composition shifts.
+
+Impact of per-(constellation, freq) z-scoring on Cohen's d:
+
+| Feature | Daily d (raw) | Daily d (z-scored) | Change |
+|---------|---------------|--------------------|---------| 
+| AF      | 1.73          | 1.63               | −6% (no help — already baseline-subtracted) |
+| SP      | 0.86          | 0.89               | +5% (minor) |
+| **MS**  | **0.19**      | **1.04**           | **+457%** (transforms useless → strong) |
+
+**MS is the headline finding.** Raw pooled daily MS has near-zero discrimination because per-combo baselines (antenna gain patterns at different frequencies/elevations) swamp the temporal signal. After per-combo z-scoring, MS becomes a strong discriminator comparable to AF. This makes physical sense: MS is mean SNR in dB, which is dominated by satellite geometry and antenna gain unless you remove the per-combo baseline.
+
+**GLBX:** Per-freq normalization changes the daily signal substantially (r = 0.42 between raw and z-scored daily AF, vs r = 0.996 at UMNQ). L1 and L5 AF are anti-correlated (r = −0.39). Normalizing would mask the physically meaningful L1/L5 differential response.
+
+Best-discriminating combos at UMNQ: GPS L5 (d = 1.19), GPS L2C (d = 1.16), GPS L1 (d = 1.15). Weakest: GLONASS G1 (d = 0.57).
+
+**Implication:**
+1. **Add MS to z-score normalization** — per-(constellation, freq) z-scoring using ice-free reference, then aggregate. This is the single highest-value change from the literature comparison.
+2. Leave AF un-normalized at the daily level (already per-PRN baseline-subtracted).
+3. At GLBX, preserve frequency-separated features; do not z-score AF across frequencies.
+4. The L1/L5 AF ratio at GLBX is a candidate new feature (frequency-dependent scattering).
+
+---
+
+### Summary: Literature Gap Analysis
+
+| Test | Source | Finding | Action |
+|------|--------|---------|--------|
+| C10: γ_rel | Strandberg | Global scalar normalization cannot improve d | None — γ_r2 gating is better |
+| C11: AF polarity | Purnell | Inverted between ROSS and UMNQ | Classifier already handles via d sign |
+| C12: Per-PRN bias | Purnell | ICC 11–33% depending on feature; PRN discriminating power varies 0–2.9 | Add per-PRN z-score for MS; consider PRN weighting |
+| C13: γ_r2 meaning | Song | Surface coherence metric, not complexity proxy; ice > water | Reframe from quality gate to coherence feature |
+| C14: Per-combo MS | Strandberg | MS d jumps 0.19 → 1.04 with per-combo z-scoring | **Implement immediately** — add MS to `_ZSCORE_FEATURES` |
+
+Figures for C10–C14: generated by `scripts/plot_investigation_figures.py` (Stories 1–5) and ad-hoc analysis scripts (not yet persisted as figures).

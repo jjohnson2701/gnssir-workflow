@@ -35,13 +35,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 logger = logging.getLogger(__name__)
 
 # SNR feature columns eligible for z-score normalization
-_ZSCORE_FEATURES = ["CLR", "AF", "PR", "gamma"]
+# MS added per C14 finding: per-(sat, freq) z-scoring transforms MS from
+# d=0.19 to d=1.04 by removing antenna gain / geometry baselines.
+_ZSCORE_FEATURES = ["CLR", "AF", "PR", "gamma", "MS"]
 
 # SNR feature columns to compute medians for (raw + z-scored)
 _SNR_FEATURE_COLS = ["CLR", "PR", "AF", "gamma", "MS", "VS"]
 
 # Minimum arcs per satellite to compute z-score reference stats
 _MIN_REF_ARCS = 10
+
+# PRN weight column name prefix (added to arc_table when weights are loaded)
+_WEIGHT_PREFIX = "_w_"
 
 
 # ---------------------------------------------------------------------------
@@ -64,18 +69,23 @@ def _load_station_config(station):
 
 def normalize_features_per_satellite(arc_table, feature_cols=None,
                                      ice_free_months=None):
-    """Z-score normalize SNR features per satellite PRN.
+    """Z-score normalize SNR features per (satellite PRN, frequency) combo.
 
-    For each feature, compute mean and std per satellite from ice-free
+    For each feature, compute mean and std per (sat, freq) from ice-free
     months (or full year if not specified), then apply (value - mean) / std.
-    Writes new columns with '_z' suffix (e.g., CLR_z, AF_z).
+    Writes new columns with '_z' suffix (e.g., CLR_z, AF_z, MS_z).
 
-    Satellites only seen during ice months fall back to full-year stats.
-    Satellites with < 10 reference arcs are left un-normalized (NaN in _z column).
+    Per-(sat, freq) grouping is more physically correct than per-sat alone
+    because each observation is on a specific frequency with its own antenna
+    gain pattern and baseline SNR (Strandberg 2017, Purnell 2024). This is
+    essential for MS where 87.8% of variance is from PRN/freq identity (C12/C14).
+
+    Combos only seen during ice months fall back to full-year stats.
+    Combos with < 10 reference arcs are left un-normalized (NaN in _z column).
 
     Args:
-        arc_table: DataFrame with per-arc data (must have 'date', 'sat' columns)
-        feature_cols: list of column names to normalize (default: CLR, AF, PR, gamma)
+        arc_table: DataFrame with per-arc data (must have 'date', 'sat', 'freq' columns)
+        feature_cols: list of column names to normalize (default: _ZSCORE_FEATURES)
         ice_free_months: list of month ints for reference period, or None for full year
 
     Returns:
@@ -86,6 +96,10 @@ def normalize_features_per_satellite(arc_table, feature_cols=None,
 
     if not feature_cols:
         return arc_table
+
+    # Use (sat, freq) grouping if freq column exists, else fall back to sat only
+    has_freq = "freq" in arc_table.columns
+    group_cols = ["sat", "freq"] if has_freq else ["sat"]
 
     # Compute month for filtering
     months = pd.to_datetime(arc_table["date"]).dt.month
@@ -103,28 +117,33 @@ def normalize_features_per_satellite(arc_table, feature_cols=None,
         z_col = f"{col}_z"
         arc_table[z_col] = np.nan
 
-        sat_stats = ref_data.groupby("sat")[col].agg(["mean", "std", "count"])
+        combo_stats = ref_data.groupby(group_cols)[col].agg(["mean", "std", "count"])
 
-        # Fall back to full-year stats for satellites only seen during ice months
+        # Fall back to full-year stats for combos only seen during ice months
         if ice_free_months:
-            all_sats = arc_table["sat"].unique()
-            missing_sats = set(all_sats) - set(sat_stats.index)
-            if missing_sats:
-                fallback = arc_table.groupby("sat")[col].agg(
+            all_combos = set(arc_table.groupby(group_cols).groups.keys())
+            ref_combos = set(combo_stats.index)
+            missing_combos = all_combos - ref_combos
+            if missing_combos:
+                fallback = arc_table.groupby(group_cols)[col].agg(
                     ["mean", "std", "count"]
                 )
-                for sat in missing_sats:
-                    if sat in fallback.index:
-                        sat_stats.loc[sat] = fallback.loc[sat]
+                for combo in missing_combos:
+                    if combo in fallback.index:
+                        combo_stats.loc[combo] = fallback.loc[combo]
                         logger.debug(
-                            f"Satellite {sat}: no ice-free data for {col}, "
+                            f"Combo {combo}: no ice-free data for {col}, "
                             f"using full-year stats"
                         )
 
         normalized = 0
         skipped = 0
-        for sat, row in sat_stats.iterrows():
-            mask = arc_table["sat"] == sat
+        for combo, row in combo_stats.iterrows():
+            if has_freq:
+                sat, freq = combo
+                mask = (arc_table["sat"] == sat) & (arc_table["freq"] == freq)
+            else:
+                mask = arc_table["sat"] == combo
             if row["count"] < _MIN_REF_ARCS:
                 skipped += 1
                 continue
@@ -137,11 +156,104 @@ def normalize_features_per_satellite(arc_table, feature_cols=None,
             normalized += 1
 
         logger.debug(
-            f"Z-score {col}: {normalized} satellites normalized, "
+            f"Z-score {col}: {normalized} (sat, freq) combos normalized, "
             f"{skipped} skipped (<{_MIN_REF_ARCS} arcs)"
         )
 
     return arc_table
+
+
+# ---------------------------------------------------------------------------
+# PRN discriminating-power weights (C12/C14)
+# ---------------------------------------------------------------------------
+
+def load_prn_weights(station, year, results_dir=None):
+    """Load per-(sat, freq) weights from compute_prn_weights.py output.
+
+    Adds weight columns (_w_CLR, _w_AF, etc.) to use during aggregation.
+
+    Args:
+        station: station ID
+        year: processing year
+        results_dir: override for results directory
+
+    Returns:
+        dict mapping feature -> {(sat, freq) -> weight}, or None if not found.
+    """
+    if results_dir is None:
+        results_dir = PROJECT_ROOT / "results_annual" / station
+    path = Path(results_dir) / f"{station}_{year}_prn_weights.json"
+    if not path.exists():
+        return None
+
+    import json as _json
+    with open(path) as f:
+        data = _json.load(f)
+
+    weights = {}
+    for feature, combo_weights in data.get("features", {}).items():
+        feature_map = {}
+        for key, info in combo_weights.items():
+            sat_str, freq_str = key.split("_", 1)
+            feature_map[(int(sat_str), int(freq_str))] = info.get("weight", 0.0)
+        weights[feature] = feature_map
+
+    return weights
+
+
+def attach_prn_weights(arc_table, weights):
+    """Add per-arc weight columns to the arc_table for weighted aggregation.
+
+    For each feature, creates a column _w_{feature} with the |d| weight for
+    that arc's (sat, freq) combo.  Arcs with no weight entry get weight 0.
+
+    Args:
+        arc_table: DataFrame with 'sat' and 'freq' columns
+        weights: dict from load_prn_weights()
+
+    Returns:
+        arc_table with added weight columns (modified in place).
+    """
+    for feature, combo_map in weights.items():
+        w_col = f"{_WEIGHT_PREFIX}{feature}"
+        # Vectorized: build a Series from the (sat, freq) tuples
+        keys = list(zip(arc_table["sat"].values, arc_table["freq"].values))
+        arc_table[w_col] = [combo_map.get(k, 0.0) for k in keys]
+
+    return arc_table
+
+
+def _weighted_median(values, weights):
+    """Compute weighted median.
+
+    Args:
+        values: array-like of values
+        weights: array-like of non-negative weights (same length)
+
+    Returns:
+        Weighted median, or NaN if no valid data.
+    """
+    vals = np.asarray(values, dtype=float)
+    wts = np.asarray(weights, dtype=float)
+
+    # Drop NaN values and zero weights
+    valid = np.isfinite(vals) & np.isfinite(wts) & (wts > 0)
+    if valid.sum() == 0:
+        return np.nan
+
+    vals = vals[valid]
+    wts = wts[valid]
+
+    # Sort by value
+    sort_idx = np.argsort(vals)
+    vals = vals[sort_idx]
+    wts = wts[sort_idx]
+
+    # Cumulative weight, find 50th percentile
+    cum_weight = np.cumsum(wts)
+    half = cum_weight[-1] / 2.0
+    idx = np.searchsorted(cum_weight, half)
+    return float(vals[min(idx, len(vals) - 1)])
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +416,18 @@ def _aggregate_sector(sector_arcs, has_snr, has_phase, has_zscore):
                 vals = sector_arcs[z_col].dropna()
                 row[f"{col.lower()}_z"] = float(vals.median()) if len(vals) > 0 else np.nan
 
+    # SNR feature weighted medians (PRN discriminating-power weights, C12)
+    # Only produced when prn_weights have been computed and attached.
+    if has_snr:
+        for col in _SNR_FEATURE_COLS:
+            w_col = f"{_WEIGHT_PREFIX}{col}"
+            if col in sector_arcs.columns and w_col in sector_arcs.columns:
+                wmed = _weighted_median(
+                    sector_arcs[col].values,
+                    sector_arcs[w_col].values,
+                )
+                row[f"{col.lower()}_wmed"] = wmed
+
     # Phase circular stats
     if has_phase and "phase" in sector_arcs.columns:
         phase_vals = sector_arcs["phase"].dropna()
@@ -342,6 +466,16 @@ def _aggregate_sector(sector_arcs, has_snr, has_phase, has_zscore):
             row[f"rh_{band}_count"] = len(band_arcs)
             if len(band_arcs) >= 2:
                 row[f"amp_{band}_mean"] = float(band_arcs["Amp"].mean())
+
+        # Frequency amplitude ratios (C14: L1/L5 anti-correlated at GLBX, r=-0.39)
+        # Captures frequency-dependent scattering that pooled amp_mean hides.
+        amp_L1 = row.get("amp_L1_mean")
+        amp_L5 = row.get("amp_L5_mean")
+        if amp_L1 is not None and amp_L5 is not None and amp_L5 > 0:
+            row["amp_ratio_L1_L5"] = float(amp_L1 / amp_L5)
+        amp_L2C = row.get("amp_L2C_mean")
+        if amp_L1 is not None and amp_L2C is not None and amp_L2C > 0:
+            row["amp_ratio_L1_L2C"] = float(amp_L1 / amp_L2C)
 
     return row
 
@@ -405,6 +539,14 @@ def aggregate_daily_features(station, year, results_dir=None):
         if has_zscore:
             logger.info(f"Z-score normalization applied "
                         f"(ice_free_months={ice_free_months})")
+
+    # PRN discriminating-power weights (optional — requires compute_prn_weights.py)
+    prn_weights = load_prn_weights(station, year, results_dir)
+    if prn_weights is not None:
+        attach_prn_weights(arc_table, prn_weights)
+        logger.info(f"PRN weights loaded: {list(prn_weights.keys())}")
+    else:
+        logger.debug("No PRN weights found — weighted medians will be skipped")
 
     # Group by (date, azimuth_bin) and aggregate
     dates = sorted(arc_table["date"].unique())

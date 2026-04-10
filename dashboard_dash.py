@@ -194,6 +194,27 @@ def load_cross_station_summary():
     return pd.read_parquet(p)
 
 
+def load_daily_features(station, year):
+    """Load Layer 2 daily features (aggregated from arc_table by feature_aggregator.py)."""
+    p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_daily_features.parquet"
+    if not p.exists():
+        return None
+    df = pd.read_parquet(p)
+    if "date" in df.columns:
+        df["date_dt"] = pd.to_datetime(df["date"])
+        df["doy"] = df["date_dt"].dt.dayofyear
+    return df
+
+
+def load_prn_weights(station, year):
+    """Load per-PRN discriminating power weights JSON (from compute_prn_weights.py)."""
+    p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_prn_weights.json"
+    if not p.exists():
+        return None
+    with open(p) as f:
+        return json.load(f)
+
+
 def list_s1_images(station):
     s1_dir = PROJECT_ROOT / "data" / station / "s1_fresnel"
     if not s1_dir.exists():
@@ -340,19 +361,61 @@ def build_timeseries_figure(per_arc, v3=None, station="", year=0, s1_dates=None)
     return fig
 
 
-def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station="", year=0):
-    """Multi-panel: SNR features + temperature + SMAP, colored by v3 state."""
-    if snr_features is None or v3 is None:
+def build_ice_features_figure(snr_features, v3, era5=None, smap=None,
+                               station="", year=0, daily_features=None):
+    """Multi-panel: SNR features + temperature + SMAP, colored by v3 state.
+
+    If daily_features is provided, uses pre-aggregated best-variant columns
+    from daily_features.parquet. Otherwise falls back to computing daily
+    medians from arc-level snr_features.
+    """
+    if v3 is None:
         return go.Figure().update_layout(title="No data")
 
     mode = _get_mode(v3)
     order = _state_order(mode)
+    v3c = v3[["doy", "v3_state"]].drop_duplicates("doy")
 
-    daily = snr_features.groupby("doy")[["CLR", "AF", "gamma", "VS"]].median().reset_index()
-    v3c = v3[["doy", "v3_state"]].copy()
-    daily = daily.merge(v3c, on="doy", how="left")
+    # --- Determine feature panels ---
+    # Try daily_features (best variants) first, fall back to arc-level
+    use_daily = False
+    if daily_features is not None:
+        pooled = daily_features[daily_features["azimuth_bin"] == -1].copy() if "azimuth_bin" in daily_features.columns else daily_features.copy()
+        if not pooled.empty and "doy" in pooled.columns:
+            pooled = pooled.merge(v3c, on="doy", how="left")
+            use_daily = True
 
-    n_panels = 3
+    if not use_daily:
+        if snr_features is None:
+            return go.Figure().update_layout(title="No data")
+        pooled = snr_features.groupby("doy")[["CLR", "AF", "gamma", "VS"]].median().reset_index()
+        pooled = pooled.merge(v3c, on="doy", how="left")
+
+    # Build panel list: (column_name, y_label)
+    if use_daily:
+        panels = []
+        # Core features in preferred order, using best variant when available
+        panel_candidates = [
+            ("gamma", "gamma_med", "Damping (γ)"),
+            ("VS", "vs_wmed", "SNR Variance (PRN-wt)"),
+            ("AF", "af_wmed", "Area Factor (PRN-wt)"),
+            ("MS", "ms_z", "Mean Spectral Power (z)"),
+            ("CLR", "clr_wmed", "CLR (PRN-wt)"),
+            ("gamma_r2", "gamma_r2_med", "Surface Coherence (γ_r2)"),
+        ]
+        for _base, best_col, label in panel_candidates:
+            if best_col in pooled.columns:
+                panels.append((best_col, label))
+        # Fallback: if no best-variant columns found, use raw arc-level names
+        if not panels:
+            for col in ["gamma", "VS", "AF"]:
+                if col in pooled.columns:
+                    panels.append((col, FEATURE_LABELS.get(col + "_med", col)))
+    else:
+        panels = [("gamma", "Damping (γ)"), ("VS", "SNR Variance"), ("AF", "Area Factor")]
+
+    n_feature_panels = len(panels)
+    n_panels = n_feature_panels
     has_era5 = era5 is not None and "t2m_mean" in era5.columns
     has_smap = smap is not None and "polarization_diff" in smap.columns
     if has_era5:
@@ -364,13 +427,16 @@ def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station=""
                         vertical_spacing=0.03)
 
     row = 1
-    for feat, label in [("gamma", "Damping (γ)"), ("VS", "SNR Variance"), ("AF", "Area Factor")]:
+    for feat_col, label in panels:
+        if feat_col not in pooled.columns:
+            row += 1
+            continue
         for state in order:
-            mask = daily["v3_state"] == state
+            mask = pooled["v3_state"] == state
             if mask.sum() > 0:
-                sub = daily[mask]
+                sub = pooled[mask]
                 fig.add_trace(go.Scatter(
-                    x=sub["doy"], y=sub[feat], mode="markers",
+                    x=sub["doy"], y=sub[feat_col], mode="markers",
                     marker=dict(size=4, color=V3_COLORS.get(state, "#999"), opacity=0.6),
                     name=state, showlegend=(row == 1),
                     legendgroup=state,
@@ -412,6 +478,8 @@ def build_ice_features_figure(snr_features, v3, era5=None, smap=None, station=""
             row += 1
 
     tab_title = "Regime Detection Features" if mode == "discovery" else "Ice Classification Features"
+    if use_daily:
+        tab_title += " (best variants)"
     fig.update_xaxes(title_text="Day of Year", row=n_panels, col=1)
     fig.update_layout(
         title=f"{station} {year}: {tab_title}",
@@ -451,16 +519,178 @@ def _non_baseline_states(mode):
 
 
 FEATURE_LABELS = {
+    # Raw medians
     "amp_mean": "Amplitude", "gamma_med": "Damping γ", "clr_med": "CLR",
-    "af_med": "Area Factor", "pr_med": "Pseudorange", "rh_std": "RH Std",
-    "vs_med": "SNR Variance",
+    "af_med": "Area Factor", "pr_med": "Peak Ratio", "rh_std": "RH Std",
+    "vs_med": "SNR Variance", "ms_med": "Mean Spectral Power",
+    "gamma_r2_med": "Surface Coherence (γ_r2)",
+    # Z-scored
+    "clr_z": "CLR (z-scored)", "af_z": "AF (z-scored)", "pr_z": "PR (z-scored)",
+    "gamma_z": "γ (z-scored)", "ms_z": "MS (z-scored)", "vs_z": "VS (z-scored)",
+    # PRN-weighted medians
+    "clr_wmed": "CLR (PRN-weighted)", "af_wmed": "AF (PRN-weighted)",
+    "pr_wmed": "PR (PRN-weighted)", "gamma_wmed": "γ (PRN-weighted)",
+    "ms_wmed": "MS (PRN-weighted)", "vs_wmed": "VS (PRN-weighted)",
+    # Amplitude ratios
+    "amp_ratio_L1_L5": "Amp ratio L1/L5", "amp_ratio_L1_L2C": "Amp ratio L1/L2C",
+    # Other
+    "delta_rh_mean": "ΔRH mean", "phase_circ_std": "Phase circ. std",
+    "n_arcs": "Arc count", "frac_full_arc": "Full-arc fraction",
 }
+
+# Best normalization variant per feature (from literature review tests, Apr 2026)
+BEST_VARIANT = {
+    "AF": "af_wmed", "MS": "ms_z", "VS": "vs_wmed",
+    "CLR": "clr_wmed", "PR": "pr_wmed", "gamma": "gamma_med",
+    "gamma_r2": "gamma_r2_med", "amp": "amp_mean", "rh_std": "rh_std",
+}
+
 # Majority directions from cross-station analysis (network consensus)
 MAJORITY_DIRECTION = {
     "amp_mean": "winter_high", "gamma_med": "summer_high", "clr_med": "summer_high",
     "af_med": "winter_high", "pr_med": "winter_high", "rh_std": "summer_high",
     "vs_med": "winter_high",
 }
+
+# Feature definitions for the reference panel
+FEATURE_DEFINITIONS = {
+    "CLR": {
+        "name": "Clarity Ratio (CLR)",
+        "source": "Purnell 2024, Eq. 4",
+        "desc": "Ratio of dominant LSP peak power to mean of remaining peaks. "
+                "Higher = cleaner single-reflector signal (smooth ice/water). "
+                "Lower = multipath interference (rough surfaces, layered ice).",
+        "variants": "clr_med (raw), clr_z (z-scored), clr_wmed (PRN-weighted)",
+        "best": "clr_wmed (d=0.82)",
+    },
+    "AF": {
+        "name": "Area Factor (AF)",
+        "source": "Song 2022, Eq. 22-23",
+        "desc": "CWT-based spectral power integrated around the dominant RH, "
+                "with per-PRN ice-free baseline subtracted. Measures excess or "
+                "deficit spectral energy relative to open-water conditions. "
+                "Polarity is site-dependent (drops during ice at ROSS, rises at UMNQ).",
+        "variants": "af_med (raw), af_z (z-scored), af_wmed (PRN-weighted)",
+        "best": "af_wmed (d=1.68)",
+    },
+    "gamma": {
+        "name": "Damping Parameter (γ)",
+        "source": "Strandberg 2017",
+        "desc": "Rate of SNR envelope decay with elevation. Fit per-arc via "
+                "Hilbert envelope + Siegel robust regression on log(envelope) vs sin²(ε). "
+                "Higher = rougher/wetter surface. Lower = smoother/frozen surface.",
+        "variants": "gamma_med (raw), gamma_z (z-scored), gamma_wmed (PRN-weighted)",
+        "best": "gamma_med (d=0.74)",
+    },
+    "gamma_r2": {
+        "name": "Surface Coherence (γ_r2)",
+        "source": "Strandberg 2017 (reinterpreted)",
+        "desc": "R² of the damping envelope fit. NOT a quality gate — it is a surface "
+                "coherence metric. Higher = more specular/smooth surface (ice, calm water, snow). "
+                "Lower = more diffuse scattering (rough open water, wet snow).",
+        "variants": "gamma_r2_med",
+        "best": "gamma_r2_med",
+    },
+    "MS": {
+        "name": "Mean Spectral Power (MS)",
+        "source": "Derived from LSP",
+        "desc": "Mean power across the LSP spectrum. Strongly PRN-dependent (ICC=88%), "
+                "so raw values are dominated by satellite hardware differences. "
+                "Z-scoring per (sat, freq) removes the hardware bias and reveals the "
+                "surface-state signal.",
+        "variants": "ms_med (raw), ms_z (z-scored), ms_wmed (PRN-weighted)",
+        "best": "ms_z (d=1.92)",
+    },
+    "VS": {
+        "name": "SNR Variance (VS)",
+        "source": "Derived from detrended SNR",
+        "desc": "Variance of the detrended SNR arc. Higher variance indicates stronger "
+                "multipath interference patterns, typically from rough or layered surfaces.",
+        "variants": "vs_med (raw), vs_wmed (PRN-weighted)",
+        "best": "vs_wmed (d=1.84)",
+    },
+    "PR": {
+        "name": "Peak Ratio (PR)",
+        "source": "Derived from LSP",
+        "desc": "Ratio of the dominant LSP peak to the noise floor. Similar concept to CLR "
+                "but measures absolute peak prominence rather than relative clarity.",
+        "variants": "pr_med (raw), pr_z (z-scored), pr_wmed (PRN-weighted)",
+        "best": "pr_wmed (d=0.72)",
+    },
+    "amp": {
+        "name": "Amplitude (amp_mean)",
+        "source": "gnssrefl output",
+        "desc": "Mean amplitude of the dominant LSP peak across arcs. Reflects overall "
+                "signal strength of the reflected signal.",
+        "variants": "amp_mean, amp_std, amp_cv, per-band (amp_L1_mean, etc.)",
+        "best": "amp_mean",
+    },
+    "amp_ratio": {
+        "name": "Amplitude Ratios (L1/L5, L1/L2C)",
+        "source": "Literature review, Apr 2026",
+        "desc": "Ratio of mean amplitude on L1 to L5 (or L2C). Different frequencies "
+                "penetrate ice/snow differently, so the ratio can indicate surface layering "
+                "or material changes invisible to single-frequency features.",
+        "variants": "amp_ratio_L1_L5, amp_ratio_L1_L2C",
+        "best": "TBD — newly added",
+    },
+    "rh_std": {
+        "name": "RH Standard Deviation",
+        "source": "Derived from gnssrefl RH",
+        "desc": "Daily standard deviation of reflector height estimates. Higher during "
+                "open water (waves, tides) than during stable ice cover.",
+        "variants": "rh_std",
+        "best": "rh_std",
+    },
+    "normalization": {
+        "name": "Normalization Variants",
+        "source": "feature_aggregator.py",
+        "desc": "_med = raw median across arcs. "
+                "_z = per-(satellite, frequency) z-scored before aggregating — removes "
+                "hardware bias (critical for MS where ICC=88%). "
+                "_wmed = PRN-weighted median where weight = |Cohen's d| from a training "
+                "period — PRNs with stronger ice/water discrimination contribute more.",
+        "variants": "Suffix: _med, _z, _wmed",
+        "best": "Depends on feature — see individual entries",
+    },
+}
+
+
+def build_feature_definitions_panel():
+    """Collapsible reference panel with feature definitions."""
+    rows = []
+    for key, info in FEATURE_DEFINITIONS.items():
+        rows.append(html.Tr([
+            html.Td(info["name"], style={"fontWeight": "bold", "color": "#58a6ff",
+                                          "verticalAlign": "top", "padding": "6px 12px 6px 0",
+                                          "whiteSpace": "nowrap", "fontSize": "0.85rem"}),
+            html.Td(info["desc"], style={"color": DARK_TEXT, "padding": "6px 12px 6px 0",
+                                          "fontSize": "0.85rem", "lineHeight": "1.4"}),
+            html.Td(info.get("best", ""), style={"color": "#2d9a6b", "padding": "6px 0",
+                                                   "fontSize": "0.8rem", "whiteSpace": "nowrap"}),
+        ]))
+
+    return html.Details([
+        html.Summary("Feature Definitions & Best Variants",
+                     style={"cursor": "pointer", "color": "#58a6ff", "fontWeight": "bold",
+                            "fontSize": "0.95rem", "padding": "8px 0"}),
+        html.Table([
+            html.Thead(html.Tr([
+                html.Th("Feature", style={"color": "#8b949e", "padding": "4px 12px 4px 0",
+                                           "fontSize": "0.8rem", "fontWeight": "normal",
+                                           "borderBottom": f"1px solid {DARK_BORDER}"}),
+                html.Th("Description", style={"color": "#8b949e", "padding": "4px 12px 4px 0",
+                                               "fontSize": "0.8rem", "fontWeight": "normal",
+                                               "borderBottom": f"1px solid {DARK_BORDER}"}),
+                html.Th("Best Variant", style={"color": "#8b949e", "padding": "4px 0",
+                                                "fontSize": "0.8rem", "fontWeight": "normal",
+                                                "borderBottom": f"1px solid {DARK_BORDER}"}),
+            ])),
+            html.Tbody(rows),
+        ], style={"borderCollapse": "collapse", "width": "100%"}),
+    ], style={"backgroundColor": DARK_CARD, "borderRadius": "6px",
+              "border": f"1px solid {DARK_BORDER}", "padding": "8px 16px",
+              "marginBottom": "8px"})
 
 
 def build_state_timeline(v3, station, year):
@@ -625,6 +855,570 @@ def build_feature_direction_summary(station, year):
         "backgroundColor": DARK_CARD, "borderRadius": "6px",
         "border": f"1px solid {DARK_BORDER}", "padding": "8px",
     })
+
+
+def _cohens_d(group_a, group_b):
+    """Cohen's d (pooled SD) between two groups."""
+    na, nb = len(group_a), len(group_b)
+    if na < 2 or nb < 2:
+        return np.nan
+    va, vb = group_a.var(ddof=1), group_b.var(ddof=1)
+    pooled_std = np.sqrt(((na - 1) * va + (nb - 1) * vb) / (na + nb - 2))
+    if pooled_std == 0:
+        return 0.0
+    return float((group_a.mean() - group_b.mean()) / pooled_std)
+
+
+def build_discrimination_summary(daily_features, v3, station, year):
+    """Horizontal bar chart: Cohen's d for each numeric column in daily_features."""
+    if daily_features is None or v3 is None:
+        return html.Div("Need daily_features and v3 classification.",
+                        style={"color": DARK_TEXT, "padding": "16px"})
+
+    pooled = daily_features[daily_features["azimuth_bin"] == -1].copy() if "azimuth_bin" in daily_features.columns else daily_features.copy()
+    v3c = v3[["doy", "v3_state"]].drop_duplicates("doy")
+    pooled = pooled.merge(v3c, on="doy", how="left")
+
+    mode = _get_mode(v3)
+    non_baseline = _non_baseline_states(mode)
+    water_label = "baseline" if mode == "discovery" else "open_water"
+
+    water = pooled[pooled["v3_state"] == water_label]
+    ice = pooled[pooled["v3_state"].isin(non_baseline)]
+
+    if len(water) < 5 or len(ice) < 5:
+        return html.Div("Insufficient classified days for discrimination analysis.",
+                        style={"color": DARK_TEXT, "padding": "16px"})
+
+    skip = {"date", "date_dt", "doy", "azimuth_bin", "v3_state"}
+    numeric_cols = [c for c in pooled.columns
+                    if c not in skip and pd.api.types.is_numeric_dtype(pooled[c])]
+
+    results = []
+    for col in numeric_cols:
+        iv, wv = ice[col].dropna(), water[col].dropna()
+        if len(iv) > 5 and len(wv) > 5:
+            d = _cohens_d(iv, wv)
+            if np.isfinite(d):
+                results.append({"feature": col,
+                                "label": FEATURE_LABELS.get(col, col),
+                                "d": d, "abs_d": abs(d)})
+
+    if not results:
+        return html.Div("No features with sufficient data.",
+                        style={"color": DARK_TEXT, "padding": "16px"})
+
+    rdf = pd.DataFrame(results).sort_values("abs_d", ascending=True)
+
+    colors = ["#2d9a6b" if ad >= 0.8 else "#f0ad4e" if ad >= 0.5 else "#8b949e"
+              for ad in rdf["abs_d"]]
+
+    sep = "ice" if mode != "discovery" else "anomalous"
+    fig = go.Figure(go.Bar(
+        y=rdf["label"], x=rdf["d"], orientation="h",
+        marker_color=colors,
+        hovertemplate="%{y}<br>d = %{x:.2f}<extra></extra>",
+    ))
+    fig.update_layout(
+        title=f"{station} {year}: Feature Discrimination (Cohen's d, {sep} vs {water_label})",
+        xaxis_title=f"Cohen's d (positive = higher during {sep})",
+        height=max(400, len(rdf) * 22),
+        margin=dict(l=200, r=20, t=50, b=30),
+        **PLOTLY_DARK,
+    )
+    return dcc.Graph(figure=fig)
+
+
+def build_normalization_comparison(daily_features, v3, station, year, base_feature="CLR"):
+    """3-panel comparison of raw, z-scored, and weighted median for one feature."""
+    variant_map = {
+        "CLR": {"Raw": "clr_med", "Z-scored": "clr_z", "PRN-weighted": "clr_wmed"},
+        "AF": {"Raw": "af_med", "Z-scored": "af_z", "PRN-weighted": "af_wmed"},
+        "PR": {"Raw": "pr_med", "Z-scored": "pr_z", "PRN-weighted": "pr_wmed"},
+        "gamma": {"Raw": "gamma_med", "Z-scored": "gamma_z", "PRN-weighted": "gamma_wmed"},
+        "MS": {"Raw": "ms_med", "Z-scored": "ms_z", "PRN-weighted": "ms_wmed"},
+        "VS": {"Raw": "vs_med", "Z-scored": "vs_z", "PRN-weighted": "vs_wmed"},
+    }
+
+    if daily_features is None or v3 is None:
+        return html.Div("Need daily_features and v3 classification.",
+                        style={"color": DARK_TEXT, "padding": "16px"})
+
+    variants = variant_map.get(base_feature, {})
+    pooled = daily_features[daily_features["azimuth_bin"] == -1].copy() if "azimuth_bin" in daily_features.columns else daily_features.copy()
+    variants = {k: v for k, v in variants.items() if v in pooled.columns}
+
+    if not variants:
+        return html.Div(f"No variants found for {base_feature}",
+                        style={"color": DARK_TEXT, "padding": "16px"})
+
+    v3c = v3[["doy", "v3_state"]].drop_duplicates("doy")
+    pooled = pooled.merge(v3c, on="doy", how="left")
+
+    mode = _get_mode(v3)
+    order = _state_order(mode)
+    non_baseline = _non_baseline_states(mode)
+    water_label = "baseline" if mode == "discovery" else "open_water"
+
+    n = len(variants)
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True,
+                        subplot_titles=list(variants.keys()),
+                        vertical_spacing=0.06)
+
+    for i, (label, col) in enumerate(variants.items(), 1):
+        # Compute Cohen's d for annotation
+        water = pooled[pooled["v3_state"] == water_label][col].dropna()
+        ice = pooled[pooled["v3_state"].isin(non_baseline)][col].dropna()
+        d_ann = ""
+        if len(water) > 5 and len(ice) > 5:
+            d_val = _cohens_d(ice, water)
+            if np.isfinite(d_val):
+                d_ann = f" (d={d_val:.2f})"
+
+        for state in order:
+            mask = pooled["v3_state"] == state
+            if mask.sum() == 0:
+                continue
+            sub = pooled[mask]
+            fig.add_trace(go.Scatter(
+                x=sub["doy"], y=sub[col], mode="markers",
+                marker=dict(size=4, color=V3_COLORS.get(state, "#999"), opacity=0.6),
+                name=state, showlegend=(i == 1), legendgroup=state,
+            ), row=i, col=1)
+
+        fig.update_yaxes(title_text=f"{label}{d_ann}", row=i, col=1)
+
+    fig.update_xaxes(title_text="Day of Year", row=n, col=1)
+    fig.update_layout(
+        title=f"{station} {year}: {base_feature} — Normalization Comparison",
+        height=250 * n,
+        margin=dict(l=80, r=20, t=50, b=30),
+        legend=dict(font=dict(size=9), orientation="h", y=-0.05),
+        **PLOTLY_DARK,
+    )
+    return dcc.Graph(figure=fig)
+
+
+def build_prn_weight_heatmap(station, year):
+    """Heatmap of per-PRN |Cohen's d| across features from PRN weights JSON."""
+    weights = load_prn_weights(station, year)
+    if weights is None:
+        return html.Div([
+            html.P(f"No PRN weight file for {station} {year}.",
+                   style={"color": "#8b949e", "padding": "4px"}),
+            html.Code(f"python scripts/compute_prn_weights.py --station {station} --year {year}",
+                      style={"color": "#4a90d9", "fontSize": "0.9rem"}),
+        ], style={"padding": "16px"})
+
+    features_dict = weights.get("features", {})
+    if not features_dict:
+        return html.Div("No feature data in weight file.",
+                        style={"color": DARK_TEXT, "padding": "16px"})
+
+    # Collect all PRN keys across features
+    all_prns = set()
+    feature_names = list(features_dict.keys())
+    for feat_data in features_dict.values():
+        all_prns.update(feat_data.keys())
+    prn_list = sorted(all_prns, key=lambda k: (int(k.split("_")[0]), int(k.split("_")[1])))
+
+    # Build z matrix: rows=PRNs, cols=features
+    z = []
+    for prn in prn_list:
+        row = []
+        for feat in feature_names:
+            entry = features_dict[feat].get(prn, {})
+            row.append(entry.get("weight", 0.0))
+        z.append(row)
+
+    feat_labels = [FEATURE_LABELS.get(f.lower() + "_med", f) for f in feature_names]
+
+    fig = go.Figure(go.Heatmap(
+        z=z,
+        x=feat_labels,
+        y=prn_list,
+        colorscale="YlOrRd",
+        colorbar_title="|d|",
+        hovertemplate="PRN %{y}<br>Feature: %{x}<br>|d| = %{z:.2f}<extra></extra>",
+    ))
+    fig.update_layout(
+        title=f"{station} {year}: Per-PRN Discriminating Power (|Cohen's d|)",
+        xaxis_title="Feature", yaxis_title="Satellite_Frequency",
+        height=max(400, len(prn_list) * 18),
+        margin=dict(l=80, r=20, t=50, b=80),
+        **PLOTLY_DARK,
+    )
+
+    # Summary from the weights file
+    summary_dict = weights.get("summary", {})
+    summary_items = []
+    for feat, s in summary_dict.items():
+        summary_items.append(
+            f"{feat}: {s.get('n_weighted', 0)}/{s.get('n_combos', 0)} weighted, "
+            f"mean |d|={s.get('mean_weight', 0):.3f}, max={s.get('max_weight', 0):.3f}"
+        )
+
+    return html.Div([
+        dcc.Graph(figure=fig),
+        html.Div([html.P(line, style={"margin": "2px 0", "fontSize": "0.85rem"})
+                  for line in summary_items],
+                 style={"color": DARK_TEXT, "padding": "8px 16px"}),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Investigation tab — static story viewer
+# ---------------------------------------------------------------------------
+
+INVESTIGATION_IMG_DIR = PROJECT_ROOT / "docs" / "images" / "investigation"
+
+
+def _encode_inv_img(fname):
+    """Return base64 data URI for a PNG in the investigation image dir, or None."""
+    p = INVESTIGATION_IMG_DIR / fname
+    if not p.exists():
+        return None
+    with open(p, "rb") as f:
+        data = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/png;base64,{data}"
+
+
+def _inv_fig(fname, caption):
+    """Render one investigation figure with a caption below."""
+    src = _encode_inv_img(fname)
+    if src is None:
+        return html.P(f"[Figure not found: {fname}]",
+                      style={"color": "#666", "fontStyle": "italic", "padding": "4px"})
+    return html.Div([
+        html.Img(src=src, style={"maxWidth": "100%", "borderRadius": "4px",
+                                  "border": f"1px solid {DARK_BORDER}",
+                                  "display": "block"}),
+        html.P(caption, style={"fontSize": "0.78rem", "color": "#8b949e",
+                                "marginTop": "4px", "textAlign": "center",
+                                "fontStyle": "italic", "lineHeight": "1.4"}),
+    ], style={"marginBottom": "14px"})
+
+
+def _inv_two_col(fig_a, fig_b):
+    """Lay two investigation figures side-by-side."""
+    return html.Div([
+        html.Div(fig_a, style={"flex": "1", "minWidth": "0"}),
+        html.Div(fig_b, style={"flex": "1", "minWidth": "0"}),
+    ], style={"display": "flex", "gap": "12px", "marginBottom": "8px"})
+
+
+def _inv_story_header(title, status, status_color, summary):
+    return html.Div([
+        html.Div([
+            html.Span(title, style={"color": "#e0e0e0", "fontSize": "1.05rem",
+                                     "fontWeight": "bold"}),
+            html.Span(f"  [{status}]",
+                      style={"color": status_color, "fontSize": "0.82rem",
+                             "fontWeight": "bold", "marginLeft": "8px"}),
+        ]),
+        html.P(summary, style={"color": DARK_TEXT, "fontSize": "0.86rem",
+                                "marginTop": "6px", "lineHeight": "1.5",
+                                "margin": "6px 0 0 0"}),
+    ], style={"padding": "10px 14px", "backgroundColor": DARK_CARD,
+               "borderRadius": "4px", "borderLeft": f"3px solid {status_color}",
+               "marginBottom": "10px"})
+
+
+def _inv_findings(findings):
+    """findings: list of (label, text, color)."""
+    items = [
+        html.Div([
+            html.Span(f"{lbl}: ", style={"color": col, "fontWeight": "bold"}),
+            html.Span(txt, style={"color": DARK_TEXT}),
+        ], style={"marginBottom": "3px", "fontSize": "0.84rem"})
+        for lbl, txt, col in findings
+    ]
+    return html.Div(items, style={"backgroundColor": "#0d1117",
+                                   "border": f"1px solid {DARK_BORDER}",
+                                   "borderRadius": "4px", "padding": "8px 14px",
+                                   "marginBottom": "12px"})
+
+
+def build_investigation_tab():
+    """Build the Investigation tab — 5 story sub-tabs, image-based narrative."""
+    _ss = {"backgroundColor": "#161b22", "color": "#8b949e",
+           "border": "1px solid #30363d", "padding": "6px 14px"}
+    _ss_sel = {"backgroundColor": "#21262d", "color": "#e0e0e0",
+               "borderTop": "2px solid #f0ad4e", "padding": "6px 14px"}
+
+    # ── Story 1: AF Baseline Fix ─────────────────────────────────────
+    s1 = html.Div([
+        _inv_story_header(
+            "AF Baseline Domain Fix",
+            "PRODUCTION BUG FIX",
+            "#f0ad4e",
+            "The Song 2022 antenna gain pattern correction was a complete no-op on every prior run. "
+            "compute_af_baselines.py stored baselines on a sin(e) grid (0.09–0.42). "
+            "snr_feature_extractor.py queried at sin(e)/cf (0.92–4.44 for GPS L1) — zero overlap, "
+            "every query returned NaN, baseline subtraction was silently skipped. "
+            "196 UMNQ baselines and 38 ROSS baselines were all-zero for the lifetime of the pipeline.",
+        ),
+        _inv_findings([
+            ("Root cause", "power_info['sin_elev'] returns x/cf (rescaled), not x (raw sin(e)). "
+             "Two-site fix: baseline accumulation and extraction query both corrected.", "#f0ad4e"),
+            ("Impact UMNQ", "Median AF drops 77.5%; per-PRN AF variance reduced 27.3%", "#2ca02c"),
+            ("Impact ROSS", "AF median drops 80.2%. Only 38 combos (GPS-only) vs 196 at UMNQ.", "#2ca02c"),
+            ("Consequence", "All AF thresholds in v1/v2/v3 classifiers are calibrated against uncorrected "
+             "antenna gain patterns and need recalibration.", "#d62728"),
+        ]),
+        _inv_two_col(
+            _inv_fig("fig1a_baselines.png",
+                     "Fig 1a — Before (all-zero) vs after (real curves): 196 antenna gain baselines "
+                     "recovered for UMNQ 2025. GPS / GLONASS / Galileo constellation bands visible."),
+            _inv_fig("fig1b_af_shift.png",
+                     "Fig 1b — AF distribution before (red) vs after (blue) baseline subtraction. "
+                     "Median drops 77.5%. Per-constellation violins show the shift is consistent."),
+        ),
+        _inv_fig("fig1c_prn_variance.png",
+                 "Fig 1c — Per-PRN AF standard deviation: before vs after. Most points fall below the "
+                 "diagonal (lower variance post-fix). Mean σ reduction: 27.3%. The gain pattern was "
+                 "adding satellite-specific bias on top of surface-state variance."),
+    ], style={"padding": "10px 0"})
+
+    # ── Story 2: Gamma Hardening ─────────────────────────────────────
+    s2 = html.Div([
+        _inv_story_header(
+            "Per-Arc γ Extraction: Three Reliability Improvements",
+            "PRODUCTION IMPROVEMENT",
+            "#2ca02c",
+            "γ and gamma_r2 — what they are and why per-arc extraction needs explicit hardening.",
+        ),
+        html.Div([
+            html.P(
+                "γ (gamma) is the damping coefficient from Strandberg 2017: the rate at which the SNR "
+                "interference fringe amplitude decays with increasing elevation angle, modeled as "
+                "log(envelope) = intercept − γ · sin²(ε). A smooth specular surface (calm ice) produces "
+                "slow decay — low γ. A rough diffuse surface (open water) produces faster decay — high γ.",
+                style={"color": DARK_TEXT, "fontSize": "0.87rem", "lineHeight": "1.6", "marginBottom": "8px"}),
+            html.P(
+                "Strandberg extracted γ by fitting this model jointly to all arcs collected over a "
+                "72-hour window using nonlinear least squares (NLLS). With dozens of satellite passes "
+                "pooled together, random noise sources — Hilbert edge artifacts, destructive interference "
+                "nulls, truncated arcs — appear at different positions in each arc and cancel out in the "
+                "aggregate. Our pipeline extracts γ per-arc from individual 20–40 minute satellite passes, "
+                "so every noise source that would average away over 72 hours is fully present and can "
+                "dominate a single fit. Three explicit software fixes compensate:",
+                style={"color": DARK_TEXT, "fontSize": "0.87rem", "lineHeight": "1.6", "marginBottom": "8px"}),
+        ], style={"padding": "4px 14px 0 14px"}),
+        _inv_findings([
+            ("1 · Tukey tapering", "Problem: Hilbert transform assumes a periodic signal. A real arc ends "
+             "mid-oscillation — the boundary discontinuity leaks energy into the computed envelope, "
+             "corrupting the edge samples that γ is fit to. In 72-hour averaging this averages away; "
+             "per-arc it does not. "
+             "Fix: Tukey window (α=0.2, 10% cosine taper each edge) before the transform; tapered samples "
+             "trimmed from the fit region. Verified on synthetic signal: 1.5% estimation error. "
+             "Not visualized — no pre-Tukey arc_table snapshot was saved.", "#8b949e"),
+            ("2 · Siegelslopes", "Problem: at destructive interference nulls the envelope approaches zero. "
+             "log(near-zero) → large negative values that dominate an OLS fit (high leverage). "
+             "In 72-hour averaging, null positions vary across arcs and wash out; per-arc they do not. "
+             "Fix: Siegel repeated-medians regression (~50% breakdown point). "
+             "Verified qualitatively: eliminates extreme γ outliers. Not visualized — no pre-implementation snapshot.", "#8b949e"),
+            ("3 · Full-arc guard (Fig 2a)", "Problem: UMNQ's gnssrefl config uses ediff=200 (effectively "
+             "disabled), passing arcs that span <80% of [e1, e2]. Shorter elevation range = less lever arm "
+             "for the sin²(ε) fit → biased γ; shorter integration domain → biased AF. "
+             "Song 2022 avoided this with strict ediff; our config did not. "
+             "Fix: exclude arcs with ele_range < 0.8×expected_range from γ and AF. "
+             "UMNQ: 14.7% excluded (partial arcs had 23% lower PkNoise). ROSS: 0% (ediff=2.0 catches them).", "#f0ad4e"),
+            ("gamma_r2 (Fig 2b)", "R² of the log-envelope fit — how well the Strandberg smooth-surface "
+             "model describes a given arc. Where all three hardening improvements still cannot tame a noisy "
+             "arc, gamma_r2 quantifies how much to trust the resulting γ. "
+             "UMNQ median = 0.123 (model partially applies). ROSS median = 0.000 — rough Great Lakes ice "
+             "breaks the smooth-surface assumption regardless of extraction method. "
+             "Reframed as surface coherence: high R² = the surface itself is specular enough for the model "
+             "to apply, not simply 'good data'.", "#58a6ff"),
+        ]),
+        _inv_two_col(
+            _inv_fig("fig2a_arc_guard.png",
+                     "Fig 2a — Full (blue) vs partial (orange) arc distributions for gamma, PkNoise, and "
+                     "elevation coverage at UMNQ 2025. Partial arcs cluster below the 80% threshold (dashed). "
+                     "Their lower PkNoise confirms they add noise, not signal, to daily medians."),
+            _inv_fig("fig2b_gamma_r2.png",
+                     "Fig 2b — (Left) gamma_r2 distributions: UMNQ (median 0.123) vs ROSS (median 0.000). "
+                     "ROSS near-zero confirms the Strandberg smooth-surface model fails for rough Great Lakes ice. "
+                     "(Center) gamma vs gamma_r2 colored by DOY at UMNQ — R² < 0.1 marks unreliable gamma. "
+                     "(Right) gamma distributions by R² band — higher R² → sharper, more informative fit."),
+        ),
+    ], style={"padding": "10px 0"})
+
+    # ── Story 3: Ruled-Out Features ───────────────────────────────────
+    s3 = html.Div([
+        _inv_story_header(
+            "Feature Candidates: Tested and Ruled Out",
+            "DEAD / PARKED",
+            "#d62728",
+            "Three candidates targeting different physical signals — snow layering, surface complexity, "
+            "and spatial heterogeneity. B3 and B2 are ruled out on noise grounds. B4 is parked: "
+            "the geometry is sufficient but no classification method has been built to use it.",
+        ),
+        html.Div([
+            html.P(
+                "B3 (envelope ratio) attempts to detect a snow layer on top of ice using "
+                "frequency-dependent Fresnel reflections. A two-layer air→snow→ice system produces "
+                "different L1 vs L2C Hilbert envelope shapes as a function of elevation angle — "
+                "the ratio of those envelopes carries a slope that scales with snow depth and permittivity. "
+                "Fig 3a shows the theoretical signal and the real data side by side: the noise-to-signal "
+                "ratio makes the approach unworkable with current Hilbert envelope quality.",
+                style={"color": DARK_TEXT, "fontSize": "0.87rem", "lineHeight": "1.6", "marginBottom": "8px"}),
+            html.P(
+                "B2 (cross-frequency correlation) attempts to use waveform similarity between frequency "
+                "bands as a surface complexity proxy. For the same physical arc, L1 and L2C observe "
+                "identical geometry and should oscillate at the same dominant frequency. "
+                "Pearson r measures the linear correlation between the two rescaled waveforms — "
+                "r=1 means the bands track each other perfectly, r=0 means no relationship. "
+                "A single specular reflector (smooth ice) should push r toward 1; a rough or layered "
+                "surface should decorrelate them toward 0. "
+                "Fig 3b shows the median ice/water separation is real (0.02–0.09) but the per-arc "
+                "distribution width (~0.5 IQR) buries it completely.",
+                style={"color": DARK_TEXT, "fontSize": "0.87rem", "lineHeight": "1.6", "marginBottom": "8px"}),
+            html.P(
+                "B4 (geometry census) is different in character — it was not ruled out on signal grounds, "
+                "it was parked for lack of a defined use. The census confirmed that at UMNQ, 2300–3200 "
+                "simultaneous satellite pairs exist per day at matching elevations but different azimuths. "
+                "If a classification method were built around them, they would enable spatial surface maps "
+                "at sub-daily resolution: which azimuth sectors see ice vs open water at the same time, "
+                "rather than one label per station per day. During spring breakup (DOY 85–117), where "
+                "sector consistency analysis showed inter-sector AF disagreement up to 9.6, B4 pairs could "
+                "distinguish a mixed fjord — some sectors ice, others open water — from a uniformly "
+                "transitioning one. Fig 3c shows the coverage: the infrastructure is there, "
+                "the analysis method is not.",
+                style={"color": DARK_TEXT, "fontSize": "0.87rem", "lineHeight": "1.6", "marginBottom": "4px"}),
+        ], style={"padding": "4px 14px 0 14px"}),
+        _inv_findings([
+            ("B3 verdict", "Theoretical 5cm snow signal (slope=−0.07) is ~400× below real Hilbert "
+             "envelope noise floor (std=28.83). Dead.", "#d62728"),
+            ("B2 verdict", "Median ice/water Pearson r shift 0.02–0.09; per-arc IQR ~0.5. Signal "
+             "completely buried. GAL L1-E5b persistently negative in both states (receiver artifact). Dead.", "#d62728"),
+            ("B4 verdict", "2300–3200 pairs/day at UMNQ (>200/hour), consistent across all seasons. "
+             "Parked — needs a spatial classification method before it becomes useful.", "#f0ad4e"),
+            ("Noise floor note", "Any Hilbert-envelope feature must produce signals >10× σ=29 to be "
+             "usable. Rules out all subtle multi-layer approaches.", "#8b949e"),
+        ]),
+        _inv_fig("fig3a_envelope_ratio.png",
+                 "Fig 3a — (Left) Theoretical L1/L2C envelope ratio slope vs snow depth from a two-layer "
+                 "Fresnel model: 5cm snow produces slope=−0.07. (Right) Real data distribution by surface "
+                 "state: std=28.8. The theoretical signal is invisible at this scale — green dashes mark "
+                 "the 5, 10, and 20cm theoretical values. The noise-to-signal ratio is ~400:1."),
+        _inv_two_col(
+            _inv_fig("fig3b_xfreq_corr.png",
+                     "Fig 3b — Pearson r between frequency-pair waveforms by surface state (boxplots, "
+                     "outliers hidden). Blue=baseline, red=anomalous, orange=regime change. "
+                     "Δmedian labels show the ice/water separation per pair: real but ~0.02–0.09. "
+                     "IQR of ~0.5 in both states means individual arcs are not separable."),
+            _inv_fig("fig3c_geometry_census.png",
+                     "Fig 3c — Simultaneous satellite pairs (|Δelev| < 1°, |Δaz| > 30°) across four "
+                     "seasonal sample days at UMNQ 2025. Color = azimuth separation. Consistent "
+                     "200+ pairs/hour across all seasons confirms adequate geometry for spatial "
+                     "heterogeneity mapping — the missing piece is the classification method."),
+        ),
+    ], style={"padding": "10px 0"})
+
+    # ── Story 4: Post-Fix Assessment ──────────────────────────────────
+    s4 = html.Div([
+        _inv_story_header(
+            "Post-Fix Feature Reassessment",
+            "DECISIONS MADE",
+            "#58a6ff",
+            "After correcting the AF baseline bug and re-extracting all features, a full discriminability "
+            "audit across ROSS 2024 and UMNQ 2025 drove several concrete decisions: "
+            "CLR is blind at UMNQ due to polar geometry; af_z adds nothing over af_med post-correction; "
+            "spring breakup is spatially patchy while autumn freeze-up is spatially uniform.",
+        ),
+        _inv_findings([
+            ("CLR at UMNQ", "d = 0.057 — effectively blind. All GPS+GLONASS+Galileo satellites track "
+             "through a narrow elevation band; LSP always has one dominant peak. Drop from v1/Mahal.", "#d62728"),
+            ("CLR at ROSS", "d = 1.30 — strongly discriminating at mid-latitude (Great Lakes). "
+             "Same feature, completely different behavior due to geometry.", "#2ca02c"),
+            ("af_z vs af_med", "r = 0.99 at both stations. af_med strictly outperforms af_z. "
+             "Post-correction, z-scoring adds nothing. Drop af_z from Mahalanobis feature set.", "#f0ad4e"),
+            ("Spring breakup", "DOY 85–117: inter-sector AF score σ up to 9.6 — real spatial heterogeneity. "
+             "Multiple sectors showing ice while others show open water simultaneously.", "#f0ad4e"),
+            ("Autumn freeze-up", "DOY 300+: sectors agree (σ ≈ 1.3 = regime_change noise floor). "
+             "New thin ice forms uniformly across the fjord. Classifier signal is real and coherent.", "#58a6ff"),
+        ]),
+        _inv_fig("fig4a_cohens_d.png",
+                 "Fig 4a — |Cohen's d| for 9 features: ROSS 2024 (purple) vs UMNQ 2025 (green). "
+                 "CLR highlighted in red at UMNQ (d=0.06). AF (corrected) is strongest at both stations. "
+                 "Dashed lines mark small (0.2) and large (0.8) effect thresholds."),
+        _inv_two_col(
+            _inv_fig("fig4b_clr_blind.png",
+                     "Fig 4b — CLR distributions for ice vs water. ROSS (d=1.30): well-separated. "
+                     "UMNQ (d=0.06): completely overlapping. At 70.7°N, polar geometry makes CLR useless — "
+                     "every arc looks spectrally clear regardless of surface state."),
+            _inv_fig("fig4c_sector_consistency.png",
+                     "Fig 4c — Inter-sector AF score disagreement over the UMNQ 2025 year. "
+                     "Spring (DOY 85–117): high disagreement = patchy ice, real spatial heterogeneity. "
+                     "Autumn (DOY 300+): sectors agree = uniform new ice formation."),
+        ),
+    ], style={"padding": "10px 0"})
+
+    # ── Story 5: GLBX Hardware Artifact ──────────────────────────────
+    s5 = html.Div([
+        _inv_story_header(
+            "GLBX Hardware Artifact: L1 Suppression",
+            "STATION-SPECIFIC",
+            "#9467bd",
+            "At GLBX (Bartlett Cove, AK), L1 input SNR drops ~8 dBHz in winter. This collapses "
+            "L1 amplitude 67% (from 29 to 9 units), dragging the frequency-pooled amp_mean in the "
+            "wrong direction during ice periods. L5 amplitude is correctly higher in winter (46 vs 41). "
+            "UMNQ 2025 and NIAQ 2025 are both clean. Additionally, L1 amplitude at UMNQ detects "
+            "autumn freeze-onset about one month earlier than the pooled amplitude.",
+        ),
+        _inv_findings([
+            ("GLBX verdict", "CONTAMINATED. L1 input SNR drops 8 dBHz; amplitude collapses 67%. "
+             "Pooled amp_mean moves DOWN during ice (wrong direction). Fix: use amp_L5_mean.", "#d62728"),
+            ("UMNQ verdict", "CLEAN. Both L1 (+5.3 units) and L5 (+4.1 units) rise in winter. "
+             "L1 marginally better discriminator (d=1.18 vs d=1.05 for L5).", "#2ca02c"),
+            ("NIAQ verdict", "CLEAN. Minimal seasonal variation (<1 unit), MS flat (<0.5 dBHz). "
+             "Pool correlations r > 0.99 in winter for all bands.", "#2ca02c"),
+            ("UMNQ autumn", "DOY 300–366: amp_L1 d=0.72, pooled d=0.25, amp_L5 d=−0.003. "
+             "L5 actively dilutes L1's freeze-onset signal in the pooled mean.", "#f0ad4e"),
+            ("DOY boundary", "DOY 285 (Oct 12): switch to amp_L1_mean for UMNQ autumn classification. "
+             "At this point d_L1 ≈ 0 while d_pooled = −1.11 (actively wrong direction).", "#58a6ff"),
+            ("Action GLBX", "Replace amp_mean with amp_L5_mean in GLBX mahal_features config "
+             "and switch polarity from winter_low to winter_high.", "#58a6ff"),
+        ]),
+        _inv_two_col(
+            _inv_fig("fig5a_glbx_amplitude.png",
+                     "Fig 5a — GLBX monthly amplitude by band. L1 (blue) collapses Jan–Mar; "
+                     "L5 (green) is flat/higher in winter. Input MS (right) drops 8 dBHz — "
+                     "hardware-level cause, not surface physics."),
+            _inv_fig("fig5b_three_station.png",
+                     "Fig 5b — Three-station comparison: GLBX (CONTAMINATED, left), UMNQ (CLEAN, center), "
+                     "NIAQ (CLEAN, right). L1 suppression mechanism is GLBX-specific — absent at "
+                     "both Greenland stations."),
+        ),
+        _inv_fig("fig5c_doy_crossover.png",
+                 "Fig 5c — Rolling 30-day Cohen's d at UMNQ 2025. amp_L1 (blue) crosses from wrong- to "
+                 "correct-ice direction at ~DOY 285, a full month before pooled amp_mean (gray, ~DOY 334). "
+                 "amp_L5 (green) remains strongly negative (dilutes pool). Shaded = L1 advantage window."),
+    ], style={"padding": "10px 0"})
+
+    return html.Div([
+        html.Div([
+            html.H4("Feature Investigation Log",
+                    style={"color": "#e0e0e0", "margin": "0 0 3px 0", "fontSize": "1.0rem"}),
+            html.P("Systematic pipeline debugging and feature evaluation — UMNQ 2025 and ROSS 2024. "
+                   "Generated figures from scripts/plot_investigation_figures.py.",
+                   style={"color": "#8b949e", "fontSize": "0.82rem", "margin": "0 0 10px 0"}),
+        ]),
+        dcc.Tabs(id="investigation-subtabs", value="story1", children=[
+            dcc.Tab(label="1 · AF Baseline Fix", value="story1",
+                    style=_ss, selected_style=_ss_sel, children=[s1]),
+            dcc.Tab(label="2 · Per-Arc γ Reliability", value="story2",
+                    style=_ss, selected_style=_ss_sel, children=[s2]),
+            dcc.Tab(label="3 · Ruled-Out Features", value="story3",
+                    style=_ss, selected_style=_ss_sel, children=[s3]),
+            dcc.Tab(label="4 · Post-Fix Assessment", value="story4",
+                    style=_ss, selected_style=_ss_sel, children=[s4]),
+            dcc.Tab(label="5 · GLBX Hardware Artifact", value="story5",
+                    style=_ss, selected_style=_ss_sel, children=[s5]),
+        ]),
+    ])
 
 
 def build_mahalanobis_figure(v2, v3, threshold, station, year):
@@ -898,6 +1692,9 @@ def create_app():
             dcc.Tab(label="Features", value="features",
                     style={"backgroundColor": "#161b22", "color": "#8b949e", "border": "1px solid #30363d"},
                     selected_style={"backgroundColor": "#21262d", "color": "#e0e0e0", "borderTop": "2px solid #4a90d9"}),
+            dcc.Tab(label="Investigation", value="investigation",
+                    style={"backgroundColor": "#161b22", "color": "#8b949e", "border": "1px solid #30363d"},
+                    selected_style={"backgroundColor": "#21262d", "color": "#e0e0e0", "borderTop": "2px solid #f0ad4e"}),
         ], style={"marginBottom": "0"}),
 
         # Tab content with loading spinner
@@ -1553,6 +2350,7 @@ def create_app():
             era5 = load_era5(station, year)
             smap = load_smap(station, year)
             threshold = load_mahal_threshold(station)
+            daily_feat = load_daily_features(station, year)
 
             # State timeline strip
             timeline = build_state_timeline(v3, station, year)
@@ -1566,8 +2364,9 @@ def create_app():
             # Mahalanobis distance plot
             mahal_fig = build_mahalanobis_figure(v2, v3, threshold, station, year)
 
-            # Existing SNR features figure
-            snr_fig = build_ice_features_figure(snr, v3, era5, smap, station, year)
+            # SNR features figure — uses daily_features best variants when available
+            snr_fig = build_ice_features_figure(snr, v3, era5, smap, station, year,
+                                                 daily_features=daily_feat)
 
             content = html.Div([
                 timeline,
@@ -1641,75 +2440,42 @@ def create_app():
                     html.Div(id="imagery-display", children=initial_imagery),
                 ])
         elif tab == "features":
-            snr = load_snr_features(station, year)
-            if snr is None:
-                content = html.Div([
-                    html.P(f"No SNR features for {station} {year}.",
-                           style={"color": DARK_TEXT, "fontSize": "1.1rem", "padding": "20px"}),
-                ])
-            else:
-                content = html.Div([
-                    # Controls row
-                    html.Div([
-                        # Metric selector
-                        html.Div([
-                            html.Label("Distance metric:",
-                                       style={"color": DARK_TEXT, "fontWeight": "bold",
-                                              "marginBottom": "4px", "display": "block"}),
-                            dcc.RadioItems(
-                                id="cluster-metric",
-                                options=[
-                                    {"label": " Correlation (1-|r|)", "value": "correlation"},
-                                    {"label": " Partial correlation (precision matrix)",
-                                     "value": "partial"},
-                                ],
-                                value="partial",
-                                style={"color": "#e0e0e0", "fontSize": "0.95rem"},
-                                inputStyle={"marginRight": "8px", "accentColor": "#58a6ff"},
-                                labelStyle={"display": "block", "marginBottom": "6px",
-                                            "color": "#e0e0e0", "cursor": "pointer"},
-                            ),
-                            html.Div([
-                                html.Span("Correlation: ", style={"color": "#8b949e"}),
-                                html.Span("do these features move together?",
-                                          style={"color": "#8b949e", "fontSize": "0.8rem"}),
-                                html.Br(),
-                                html.Span("Partial: ", style={"color": "#8b949e"}),
-                                html.Span("are they directly related, or only through other features?",
-                                          style={"color": "#8b949e", "fontSize": "0.8rem"}),
-                            ], style={"marginTop": "6px"}),
-                        ], style={"flex": "0 0 340px", "padding": "8px 20px"}),
+            _subtab_style = {"backgroundColor": "#161b22", "color": "#8b949e",
+                             "border": "1px solid #30363d", "padding": "6px 12px"}
+            _subtab_sel = {"backgroundColor": "#21262d", "color": "#e0e0e0",
+                           "borderTop": "2px solid #58a6ff", "padding": "6px 12px"}
+            content = html.Div([
+                build_feature_definitions_panel(),
+                dcc.Tabs(id="features-subtabs", value="clustering", children=[
+                    dcc.Tab(label="Feature Clustering", value="clustering",
+                            style=_subtab_style, selected_style=_subtab_sel),
+                    dcc.Tab(label="Discrimination Summary", value="discrimination",
+                            style=_subtab_style, selected_style=_subtab_sel),
+                    dcc.Tab(label="Normalization Comparison", value="normalization",
+                            style=_subtab_style, selected_style=_subtab_sel),
+                    dcc.Tab(label="PRN Weights", value="prn_weights",
+                            style=_subtab_style, selected_style=_subtab_sel),
+                ]),
+                # Normalization feature selector — always in DOM, shown/hidden by sub-tab callback
+                html.Div([
+                    html.Label("Base feature:", style={"color": DARK_TEXT, "fontWeight": "bold",
+                                                        "marginRight": "8px"}),
+                    dcc.Dropdown(
+                        id="norm-base-feature",
+                        options=[{"label": f, "value": f}
+                                 for f in ["CLR", "AF", "PR", "gamma", "MS", "VS"]],
+                        value="MS",
+                        style={"width": "200px", "color": "#000"},
+                        clearable=False,
+                    ),
+                ], id="norm-selector-row",
+                   style={"display": "none", "alignItems": "center", "padding": "8px 0"}),
+                html.Div(id="features-subtab-content",
+                         style={"minHeight": "400px", "padding": "8px 0"}),
+            ])
 
-                        # Threshold slider
-                        html.Div([
-                            html.Label("Cluster threshold:",
-                                       style={"color": DARK_TEXT, "fontWeight": "bold",
-                                              "marginBottom": "4px", "display": "block"}),
-                            dcc.Slider(
-                                id="cluster-threshold",
-                                min=0.1, max=0.9, step=0.05, value=0.4,
-                                marks={v: {"label": f"{v}", "style": {"color": "#c9d1d9"}}
-                                       for v in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]},
-                                tooltip={"placement": "bottom", "always_visible": True},
-                            ),
-                            html.Span("Low = strict (only near-identical cluster) | "
-                                      "High = loose (more features merge)",
-                                      style={"color": "#8b949e", "fontSize": "0.8rem"}),
-                        ], style={"flex": "1 1 400px", "padding": "8px 20px",
-                                  "minWidth": "300px"}),
-                    ], style={"display": "flex", "flexWrap": "wrap", "alignItems": "flex-start",
-                              "backgroundColor": DARK_CARD, "borderRadius": "8px",
-                              "margin": "8px", "border": f"1px solid {DARK_BORDER}"}),
-
-                    html.Div([
-                        dcc.Graph(id="cluster-heatmap", style={"height": "700px"}),
-                    ], style={"width": "100%"}),
-                    html.Div(id="cluster-summary", style={
-                        "padding": "12px 20px", "color": DARK_TEXT, "fontSize": "0.9rem",
-                    }),
-                    # Hidden store to trigger initial render
-                    dcc.Store(id="cluster-init-trigger", data=True),
-                ])
+        elif tab == "investigation":
+            content = build_investigation_tab()
 
         else:
             content = html.P("Unknown tab")
@@ -1885,6 +2651,108 @@ def create_app():
         ])
 
         return fig, summary
+
+    # ----- Features sub-tab routing -----
+
+    @callback(
+        Output("features-subtab-content", "children"),
+        Output("norm-selector-row", "style"),
+        Input("features-subtabs", "value"),
+        Input("norm-base-feature", "value"),
+        State("station-select", "value"),
+        State("year-select", "value"),
+    )
+    def update_features_subtab(subtab, norm_feature, station, year):
+        norm_hidden = {"display": "none"}
+        norm_visible = {"display": "flex", "alignItems": "center", "padding": "8px 0"}
+
+        if not station or not year:
+            return html.Div(), norm_hidden
+
+        if subtab == "clustering":
+            snr = load_snr_features(station, year)
+            if snr is None:
+                return html.Div(html.P(f"No SNR features for {station} {year}.",
+                                       style={"color": DARK_TEXT, "padding": "20px"})), norm_hidden
+            return html.Div([
+                html.Div([
+                    html.Div([
+                        html.Label("Distance metric:",
+                                   style={"color": DARK_TEXT, "fontWeight": "bold",
+                                          "marginBottom": "4px", "display": "block"}),
+                        dcc.RadioItems(
+                            id="cluster-metric",
+                            options=[
+                                {"label": " Correlation (1-|r|)", "value": "correlation"},
+                                {"label": " Partial correlation (precision matrix)",
+                                 "value": "partial"},
+                            ],
+                            value="partial",
+                            style={"color": "#e0e0e0", "fontSize": "0.95rem"},
+                            inputStyle={"marginRight": "8px", "accentColor": "#58a6ff"},
+                            labelStyle={"display": "block", "marginBottom": "6px",
+                                        "color": "#e0e0e0", "cursor": "pointer"},
+                        ),
+                        html.Div([
+                            html.Span("Correlation: ", style={"color": "#8b949e"}),
+                            html.Span("do these features move together?",
+                                      style={"color": "#8b949e", "fontSize": "0.8rem"}),
+                            html.Br(),
+                            html.Span("Partial: ", style={"color": "#8b949e"}),
+                            html.Span("are they directly related, or only through other features?",
+                                      style={"color": "#8b949e", "fontSize": "0.8rem"}),
+                        ], style={"marginTop": "6px"}),
+                    ], style={"flex": "0 0 340px", "padding": "8px 20px"}),
+                    html.Div([
+                        html.Label("Cluster threshold:",
+                                   style={"color": DARK_TEXT, "fontWeight": "bold",
+                                          "marginBottom": "4px", "display": "block"}),
+                        dcc.Slider(
+                            id="cluster-threshold",
+                            min=0.1, max=0.9, step=0.05, value=0.4,
+                            marks={v: {"label": f"{v}", "style": {"color": "#c9d1d9"}}
+                                   for v in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]},
+                            tooltip={"placement": "bottom", "always_visible": True},
+                        ),
+                        html.Span("Low = strict (only near-identical cluster) | "
+                                  "High = loose (more features merge)",
+                                  style={"color": "#8b949e", "fontSize": "0.8rem"}),
+                    ], style={"flex": "1 1 400px", "padding": "8px 20px",
+                              "minWidth": "300px"}),
+                ], style={"display": "flex", "flexWrap": "wrap", "alignItems": "flex-start",
+                          "backgroundColor": DARK_CARD, "borderRadius": "8px",
+                          "margin": "8px", "border": f"1px solid {DARK_BORDER}"}),
+                html.Div([
+                    dcc.Graph(id="cluster-heatmap", style={"height": "700px"}),
+                ], style={"width": "100%"}),
+                html.Div(id="cluster-summary", style={
+                    "padding": "12px 20px", "color": DARK_TEXT, "fontSize": "0.9rem",
+                }),
+                dcc.Store(id="cluster-init-trigger", data=True),
+            ]), norm_hidden
+
+        elif subtab == "discrimination":
+            daily_feat = load_daily_features(station, year)
+            v3 = load_v3(station, year)
+            if daily_feat is None:
+                return html.Div("No daily_features.parquet found. Run feature_aggregator.py first.",
+                                style={"color": DARK_TEXT, "padding": "16px"}), norm_hidden
+            return build_discrimination_summary(daily_feat, v3, station, year), norm_hidden
+
+        elif subtab == "normalization":
+            daily_feat = load_daily_features(station, year)
+            if daily_feat is None:
+                return html.Div("No daily_features.parquet found. Run feature_aggregator.py first.",
+                                style={"color": DARK_TEXT, "padding": "16px"}), norm_hidden
+            v3 = load_v3(station, year)
+            feature = norm_feature or "MS"
+            return build_normalization_comparison(
+                daily_feat, v3, station, year, feature), norm_visible
+
+        elif subtab == "prn_weights":
+            return build_prn_weight_heatmap(station, year), norm_hidden
+
+        return html.Div(), norm_hidden
 
     return app
 

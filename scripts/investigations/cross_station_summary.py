@@ -27,12 +27,24 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "stations_config.json"
 
 log = logging.getLogger(__name__)
 
-FEATURES = ["amp_mean", "gamma_med", "clr_med", "af_med", "pr_med", "rh_std", "vs_med"]
+FEATURES = [
+    # Base medians
+    "amp_mean", "gamma_med", "clr_med", "af_med", "pr_med", "rh_std", "vs_med",
+    "ms_med", "gamma_r2_med", "p2n_mean",
+    # z-scored per-(sat, freq)
+    "clr_z", "af_z", "pr_z", "gamma_z", "ms_z",
+    # PRN-weighted medians
+    "clr_wmed", "af_wmed", "pr_wmed", "gamma_wmed", "ms_wmed", "vs_wmed",
+    # Frequency-split amplitude
+    "amp_L1_mean", "amp_L5_mean", "amp_ratio_L1_L5", "amp_ratio_L1_L2C",
+    # RH / phase / arc quality
+    "delta_rh_mean", "phase_circ_std", "n_arcs", "frac_full_arc",
+]
 V3_STATES = ["open_water", "freeze_up", "ice_surface", "ice_layered", "ice_decaying", "break_up"]
 DISCOVERY_STATES = ["baseline", "anomalous", "regime_change"]
 ICE_STATES = {"freeze_up", "ice_surface", "ice_layered", "ice_decaying", "break_up"}
