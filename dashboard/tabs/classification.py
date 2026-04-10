@@ -45,33 +45,31 @@ def _render_analysis(station, year, scores, scorecard, baseline_def):
     # Metrics strip
     metrics = _build_analysis_metrics(scores, baseline_def)
 
-    # Main time-aligned figure: arc density + Mahal + state strip + contributions
+    # Main figure: arc density + Mahal + state strip
     main_fig = _build_time_aligned_figure(scores, daily_feat, scorecard,
                                           baseline_def, station, year)
 
-    # Feature reliability heatmap
-    heatmap = _build_reliability_heatmap(scorecard, station, year) if scorecard is not None else html.Div()
+    # Feature values figure: top features from scorecard, actual values, state-colored
+    feat_fig = _build_feature_values_figure(daily_feat, scores, scorecard,
+                                            baseline_def, station, year)
 
-    # Scorecard summary
+    # Scorecard summary + reliability heatmap (collapsible)
     scorecard_panel = _build_scorecard_panel(scorecard, station, year) if scorecard is not None else html.Div()
-
-    # SNR features below if available
-    snr = load_snr_features(station, year)
-    era5 = load_era5(station, year)
-    smap = load_smap(station, year)
-    snr_section = []
-    if snr is not None and v3 is not None:
-        from dashboard.app import build_ice_features_figure
-        snr_fig = build_ice_features_figure(snr, v3, era5, smap, station, year,
-                                             daily_features=daily_feat)
-        snr_section = [dcc.Graph(figure=snr_fig, config={"displayModeBar": True})]
+    heatmap = _build_reliability_heatmap(scorecard, station, year) if scorecard is not None else html.Div()
 
     return html.Div([
         metrics,
         dcc.Graph(figure=main_fig, config={"displayModeBar": True}),
-        heatmap,
+        feat_fig,
         scorecard_panel,
-    ] + snr_section)
+        html.Details([
+            html.Summary("Feature Discriminability Heatmap",
+                         style={"cursor": "pointer", "color": "#58a6ff",
+                                "fontWeight": "bold", "fontSize": "0.9rem",
+                                "padding": "8px 0"}),
+            heatmap,
+        ], style={"marginTop": "4px"}),
+    ])
 
 
 def _render_legacy(station, year):
@@ -114,70 +112,35 @@ def _render_legacy(station, year):
 
 def _build_time_aligned_figure(scores, daily_feat, scorecard, baseline_def,
                                 station, year):
-    """Build a single figure with shared x-axis: arc density, Mahal, state, contributions.
+    """Build a compact figure: arc density + Mahalanobis distance + state strip.
 
-    All panels share the DOY x-axis so the user can visually correlate
-    data gaps with anomaly scores and feature contributions.
+    All panels share the DOY x-axis for visual correlation.
     """
-    # Determine top contributing features
-    contrib_cols = [c for c in scores.columns if c.endswith("_contribution")]
-    anomalous = scores[scores["state"] == "anomalous"]
-    if len(anomalous) < 3:
-        anomalous = scores
-
-    if contrib_cols:
-        mean_contrib = anomalous[contrib_cols].abs().mean().sort_values(ascending=False)
-        top_features = mean_contrib.head(6).index.tolist()
-    else:
-        top_features = []
-
-    n_feat_rows = min(len(top_features), 6)
-    # Rows: arc density, Mahal distance, state strip, then one row per top feature
-    n_rows = 3 + n_feat_rows
-    row_heights = [0.08, 0.25, 0.04] + [0.63 / max(n_feat_rows, 1)] * n_feat_rows
-
+    n_rows = 3
+    row_heights = [0.15, 0.65, 0.08]
     subplot_titles = ["Arc Density", "Anomaly Score (Mahalanobis)", "State"]
-    for col in top_features:
-        feat_name = col.replace("_contribution", "")
-        subplot_titles.append(FEATURE_LABELS.get(feat_name, feat_name))
 
     fig = make_subplots(
         rows=n_rows, cols=1, shared_xaxes=True,
-        row_heights=row_heights, vertical_spacing=0.015,
+        row_heights=row_heights, vertical_spacing=0.02,
         subplot_titles=subplot_titles,
     )
 
     bl_start = baseline_def["start_doy"] if baseline_def else None
     bl_end = baseline_def["end_doy"] if baseline_def else None
 
-    # --- Row 1: Arc density histogram ---
     _add_arc_density(fig, scores, daily_feat, row=1, bl_start=bl_start, bl_end=bl_end)
-
-    # --- Row 2: Mahalanobis distance ---
     _add_mahal_panel(fig, scores, row=2, bl_start=bl_start, bl_end=bl_end)
-
-    # --- Row 3: State strip ---
     _add_state_strip(fig, scores, row=3)
-
-    # --- Rows 4+: Feature contributions ---
-    # Build reliability lookup from scorecard
-    reliable_windows = _build_reliability_lookup(scorecard) if scorecard is not None else {}
-
-    for i, col in enumerate(top_features):
-        feat_name = col.replace("_contribution", "")
-        _add_feature_panel(fig, scores, daily_feat, col, feat_name,
-                           row=4 + i, reliable_windows=reliable_windows,
-                           bl_start=bl_start, bl_end=bl_end)
 
     fig.update_xaxes(title_text="Day of Year", row=n_rows, col=1)
     fig.update_layout(
-        height=max(600, 120 + 100 * n_rows),
+        height=380,
         margin=dict(l=60, r=20, t=30, b=30),
         showlegend=False,
         **PLOTLY_DARK,
     )
 
-    # Style subplot titles
     for ann in fig.layout.annotations:
         ann.update(font=dict(size=10, color="#8b949e"), x=0.01, xanchor="left")
 
@@ -217,46 +180,24 @@ def _add_arc_density(fig, scores, daily_feat, row, bl_start, bl_end):
 
 
 def _add_mahal_panel(fig, scores, row, bl_start, bl_end):
-    """Mahalanobis distance with marker opacity scaled by n_arcs."""
+    """Mahalanobis distance scatter, state-colored."""
     if "mahal_distance" not in scores.columns:
         return
-
-    # Use opacity for confidence (more arcs = more opaque)
-    n_arcs = scores["n_arcs"].values if "n_arcs" in scores.columns else np.ones(len(scores)) * 30
-    opacity_min, opacity_max = 0.3, 1.0
-    if n_arcs.max() > n_arcs.min():
-        opacities = opacity_min + (n_arcs - n_arcs.min()) / (n_arcs.max() - n_arcs.min()) * (opacity_max - opacity_min)
-    else:
-        opacities = np.full(len(scores), 0.8)
 
     for state in ["baseline", "transition_in", "anomalous", "transition_out"]:
         mask = scores["state"] == state
         if mask.sum() == 0:
             continue
         sub = scores[mask]
-        idx = mask.values.nonzero()[0]
         fig.add_trace(go.Scatter(
             x=sub["doy"].values, y=sub["mahal_distance"].values,
             mode="markers", name=state,
-            marker=dict(
-                size=6,
-                color=V3_COLORS.get(state, "#999"),
-                opacity=opacities[idx],
-            ),
+            marker=dict(size=5, color=V3_COLORS.get(state, "#999"), opacity=0.8),
             hovertemplate=(f"{state}<br>DOY %{{x}}<br>d=%{{y:.1f}}"
                            f"<br>n_arcs=%{{customdata}}<extra></extra>"),
             customdata=sub["n_arcs"].values if "n_arcs" in sub.columns else None,
-            showlegend=False,
+            showlegend=True,
         ), row=row, col=1)
-
-    # Annotation explaining opacity
-    fig.add_annotation(
-        text="opacity = arc count",
-        xref="paper", yref=f"y{row}" if row > 1 else "y",
-        x=1.0, y=1.0, xanchor="right", yanchor="top",
-        showarrow=False, font=dict(size=8, color="#8b949e"),
-        row=row, col=1,
-    )
 
     fig.update_yaxes(title_text="Mahal d", row=row, col=1, type="log",
                      tickfont=dict(size=8), title_font=dict(size=9))
@@ -285,50 +226,128 @@ def _add_state_strip(fig, scores, row):
                      fixedrange=True)
 
 
-def _add_feature_panel(fig, scores, daily_feat, contrib_col, feat_name,
-                        row, reliable_windows, bl_start, bl_end):
-    """Feature contribution panel — line + filled area.
+def _build_feature_values_figure(daily_feat, scores, scorecard, baseline_def,
+                                  station, year):
+    """Multi-panel figure showing top feature VALUES colored by state.
 
-    Reliability info is shown in the heatmap below, not overlaid here.
+    Like the old Regime Detection Features, but using scorecard-validated
+    best features. Shows actual physical values (gamma, CLR, AF, etc.)
+    so the user can see what changed and by how much.
     """
-    if contrib_col in scores.columns:
-        vals = scores[contrib_col].values
-        fig.add_trace(go.Scatter(
-            x=scores["doy"].values, y=vals,
-            mode="lines", line=dict(width=1.5, color="#58a6ff"),
-            fill="tozeroy", fillcolor="rgba(88,166,255,0.15)",
-            hovertemplate=f"DOY %{{x}}<br>contrib=%{{y:.2f}}<extra></extra>",
-            showlegend=False,
-        ), row=row, col=1)
+    if daily_feat is None or scores is None:
+        return html.Div("No daily features available.",
+                        style={"color": DARK_TEXT, "padding": "8px"})
 
-    fig.update_yaxes(tickfont=dict(size=7), title_font=dict(size=9), row=row, col=1)
+    # Get pooled daily features
+    if "azimuth_bin" in daily_feat.columns:
+        pooled = daily_feat[daily_feat["azimuth_bin"] == -1].copy()
+    else:
+        pooled = daily_feat.copy()
 
-    # Baseline shading (blue)
-    if bl_start and bl_end:
-        fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5, row=row, col=1,
-                      fillcolor="rgba(74,144,217,0.12)", line_width=0)
+    if "doy" not in pooled.columns:
+        return html.Div()
+
+    # Merge state labels onto daily features
+    state_map = dict(zip(scores["doy"], scores["state"]))
+    pooled["state"] = pooled["doy"].map(state_map)
+
+    # Select top features to display
+    top_features = _select_top_features(scorecard, pooled)
+    if not top_features:
+        # Fallback: show standard features
+        top_features = [f for f in ["gamma_med", "clr_med", "af_med", "vs_med",
+                                     "rh_std", "amp_mean"]
+                        if f in pooled.columns][:5]
+
+    n_panels = len(top_features)
+    if n_panels == 0:
+        return html.Div()
+
+    fig = make_subplots(rows=n_panels, cols=1, shared_xaxes=True,
+                        vertical_spacing=0.03)
+
+    bl_start = baseline_def["start_doy"] if baseline_def else None
+    bl_end = baseline_def["end_doy"] if baseline_def else None
+
+    state_order_list = ["baseline", "transition_in", "anomalous", "transition_out"]
+
+    for i, feat in enumerate(top_features):
+        row = i + 1
+
+        # Compute baseline mean for reference line
+        if bl_start and bl_end:
+            bl_vals = pooled[(pooled["doy"] >= bl_start) & (pooled["doy"] <= bl_end)][feat].dropna()
+            bl_mean = bl_vals.mean() if len(bl_vals) > 0 else None
+        else:
+            bl_mean = None
+
+        # Plot points colored by state
+        for state in state_order_list:
+            mask = pooled["state"] == state
+            if mask.sum() == 0:
+                continue
+            sub = pooled[mask]
+            fig.add_trace(go.Scatter(
+                x=sub["doy"].values, y=sub[feat].values,
+                mode="markers", name=state,
+                marker=dict(size=4, color=V3_COLORS.get(state, "#999"), opacity=0.7),
+                showlegend=(row == 1),
+                legendgroup=state,
+                hovertemplate=f"{state}<br>DOY %{{x}}<br>{feat}=%{{y:.3f}}<extra></extra>",
+            ), row=row, col=1)
+
+        # Baseline mean reference line
+        if bl_mean is not None:
+            fig.add_hline(y=bl_mean, line_dash="dash", line_color="#58a6ff",
+                          line_width=1, opacity=0.5, row=row, col=1)
+
+        # Baseline shading
+        if bl_start and bl_end:
+            fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5, row=row, col=1,
+                          fillcolor="rgba(74,144,217,0.08)", line_width=0)
+
+        label = FEATURE_LABELS.get(feat, feat)
+        fig.update_yaxes(title_text=label, row=row, col=1,
+                         tickfont=dict(size=8), title_font=dict(size=9))
+
+    fig.update_xaxes(title_text="Day of Year", row=n_panels, col=1)
+    fig.update_layout(
+        title=f"{station} {year}: Top Features (scorecard-validated)",
+        height=max(400, 130 * n_panels),
+        margin=dict(l=80, r=20, t=40, b=30),
+        legend=dict(orientation="h", y=-0.05, font=dict(size=9)),
+        **PLOTLY_DARK,
+    )
+
+    return dcc.Graph(figure=fig, config={"displayModeBar": True})
 
 
-def _build_reliability_lookup(scorecard):
-    """Build lookup of unreliable windows per feature from scorecard.
+def _select_top_features(scorecard, daily_feat, n=5):
+    """Select top N features from scorecard that exist in daily_feat.
 
-    Returns dict: {feature_name: [(start_doy, end_doy), ...]} for FAILED windows.
+    Picks features with highest peak |d| across any window, excluding
+    redundant pairs (keeps the stronger one).
     """
     if scorecard is None or scorecard.empty:
-        return {}
+        return []
 
-    failed = scorecard[scorecard["usable"] == False]
-    lookup = {}
-    for _, row in failed.iterrows():
-        feat = row["feature"]
-        w_start = row["window_start_doy"]
-        ws = row["window_size"]
-        w_days = 14 if ws == "2w" else 28
-        w_end = w_start + w_days
+    usable = scorecard[scorecard["usable"] == True]
+    if usable.empty:
+        return []
 
-        lookup.setdefault(feat, []).append((w_start, w_end))
+    # Best |d| per feature
+    best = usable.groupby("feature")["gate4_cohens_d"].apply(
+        lambda x: x.abs().max()
+    ).sort_values(ascending=False)
 
-    return lookup
+    # Filter to features present in daily_feat
+    available = set(daily_feat.columns)
+    selected = []
+    for feat in best.index:
+        if feat in available and len(selected) < n:
+            selected.append(feat)
+
+    return selected
 
 
 # ---------------------------------------------------------------------------
