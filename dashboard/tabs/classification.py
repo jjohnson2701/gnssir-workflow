@@ -210,24 +210,24 @@ def _add_arc_density(fig, scores, daily_feat, row, bl_start, bl_end):
     fig.update_yaxes(title_text="arcs", row=row, col=1, tickfont=dict(size=8),
                      title_font=dict(size=9))
 
-    # Baseline shading
+    # Baseline shading (blue)
     if bl_start and bl_end:
         fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5, row=row, col=1,
-                      fillcolor="rgba(45,154,107,0.1)", line_width=0)
+                      fillcolor="rgba(74,144,217,0.12)", line_width=0)
 
 
 def _add_mahal_panel(fig, scores, row, bl_start, bl_end):
-    """Mahalanobis distance with marker size scaled by n_arcs."""
+    """Mahalanobis distance with marker opacity scaled by n_arcs."""
     if "mahal_distance" not in scores.columns:
         return
 
-    # Scale marker size by n_arcs (more arcs = more confident)
+    # Use opacity for confidence (more arcs = more opaque)
     n_arcs = scores["n_arcs"].values if "n_arcs" in scores.columns else np.ones(len(scores)) * 30
-    size_min, size_max = 3, 10
+    opacity_min, opacity_max = 0.3, 1.0
     if n_arcs.max() > n_arcs.min():
-        sizes = size_min + (n_arcs - n_arcs.min()) / (n_arcs.max() - n_arcs.min()) * (size_max - size_min)
+        opacities = opacity_min + (n_arcs - n_arcs.min()) / (n_arcs.max() - n_arcs.min()) * (opacity_max - opacity_min)
     else:
-        sizes = np.full(len(scores), 5)
+        opacities = np.full(len(scores), 0.8)
 
     for state in ["baseline", "transition_in", "anomalous", "transition_out"]:
         mask = scores["state"] == state
@@ -239,9 +239,9 @@ def _add_mahal_panel(fig, scores, row, bl_start, bl_end):
             x=sub["doy"].values, y=sub["mahal_distance"].values,
             mode="markers", name=state,
             marker=dict(
-                size=sizes[idx],
+                size=6,
                 color=V3_COLORS.get(state, "#999"),
-                opacity=0.8,
+                opacity=opacities[idx],
             ),
             hovertemplate=(f"{state}<br>DOY %{{x}}<br>d=%{{y:.1f}}"
                            f"<br>n_arcs=%{{customdata}}<extra></extra>"),
@@ -249,12 +249,22 @@ def _add_mahal_panel(fig, scores, row, bl_start, bl_end):
             showlegend=False,
         ), row=row, col=1)
 
+    # Annotation explaining opacity
+    fig.add_annotation(
+        text="opacity = arc count",
+        xref="paper", yref=f"y{row}" if row > 1 else "y",
+        x=1.0, y=1.0, xanchor="right", yanchor="top",
+        showarrow=False, font=dict(size=8, color="#8b949e"),
+        row=row, col=1,
+    )
+
     fig.update_yaxes(title_text="Mahal d", row=row, col=1, type="log",
                      tickfont=dict(size=8), title_font=dict(size=9))
 
+    # Baseline shading (blue)
     if bl_start and bl_end:
         fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5, row=row, col=1,
-                      fillcolor="rgba(45,154,107,0.1)", line_width=0)
+                      fillcolor="rgba(74,144,217,0.12)", line_width=0)
 
 
 def _add_state_strip(fig, scores, row):
@@ -277,12 +287,10 @@ def _add_state_strip(fig, scores, row):
 
 def _add_feature_panel(fig, scores, daily_feat, contrib_col, feat_name,
                         row, reliable_windows, bl_start, bl_end):
-    """Feature contribution panel with reliability shading.
+    """Feature contribution panel — line + filled area.
 
-    Shows the raw feature value as a line AND the anomaly contribution as
-    filled area. Unreliable windows (per scorecard) are shaded gray.
+    Reliability info is shown in the heatmap below, not overlaid here.
     """
-    # Contribution from anomaly scores
     if contrib_col in scores.columns:
         vals = scores[contrib_col].values
         fig.add_trace(go.Scatter(
@@ -295,16 +303,10 @@ def _add_feature_panel(fig, scores, daily_feat, contrib_col, feat_name,
 
     fig.update_yaxes(tickfont=dict(size=7), title_font=dict(size=9), row=row, col=1)
 
-    # Baseline shading
+    # Baseline shading (blue)
     if bl_start and bl_end:
         fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5, row=row, col=1,
-                      fillcolor="rgba(45,154,107,0.1)", line_width=0)
-
-    # Unreliable window shading from scorecard
-    unreliable = reliable_windows.get(feat_name, [])
-    for (w_start, w_end) in unreliable:
-        fig.add_vrect(x0=w_start - 0.5, x1=w_end + 0.5, row=row, col=1,
-                      fillcolor="rgba(139,148,158,0.2)", line_width=0)
+                      fillcolor="rgba(74,144,217,0.12)", line_width=0)
 
 
 def _build_reliability_lookup(scorecard):
@@ -334,9 +336,10 @@ def _build_reliability_lookup(scorecard):
 # ---------------------------------------------------------------------------
 
 def _build_reliability_heatmap(scorecard, station, year):
-    """Heatmap: features x DOY windows, colored by pass/fail and |d|.
+    """Heatmap: features x DOY windows, colored by |Cohen's d|.
 
-    Shows at a glance which features are trustworthy where.
+    Green cells = usable (intensity shows effect size). Dark cells = failed.
+    Only features that pass in at least one window are shown.
     """
     if scorecard is None or scorecard.empty:
         return html.Div()
@@ -346,21 +349,27 @@ def _build_reliability_heatmap(scorecard, station, year):
     if sc.empty:
         sc = scorecard.copy()
 
-    # Get features sorted by max |d| (best at top)
-    feat_order = (sc.groupby("feature")["gate4_cohens_d"]
+    # Only keep features that are usable in at least one window
+    usable_features = set(sc[sc["usable"] == True]["feature"].unique())
+    if not usable_features:
+        return html.Div("No features passed all 5 gates in any window.",
+                        style={"color": DARK_TEXT, "padding": "8px"})
+
+    # Sort by max |d| (best at top of chart = bottom of list for plotly)
+    feat_order = (sc[sc["feature"].isin(usable_features)]
+                   .groupby("feature")["gate4_cohens_d"]
                    .apply(lambda x: x.abs().max())
                    .sort_values(ascending=True))
-    # Keep top 20 for readability
-    feat_order = feat_order.tail(20)
     features = feat_order.index.tolist()
 
     windows = sorted(sc["window_start_doy"].unique())
     if not features or not windows:
         return html.Div()
 
-    # Build matrix
+    # Build matrix: |d| for usable, NaN for failed/missing
     z_matrix = np.full((len(features), len(windows)), np.nan)
     text_matrix = [[""] * len(windows) for _ in range(len(features))]
+    hover_matrix = [[""] * len(windows) for _ in range(len(features))]
 
     for i, feat in enumerate(features):
         for j, w in enumerate(windows):
@@ -369,26 +378,25 @@ def _build_reliability_heatmap(scorecard, station, year):
                 continue
             r = row.iloc[0]
             if r["usable"]:
-                z_matrix[i, j] = abs(r["gate4_cohens_d"]) if pd.notna(r["gate4_cohens_d"]) else 0
-                text_matrix[i][j] = f"|d|={abs(r['gate4_cohens_d']):.1f}"
+                d_val = abs(r["gate4_cohens_d"]) if pd.notna(r["gate4_cohens_d"]) else 0
+                z_matrix[i, j] = d_val
+                text_matrix[i][j] = f"{d_val:.1f}"
+                hover_matrix[i][j] = f"|d|={d_val:.2f}"
             else:
-                reason = r.get("failure_reason", "")
-                z_matrix[i, j] = -0.5  # negative = failed
-                abbrev = {"insufficient_data": "data", "untrustworthy_computation": "health",
-                          "unstable_baseline": "CV", "non_discriminant": "weak",
-                          "redundant": "redun"}.get(reason, reason[:5])
-                text_matrix[i][j] = abbrev
+                z_matrix[i, j] = 0  # dark cell
+                text_matrix[i][j] = ""
+                hover_matrix[i][j] = r.get("failure_reason", "failed")
 
     labels = [FEATURE_LABELS.get(f, f) for f in features]
 
-    # Custom colorscale: gray for failed, green gradient for passing
+    # Green-only colorscale: dark = no signal, bright green = strong signal
+    z_max = max(3, np.nanmax(z_matrix) if np.any(np.isfinite(z_matrix)) else 3)
     colorscale = [
-        [0.0, "#484f58"],    # failed (negative values)
-        [0.25, "#484f58"],
-        [0.25, "#1a4028"],   # weak pass
-        [0.5, "#2d9a6b"],    # medium d
-        [0.75, "#4ac89a"],   # strong d
-        [1.0, "#a8f0d4"],    # very strong d
+        [0.0, "#161b22"],    # no discrimination (dark background)
+        [0.15, "#1a3a28"],   # weak
+        [0.35, "#2d9a6b"],   # medium effect
+        [0.6, "#4ac89a"],    # strong
+        [1.0, "#a8f0d4"],    # very strong
     ]
 
     fig = go.Figure(data=go.Heatmap(
@@ -397,18 +405,26 @@ def _build_reliability_heatmap(scorecard, station, year):
         y=labels,
         text=text_matrix,
         texttemplate="%{text}",
-        textfont=dict(size=8),
+        textfont=dict(size=9, color="#e0e0e0"),
+        customdata=hover_matrix,
         colorscale=colorscale,
-        zmin=-1, zmax=max(5, np.nanmax(z_matrix[z_matrix > 0]) if np.any(z_matrix > 0) else 5),
-        colorbar=dict(title=dict(text="|d|", font=dict(size=10)), tickfont=dict(size=8)),
-        hovertemplate="Feature: %{y}<br>Window: %{x}<br>%{text}<extra></extra>",
+        zmin=0, zmax=z_max,
+        colorbar=dict(
+            title=dict(text="Cohen's |d|", font=dict(size=10)),
+            tickfont=dict(size=8),
+            tickvals=[0, 0.5, 1, 2, 3] if z_max <= 5 else None,
+        ),
+        hovertemplate="<b>%{y}</b><br>%{x}<br>%{customdata}<extra></extra>",
     ))
 
     fig.update_layout(
-        title=f"{station} {year}: Feature Reliability (4-week windows)",
-        height=max(300, 22 * len(features) + 80),
-        margin=dict(l=160, r=60, t=40, b=40),
-        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
+        title=dict(
+            text=f"{station} {year}: Feature Discriminability by Window (4-week, stride 1-week)",
+            font=dict(size=13),
+        ),
+        height=max(250, 24 * len(features) + 100),
+        margin=dict(l=180, r=60, t=50, b=50),
+        xaxis=dict(tickangle=45, tickfont=dict(size=8), side="bottom"),
         yaxis=dict(tickfont=dict(size=9)),
         **PLOTLY_DARK,
     )
