@@ -56,12 +56,9 @@ def _render_analysis(station, year, scores, scorecard, baseline_def):
     # Scorecard summary
     scorecard_panel = _build_scorecard_panel(scorecard, station, year) if scorecard is not None else html.Div()
 
-    # Confidence-filtered view: what remains when we remove unreliable periods
-    confidence_fig = _build_confidence_view(scores, scorecard, baseline_def,
-                                            station, year) if scorecard is not None else html.Div()
-
-    # Failure timeline: where and why features fail gates
-    failure_fig = _build_failure_timeline(scorecard, station, year) if scorecard is not None else html.Div()
+    # Feature coverage view: usable features per window + failure breakdown
+    coverage_fig = _build_confidence_view(scores, scorecard, baseline_def,
+                                          station, year) if scorecard is not None else html.Div()
 
     # Reliability heatmap (collapsible)
     heatmap = _build_reliability_heatmap(scorecard, station, year) if scorecard is not None else html.Div()
@@ -71,8 +68,7 @@ def _render_analysis(station, year, scores, scorecard, baseline_def):
         dcc.Graph(figure=main_fig, config={"displayModeBar": True}),
         feat_fig,
         scorecard_panel,
-        confidence_fig,
-        failure_fig,
+        coverage_fig,
         html.Details([
             html.Summary("Feature Discriminability Heatmap",
                          style={"cursor": "pointer", "color": "#58a6ff",
@@ -372,12 +368,13 @@ def _select_top_features(scorecard, daily_feat, n=5):
 # ---------------------------------------------------------------------------
 
 def _build_confidence_view(scores, scorecard, baseline_def, station, year):
-    """Show anomaly scores filtered by feature reliability.
+    """Show per-DOY feature coverage: how many features pass each gate.
 
-    For each DOY, compute how many features have usable scorecard entries
-    in the window containing that DOY. Days with more usable features
-    have higher confidence. Shows the original Mahalanobis signal with
-    confidence shading and a "high-confidence anomalous" highlight.
+    For each evaluation window, we know how many features passed all 5 gates.
+    This plot shows that count over time, answering: when do we have the most
+    (and fewest) trustworthy features backing the anomaly signal?
+
+    Also breaks down failures by gate to show what's limiting confidence.
     """
     if scores is None or scorecard is None or scorecard.empty:
         return html.Div()
@@ -386,85 +383,96 @@ def _build_confidence_view(scores, scorecard, baseline_def, station, year):
     if sc.empty:
         return html.Div()
 
-    # For each DOY, count usable features in any 4w window covering it
-    all_doys = sorted(scores["doy"].unique())
-    n_usable_per_doy = {}
+    # Per-window stats
+    windows = sorted(sc["window_start_doy"].unique())
     total_features = sc["feature"].nunique()
 
-    for doy in all_doys:
-        # Find windows that contain this DOY (window_start <= doy < window_start + 28)
-        covering = sc[(sc["window_start_doy"] <= doy) & (sc["window_start_doy"] + 28 > doy)]
-        if covering.empty:
-            n_usable_per_doy[doy] = 0
-        else:
-            # Count features usable in ANY covering window
-            n_usable_per_doy[doy] = covering[covering["usable"] == True]["feature"].nunique()
+    w_data = []
+    for w in windows:
+        wsc = sc[sc["window_start_doy"] == w]
+        n_usable = wsc["usable"].sum()
+        n_total = len(wsc)
+        # Count by failure reason
+        fails = wsc[wsc["usable"] == False]
+        reason_counts = fails["failure_reason"].value_counts().to_dict()
+        w_data.append({
+            "window_mid": w + 14,  # center of 4w window
+            "n_usable": n_usable,
+            "n_total": n_total,
+            "pct_usable": n_usable / max(n_total, 1) * 100,
+            **{f"n_{r}": reason_counts.get(r, 0) for r in
+               ["insufficient_data", "untrustworthy_computation",
+                "unstable_baseline", "non_discriminant", "redundant"]},
+        })
 
-    scores_c = scores.copy()
-    scores_c["n_usable"] = scores_c["doy"].map(n_usable_per_doy).fillna(0).astype(int)
-    scores_c["confidence"] = scores_c["n_usable"] / max(total_features, 1)
+    wdf = pd.DataFrame(w_data)
 
-    # Threshold: "high confidence" = at least 30% of features usable
-    high_conf = scores_c["n_usable"] >= total_features * 0.3
-    low_conf = ~high_conf
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.6, 0.4], vertical_spacing=0.05,
+                        subplot_titles=["Usable Features per Window",
+                                        "Why Features Are Excluded"])
 
-    fig = go.Figure()
+    # Top: usable feature count as bar
+    fig.add_trace(go.Bar(
+        x=wdf["window_mid"], y=wdf["n_usable"],
+        marker_color=["#2d9a6b" if p >= 50 else "#d29922" if p >= 25 else "#d94452"
+                       for p in wdf["pct_usable"]],
+        hovertemplate="DOY %{x}<br>%{y}/" + str(total_features) + " features usable (%{customdata:.0f}%)<extra></extra>",
+        customdata=wdf["pct_usable"],
+        showlegend=False,
+    ), row=1, col=1)
 
-    # Low confidence days — faded
-    if low_conf.any():
-        sub = scores_c[low_conf]
-        fig.add_trace(go.Scatter(
-            x=sub["doy"], y=sub["mahal_distance"],
-            mode="markers", name="Low confidence",
-            marker=dict(size=5, color="#484f58", opacity=0.4,
-                        symbol="x"),
-            hovertemplate="DOY %{x}<br>d=%{y:.1f}<br>%{customdata} usable features<extra>Low confidence</extra>",
-            customdata=sub["n_usable"],
-        ))
+    fig.update_yaxes(title_text="usable features", row=1, col=1,
+                     tickfont=dict(size=8), title_font=dict(size=9))
 
-    # High confidence days — colored by state
-    if high_conf.any():
-        sub_hc = scores_c[high_conf]
-        for state in ["baseline", "anomalous", "transition_in", "transition_out"]:
-            mask = sub_hc["state"] == state
-            if mask.sum() == 0:
-                continue
-            sub = sub_hc[mask]
-            fig.add_trace(go.Scatter(
-                x=sub["doy"], y=sub["mahal_distance"],
-                mode="markers", name=f"{state} (confident)",
-                marker=dict(size=6, color=V3_COLORS.get(state, "#999"), opacity=0.9),
-                hovertemplate=(f"{state}<br>DOY %{{x}}<br>d=%{{y:.1f}}"
-                               f"<br>%{{customdata}} usable features<extra></extra>"),
-                customdata=sub["n_usable"],
-            ))
+    # Bottom: failure breakdown stacked
+    reasons = [
+        ("n_insufficient_data", "Insufficient Data", _FAILURE_COLORS["insufficient_data"]),
+        ("n_untrustworthy_computation", "Untrustworthy", _FAILURE_COLORS["untrustworthy_computation"]),
+        ("n_unstable_baseline", "Unstable Baseline", _FAILURE_COLORS["unstable_baseline"]),
+        ("n_non_discriminant", "Non-Discriminant", _FAILURE_COLORS["non_discriminant"]),
+        ("n_redundant", "Redundant", _FAILURE_COLORS["redundant"]),
+    ]
 
-    # Stats annotation
-    n_hc = high_conf.sum()
-    n_hc_anom = ((high_conf) & (scores_c["state"] == "anomalous")).sum()
-    n_total_anom = (scores_c["state"] == "anomalous").sum()
+    for col_name, label, color in reasons:
+        if col_name in wdf.columns:
+            fig.add_trace(go.Bar(
+                x=wdf["window_mid"], y=wdf[col_name], name=label,
+                marker_color=color,
+                hovertemplate=f"{label}<br>DOY %{{x}}<br>%{{y}} features<extra></extra>",
+            ), row=2, col=1)
+
+    fig.update_yaxes(title_text="excluded", row=2, col=1,
+                     tickfont=dict(size=8), title_font=dict(size=9))
 
     bl_start = baseline_def["start_doy"] if baseline_def else None
     bl_end = baseline_def["end_doy"] if baseline_def else None
     if bl_start and bl_end:
-        fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5,
-                      fillcolor="rgba(74,144,217,0.12)", line_width=0)
+        for r in [1, 2]:
+            fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5, row=r, col=1,
+                          fillcolor="rgba(74,144,217,0.08)", line_width=0)
 
+    fig.update_xaxes(title_text="Window Center DOY", row=2, col=1)
     fig.update_layout(
-        title=f"Confidence-Filtered Anomaly Scores ({n_hc}/{len(scores_c)} days above 30% feature coverage, "
-              f"{n_hc_anom}/{n_total_anom} anomalous days confirmed)",
-        xaxis_title="Day of Year",
-        yaxis_title="Mahalanobis d",
-        yaxis_type="log", yaxis_dtick=1,
-        height=280,
-        margin=dict(l=60, r=20, t=50, b=30),
-        legend=dict(orientation="h", y=-0.2, font=dict(size=9)),
+        height=350,
+        margin=dict(l=60, r=20, t=40, b=30),
+        barmode="stack",
+        legend=dict(orientation="h", y=-0.15, font=dict(size=8)),
         **PLOTLY_DARK,
     )
 
+    for ann in fig.layout.annotations:
+        ann.update(font=dict(size=10, color="#8b949e"), x=0.01, xanchor="left")
+
+    # Summary text
+    max_usable = wdf["n_usable"].max()
+    min_usable = wdf["n_usable"].min()
+    best_window = wdf.loc[wdf["n_usable"].idxmax(), "window_mid"]
+
     return html.Div([
-        html.P("Days with fewer validated features are shown as faded X marks. "
-               "Only colored dots have enough usable features for confident anomaly detection.",
+        html.P(f"Per 4-week window: {min_usable}-{max_usable} features pass all 5 gates "
+               f"(out of {total_features}). Best coverage near DOY {int(best_window)}. "
+               f"Green = >50% usable, yellow = 25-50%, red = <25%.",
                style={"color": "#8b949e", "fontSize": "0.8rem", "margin": "4px 0"}),
         dcc.Graph(figure=fig, config={"displayModeBar": True}),
     ], style={"marginTop": "8px"})
