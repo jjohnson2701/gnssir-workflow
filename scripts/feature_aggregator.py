@@ -1,23 +1,22 @@
-# ABOUTME: Layer 2 feature aggregator — produces daily_features.parquet from arc_table
+# ABOUTME: Layer 2 feature aggregator — produces daily_features from arc-level data
 # ABOUTME: Aggregates per-arc observables to daily × sector resolution with z-score normalization,
 # ABOUTME: matched-arc ΔRH, circular phase stats, and interfrequency spread
 
 """
 Daily feature aggregator for GNSS-IR arc-level data (Layer 2).
 
-Reads arc_table.parquet (Layer 1 output) and station config, computes
-daily × azimuth-sector aggregates of all physical observables, then
-writes daily_features.parquet.
+Reads arc_features.csv (L1 output, SNR-derived features) and gnssrefl per_arc
+data, merges them, then computes daily × azimuth-sector aggregates of all
+physical observables. Writes daily_features.csv (default) or .parquet.
 
-This is the central feature table consumed by ice classifiers, dashboards,
-and notebooks. It replaces transient computations previously scattered
-across ice_classifier._extract_indicators(), generate_ice_notebook.py cells,
-and ad-hoc dashboard code.
+This is the central feature table consumed by anomaly detection, dashboards,
+and downstream analysis.
 
 Usage:
     python scripts/feature_aggregator.py --station ROSS --year 2022
     python scripts/feature_aggregator.py --all
     python scripts/feature_aggregator.py --all --force --log-level DEBUG
+    python scripts/feature_aggregator.py --station ROSS --year 2022 --format parquet
 """
 
 import argparse
@@ -34,13 +33,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger(__name__)
 
-# SNR feature columns eligible for z-score normalization
-# MS added per C14 finding: per-(sat, freq) z-scoring transforms MS from
-# d=0.19 to d=1.04 by removing antenna gain / geometry baselines.
-_ZSCORE_FEATURES = ["CLR", "AF", "PR", "gamma", "MS"]
+# SNR feature columns eligible for z-score normalization.
+# All features benefit from per-(sat, freq) z-scoring to remove antenna/geometry
+# baselines (C14: MS variance 87.8% from PRN/freq identity).
+_ZSCORE_FEATURES = ["CLR", "AF", "PR", "gamma", "MS", "VS", "SP"]
 
-# SNR feature columns to compute medians for (raw + z-scored)
-_SNR_FEATURE_COLS = ["CLR", "PR", "AF", "gamma", "MS", "VS"]
+# SNR feature columns to compute medians for (raw + z-scored + CV)
+_SNR_FEATURE_COLS = ["CLR", "PR", "AF", "gamma", "MS", "VS", "SP"]
 
 # Minimum arcs per satellite to compute z-score reference stats
 _MIN_REF_ARCS = 10
@@ -68,11 +67,11 @@ def _load_station_config(station):
 # ---------------------------------------------------------------------------
 
 def normalize_features_per_satellite(arc_table, feature_cols=None,
-                                     ice_free_months=None):
+                                     baseline_period=None):
     """Z-score normalize SNR features per (satellite PRN, frequency) combo.
 
-    For each feature, compute mean and std per (sat, freq) from ice-free
-    months (or full year if not specified), then apply (value - mean) / std.
+    For each feature, compute mean and std per (sat, freq) from the baseline
+    period months (or full year if not specified), then apply (value - mean) / std.
     Writes new columns with '_z' suffix (e.g., CLR_z, AF_z, MS_z).
 
     Per-(sat, freq) grouping is more physically correct than per-sat alone
@@ -80,13 +79,13 @@ def normalize_features_per_satellite(arc_table, feature_cols=None,
     gain pattern and baseline SNR (Strandberg 2017, Purnell 2024). This is
     essential for MS where 87.8% of variance is from PRN/freq identity (C12/C14).
 
-    Combos only seen during ice months fall back to full-year stats.
+    Combos only seen outside the baseline period fall back to full-year stats.
     Combos with < 10 reference arcs are left un-normalized (NaN in _z column).
 
     Args:
         arc_table: DataFrame with per-arc data (must have 'date', 'sat', 'freq' columns)
         feature_cols: list of column names to normalize (default: _ZSCORE_FEATURES)
-        ice_free_months: list of month ints for reference period, or None for full year
+        baseline_period: list of month ints for reference period, or None for full year
 
     Returns:
         arc_table with added _z columns (modified in place for efficiency).
@@ -104,8 +103,8 @@ def normalize_features_per_satellite(arc_table, feature_cols=None,
     # Compute month for filtering
     months = pd.to_datetime(arc_table["date"]).dt.month
 
-    if ice_free_months:
-        ref_mask = months.isin(ice_free_months)
+    if baseline_period:
+        ref_mask = months.isin(baseline_period)
         ref_data = arc_table[ref_mask]
     else:
         ref_data = arc_table
@@ -119,8 +118,8 @@ def normalize_features_per_satellite(arc_table, feature_cols=None,
 
         combo_stats = ref_data.groupby(group_cols)[col].agg(["mean", "std", "count"])
 
-        # Fall back to full-year stats for combos only seen during ice months
-        if ice_free_months:
+        # Fall back to full-year stats for combos only seen outside baseline
+        if baseline_period:
             all_combos = set(arc_table.groupby(group_cols).groups.keys())
             ref_combos = set(combo_stats.index)
             missing_combos = all_combos - ref_combos
@@ -132,7 +131,7 @@ def normalize_features_per_satellite(arc_table, feature_cols=None,
                     if combo in fallback.index:
                         combo_stats.loc[combo] = fallback.loc[combo]
                         logger.debug(
-                            f"Combo {combo}: no ice-free data for {col}, "
+                            f"Combo {combo}: no baseline data for {col}, "
                             f"using full-year stats"
                         )
 
@@ -401,12 +400,19 @@ def _aggregate_sector(sector_arcs, has_snr, has_phase, has_zscore):
             row["wse_mean"] = float(wse.mean())
             row["wse_std"] = float(wse.std())
 
-    # SNR feature medians (raw)
+    # SNR feature medians (raw) + coefficient of variation
     if has_snr:
         for col in _SNR_FEATURE_COLS:
             if col in sector_arcs.columns:
                 vals = sector_arcs[col].dropna()
-                row[f"{col.lower()}_med"] = float(vals.median()) if len(vals) > 0 else np.nan
+                med = float(vals.median()) if len(vals) > 0 else np.nan
+                row[f"{col.lower()}_med"] = med
+                # CV = std / |mean| — measures spread relative to level
+                if len(vals) >= 2:
+                    mean_val = vals.mean()
+                    row[f"{col.lower()}_cv"] = float(vals.std() / abs(mean_val)) if abs(mean_val) > 1e-12 else np.nan
+                else:
+                    row[f"{col.lower()}_cv"] = np.nan
 
     # SNR feature medians (z-scored)
     if has_zscore:
@@ -462,10 +468,12 @@ def _aggregate_sector(sector_arcs, has_snr, has_phase, has_zscore):
         for band, band_arcs in sector_arcs.groupby("freq_group"):
             if band == "OTHER":
                 continue
+            row[f"n_arcs_{band}"] = len(band_arcs)
             row[f"rh_{band}_median"] = float(band_arcs["RH"].median())
             row[f"rh_{band}_count"] = len(band_arcs)
             if len(band_arcs) >= 2:
                 row[f"amp_{band}_mean"] = float(band_arcs["Amp"].mean())
+                row[f"amp_{band}_med"] = float(band_arcs["Amp"].median())
 
         # Frequency amplitude ratios (C14: L1/L5 anti-correlated at GLBX, r=-0.39)
         # Captures frequency-dependent scattering that pooled amp_mean hides.
@@ -484,61 +492,106 @@ def _aggregate_sector(sector_arcs, has_snr, has_phase, has_zscore):
 # Main aggregation
 # ---------------------------------------------------------------------------
 
-def aggregate_daily_features(station, year, results_dir=None):
-    """Produce daily_features.parquet from arc_table.parquet.
+def aggregate_daily_features(station, year, results_dir=None,
+                             output_format="csv"):
+    """Produce daily_features from arc-level data.
 
-    Aggregates per-arc data to daily × azimuth_bin resolution.
-    Includes pooled rows (azimuth_bin = -1) for station-level daily values.
+    Reads arc_features.csv (SNR-derived features from L1) and gnssrefl per_arc
+    data (RH, Amp, PkNoise), merges them, then aggregates to daily × azimuth_bin
+    resolution. Includes pooled rows (azimuth_bin = -1) for station-level daily values.
+
+    Falls back to arc_table.parquet if arc_features.csv is not available.
 
     Args:
         station: Station ID (e.g., "ROSS")
         year: Processing year
         results_dir: Path to results directory (default: results_annual/{station})
+        output_format: "csv" (default) or "parquet"
 
     Returns:
-        Path to daily_features.parquet, or None on failure.
+        Path to daily_features output file, or None on failure.
     """
     if results_dir is None:
         results_dir = PROJECT_ROOT / "results_annual" / station
     results_dir = Path(results_dir)
 
-    arc_path = results_dir / f"{station}_{year}_arc_table.parquet"
-    out_path = results_dir / f"{station}_{year}_daily_features.parquet"
+    ext = "csv" if output_format == "csv" else "parquet"
+    out_path = results_dir / f"{station}_{year}_daily_features.{ext}"
 
-    if not arc_path.exists():
-        logger.error(f"arc_table not found: {arc_path}")
+    # --- Load arc data ---
+    # Prefer arc_features.csv (Phase 1 output) merged with gnssrefl per_arc
+    arc_features_path = results_dir / f"{station}_{year}_arc_features.csv"
+    arc_table_path = results_dir / f"{station}_{year}_arc_table.parquet"
+
+    if arc_features_path.exists():
+        arc_features = pd.read_csv(arc_features_path)
+        logger.info(f"Loaded arc_features.csv: {len(arc_features)} rows")
+
+        # Merge with gnssrefl per_arc for RH, Amp, PkNoise and metadata
+        from scripts.results_handler import resolve_layer1
+        per_arc_path = resolve_layer1(station, year)
+        if per_arc_path is not None:
+            per_arc = pd.read_parquet(per_arc_path)
+            join_cols = ["doy", "sat", "UTCtime", "rise", "freq"]
+            # Keep gnssrefl columns not in arc_features
+            gnssrefl_cols = [c for c in per_arc.columns if c not in arc_features.columns or c in join_cols]
+            arc_table = per_arc[gnssrefl_cols].merge(arc_features, on=join_cols, how="left")
+            logger.info(f"Merged with gnssrefl per_arc: {len(arc_table)} arcs")
+        else:
+            arc_table = arc_features
+            logger.warning("gnssrefl per_arc not found — using arc_features only")
+    elif arc_table_path.exists():
+        # Fallback: legacy arc_table.parquet (pre-Phase 1)
+        arc_table = pd.read_parquet(arc_table_path)
+        logger.info(f"Loaded arc_table.parquet (legacy): {len(arc_table)} arcs")
+    else:
+        logger.error(f"No arc data found for {station} {year}")
         return None
 
-    arc_table = pd.read_parquet(arc_path)
-    logger.info(f"Loaded arc_table: {len(arc_table)} arcs, "
+    # Ensure date column exists
+    if "date" not in arc_table.columns and "doy" in arc_table.columns:
+        arc_table["date"] = pd.to_datetime(
+            arc_table.get("year", year).astype(str) + "-" +
+            arc_table["doy"].astype(str), format="%Y-%j"
+        )
+
+    logger.info(f"Working with {len(arc_table)} arcs, "
                 f"{arc_table['date'].nunique()} days")
 
     # Detect available columns
     has_snr = "CLR" in arc_table.columns
-    has_phase = "phase" in arc_table.columns
+    has_phase = "phase" in arc_table.columns or "phase_deg" in arc_table.columns
     has_freq_group = "freq_group" in arc_table.columns
+
+    # Convert phase_deg back to radians if needed (arc_features.csv stores degrees)
+    if "phase_deg" in arc_table.columns and "phase" not in arc_table.columns:
+        arc_table["phase"] = np.radians(arc_table["phase_deg"])
+        has_phase = True
 
     if has_snr:
         logger.info("SNR features detected — will compute feature medians and z-scores")
     else:
         logger.info("No SNR features — computing RH/Amp/PkNoise stats only")
 
-    # Load station config for ice_free_months
+    # Load station config for baseline_period (formerly ice_free_months)
     station_cfg = _load_station_config(station)
-    ice_free_months = station_cfg.get("ice_free_months")
+    baseline_period = station_cfg.get("baseline_period",
+                                      station_cfg.get("ice_free_months"))
 
-    # Z-score normalization (adds _z columns to arc_table)
+    # Z-score normalization conditional on baseline availability
     has_zscore = False
-    if has_snr:
+    if has_snr and baseline_period is not None:
         normalize_features_per_satellite(
             arc_table,
             feature_cols=[c for c in _ZSCORE_FEATURES if c in arc_table.columns],
-            ice_free_months=ice_free_months,
+            baseline_period=baseline_period,
         )
         has_zscore = any(f"{c}_z" in arc_table.columns for c in _ZSCORE_FEATURES)
         if has_zscore:
             logger.info(f"Z-score normalization applied "
-                        f"(ice_free_months={ice_free_months})")
+                        f"(baseline_period={baseline_period})")
+    elif has_snr:
+        logger.info("No baseline_period configured — z-scores skipped")
 
     # PRN discriminating-power weights (optional — requires compute_prn_weights.py)
     prn_weights = load_prn_weights(station, year, results_dir)
@@ -550,6 +603,8 @@ def aggregate_daily_features(station, year, results_dir=None):
 
     # Group by (date, azimuth_bin) and aggregate
     dates = sorted(arc_table["date"].unique())
+    if "azimuth_bin" not in arc_table.columns:
+        arc_table["azimuth_bin"] = 0
     az_bins = sorted(arc_table["azimuth_bin"].unique())
     logger.info(f"Aggregating: {len(dates)} days × {len(az_bins)} sectors")
 
@@ -591,12 +646,26 @@ def aggregate_daily_features(station, year, results_dir=None):
 
     daily_features = pd.DataFrame(rows)
 
+    # Add year and doy columns for downstream convenience
+    daily_features["year"] = year
+    if "date" in daily_features.columns:
+        daily_features["doy"] = pd.to_datetime(daily_features["date"]).dt.dayofyear
+
     # Ensure key columns are first
-    key_cols = ["date", "azimuth_bin"]
+    key_cols = ["year", "doy", "date", "azimuth_bin", "n_arcs"]
+    key_cols = [c for c in key_cols if c in daily_features.columns]
     other_cols = [c for c in daily_features.columns if c not in key_cols]
     daily_features = daily_features[key_cols + sorted(other_cols)]
 
-    daily_features.to_parquet(out_path, index=False, engine="pyarrow")
+    if output_format == "parquet":
+        daily_features.to_parquet(out_path, index=False, engine="pyarrow")
+    else:
+        daily_features.to_csv(out_path, index=False, float_format="%.6f")
+
+    # Also write parquet companion for dashboard backward compatibility
+    parquet_companion = results_dir / f"{station}_{year}_daily_features.parquet"
+    if output_format == "csv" and not parquet_companion.exists():
+        daily_features.to_parquet(parquet_companion, index=False, engine="pyarrow")
 
     n_sectors = daily_features[daily_features["azimuth_bin"] >= 0]["azimuth_bin"].nunique()
     n_pooled = (daily_features["azimuth_bin"] == -1).sum()
@@ -625,14 +694,16 @@ def aggregate_daily_features(station, year, results_dir=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Layer 2: aggregate arc_table → daily_features.parquet"
+        description="Layer 2: aggregate arc data → daily_features"
     )
     parser.add_argument("--station", help="Station ID (e.g., ROSS)")
     parser.add_argument("--year", type=int, help="Year (e.g., 2022)")
     parser.add_argument("--all", action="store_true",
-                        help="Process all station-years with arc_table.parquet")
+                        help="Process all station-years with arc data")
     parser.add_argument("--force", action="store_true",
                         help="Rewrite even if daily_features already exists")
+    parser.add_argument("--format", choices=["csv", "parquet"], default="csv",
+                        help="Output format (default: csv)")
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
@@ -646,20 +717,22 @@ def main():
     if args.all:
         from scripts.results_handler import discover_station_years
         targets = discover_station_years(require_file="arc_table.parquet")
-        logger.info(f"Found {len(targets)} station-years with arc_table.parquet")
+        logger.info(f"Found {len(targets)} station-years with arc data")
     elif args.station and args.year:
         targets = [(args.station, args.year)]
     else:
         parser.error("Specify --station and --year, or use --all")
 
+    ext = "csv" if args.format == "csv" else "parquet"
     success = 0
     for station, year in targets:
         results_dir = PROJECT_ROOT / "results_annual" / station
-        out_path = results_dir / f"{station}_{year}_daily_features.parquet"
+        out_path = results_dir / f"{station}_{year}_daily_features.{ext}"
         if out_path.exists() and not args.force:
             logger.info(f"Skipping {station} {year} (daily_features exists, use --force)")
             continue
-        result = aggregate_daily_features(station, year, results_dir=results_dir)
+        result = aggregate_daily_features(station, year, results_dir=results_dir,
+                                          output_format=args.format)
         if result is not None:
             success += 1
 

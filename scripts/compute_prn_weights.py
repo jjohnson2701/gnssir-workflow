@@ -77,7 +77,7 @@ def compute_prn_weights(station, year, winter_months=None):
             {
                 "station": str,
                 "year": int,
-                "ice_free_months": [...],
+                "baseline_period": [...],
                 "winter_months": [...],
                 "features": {
                     "CLR": {"1_1": {"d": 0.85, "weight": 0.85, "n_summer": 40, "n_winter": 35}, ...},
@@ -88,7 +88,8 @@ def compute_prn_weights(station, year, winter_months=None):
             }
     """
     station_cfg = _load_station_config(station)
-    ice_free_months = station_cfg.get("ice_free_months", [6, 7, 8])
+    baseline_period = station_cfg.get("baseline_period",
+                                      station_cfg.get("ice_free_months", [6, 7, 8]))
     if winter_months is None:
         winter_months = _WINTER_MONTHS_DEFAULT
 
@@ -101,23 +102,23 @@ def compute_prn_weights(station, year, winter_months=None):
     arc_table = pd.read_parquet(arc_path)
     months = pd.to_datetime(arc_table["date"]).dt.month
 
-    summer_mask = months.isin(ice_free_months)
+    summer_mask = months.isin(baseline_period)
     winter_mask = months.isin(winter_months)
 
     logger.info(f"Arcs: {len(arc_table)} total, "
-                f"{summer_mask.sum()} ice-free, {winter_mask.sum()} winter")
+                f"{summer_mask.sum()} baseline, {winter_mask.sum()} winter")
 
     if summer_mask.sum() < 50 or winter_mask.sum() < 50:
         logger.error("Insufficient seasonal data for weight computation")
         return None
 
-    summer_arcs = arc_table[summer_mask]
+    baseline_arcs = arc_table[summer_mask]
     winter_arcs = arc_table[winter_mask]
 
     output = {
         "station": station,
         "year": year,
-        "ice_free_months": ice_free_months,
+        "baseline_period": baseline_period,
         "winter_months": winter_months,
         "features": {},
         "summary": {},
@@ -135,8 +136,8 @@ def compute_prn_weights(station, year, winter_months=None):
         for sat, freq in all_combos:
             key = f"{sat}_{freq}"
 
-            summer_vals = summer_arcs.loc[
-                (summer_arcs["sat"] == sat) & (summer_arcs["freq"] == freq),
+            summer_vals = baseline_arcs.loc[
+                (baseline_arcs["sat"] == sat) & (baseline_arcs["freq"] == freq),
                 feature
             ].dropna()
             winter_vals = winter_arcs.loc[
