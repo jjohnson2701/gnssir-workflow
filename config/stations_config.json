@@ -61,7 +61,7 @@
       "50-60": "land_contamination",
       "notes": "No seasonal amplitude change (ratio 0.98x). Likely exposed rock or coastline, not water. Data preserved but excluded from water/ice analysis."
     },
-    "ice_free_months": [
+    "baseline_period": [
       7,
       8
     ],
@@ -102,7 +102,7 @@
     "longitude_deg": -51.746608,
     "gnssir_json_params_path": "config/nkar.json",
     "reference_gauge_id": null,
-    "ice_free_months": [
+    "baseline_period": [
       7,
       8
     ],
@@ -421,7 +421,7 @@
     "longitude_deg": -53.66145,
     "gnssir_json_params_path": "config/niaq.json",
     "reference_gauge_id": null,
-    "ice_free_months": [
+    "baseline_period": [
       7,
       8
     ],
@@ -513,7 +513,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -588,7 +588,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -684,7 +684,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -772,7 +772,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -861,7 +861,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -963,7 +963,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -1057,7 +1057,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -1147,7 +1147,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -1235,7 +1235,7 @@
     "longitude_deg": -87.519585972,
     "gnssir_json_params_path": "config/ross.json",
     "reference_gauge_id": null,
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,
@@ -1351,7 +1351,7 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
-    "ice_free_months": [
+    "baseline_period": [
       6,
       7,
       8,

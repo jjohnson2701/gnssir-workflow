@@ -57,7 +57,8 @@ def verify(station, year):
     with open(cfg_path) as f:
         all_cfg = json.load(f)
     station_cfg = all_cfg.get(station, {})
-    ice_free_months = station_cfg.get("ice_free_months")
+    ice_free_months = station_cfg.get("baseline_period",
+                                     station_cfg.get("ice_free_months"))
 
     # Two comparison passes:
     # 1. Raw medians: compare un-normalized arc_table medians vs daily_features *_med columns

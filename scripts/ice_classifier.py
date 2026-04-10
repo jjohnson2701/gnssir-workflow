@@ -600,7 +600,8 @@ def classify_station(station, year, include_s1=True):
             s1_index = pd.read_csv(idx_path)
 
     station_cfg = _load_station_config(station)
-    ice_free_months = station_cfg.get("ice_free_months", [])
+    ice_free_months = station_cfg.get("baseline_period",
+                                     station_cfg.get("ice_free_months", []))
     smoothing_window = station_cfg.get("smoothing_window", 3)
     min_arcs = station_cfg.get("min_arcs_per_sector", 3)
     suspect_bins = _load_suspect_azimuths(station_cfg)

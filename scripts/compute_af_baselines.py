@@ -66,17 +66,19 @@ def compute_baselines(station, year, max_arcs=500):
         logger.error(f"No gnssir config found for {station}")
         return None, None
 
-    # Load ice_free_months from station config
+    # Load baseline_period (formerly ice_free_months) from station config
     stations_cfg_path = PROJECT_ROOT / "config" / "stations_config.json"
-    ice_free_months = []
+    baseline_period = []
     if stations_cfg_path.exists():
         with open(stations_cfg_path) as f:
             all_cfg = json.load(f)
-        ice_free_months = all_cfg.get(station, {}).get("ice_free_months", [])
+        scfg = all_cfg.get(station, {})
+        baseline_period = scfg.get("baseline_period", scfg.get("ice_free_months", []))
 
-    if not ice_free_months:
-        logger.error(f"No ice_free_months configured for {station}")
+    if not baseline_period:
+        logger.error(f"No baseline_period configured for {station}")
         return None, None
+    ice_free_months = baseline_period  # local alias for existing logic
 
     # Load per-arc parquet to identify summer arcs
     from scripts.results_handler import resolve_layer1

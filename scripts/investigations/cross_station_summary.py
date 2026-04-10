@@ -214,7 +214,7 @@ def build_summary(results_dir: Path) -> pd.DataFrame:
         feat_path = results_dir / station / f"{station}_{year}_daily_features.parquet"
         if feat_path.exists():
             feat_df = pd.read_parquet(feat_path)
-            ice_free = scfg.get("ice_free_months", [6, 7, 8])
+            ice_free = scfg.get("baseline_period", scfg.get("ice_free_months", [6, 7, 8]))
             row.update(compute_feature_seasonality(feat_df, v3_df, ice_free))
         else:
             log.warning(f"    No daily_features for {station} {year}")
