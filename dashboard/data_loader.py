@@ -81,7 +81,32 @@ def load_per_arc(station, year):
 
 
 def load_v3(station, year):
-    """Load v3 classification (ice_classification_v3 preferred)."""
+    """Load classification data, preferring anomaly_scores.csv (observational labels).
+
+    Priority:
+      1. anomaly_scores.csv (new pipeline — observational labels)
+      2. ice_classification_v3.parquet (legacy — ice vocabulary)
+      3. ice_classification_v2.parquet
+      4. ice_state.parquet
+    """
+    # Try new anomaly_scores first
+    scores_path = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_anomaly_scores.csv"
+    if scores_path.exists():
+        df = pd.read_csv(scores_path)
+        if "state" in df.columns:
+            df["v3_state"] = df["state"]
+            df["classification_mode"] = "discovery"
+        if "doy" in df.columns and "date" not in df.columns:
+            df["date"] = pd.to_datetime(
+                df.get("year", year).astype(str) + "-" + df["doy"].astype(str),
+                format="%Y-%j"
+            )
+        if "date" in df.columns:
+            df["date_dt"] = pd.to_datetime(df["date"])
+            df["doy"] = df["date_dt"].dt.dayofyear
+        return df
+
+    # Fall back to legacy parquet
     for name in ["ice_classification_v3", "ice_classification_v2", "ice_state"]:
         p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_{name}.parquet"
         if p.exists():
@@ -96,6 +121,41 @@ def load_v3(station, year):
                 df["doy"] = df["date_dt"].dt.dayofyear
             return df
     return None
+
+
+def load_anomaly_scores(station, year):
+    """Load anomaly scores with per-feature contributions."""
+    p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_anomaly_scores.csv"
+    if not p.exists():
+        return None
+    df = pd.read_csv(p)
+    if "doy" in df.columns and "date" not in df.columns:
+        df["date"] = pd.to_datetime(
+            df.get("year", year).astype(str) + "-" + df["doy"].astype(str),
+            format="%Y-%j"
+        )
+    if "date" in df.columns:
+        df["date_dt"] = pd.to_datetime(df["date"])
+    return df
+
+
+def load_feature_scorecard(station, year):
+    """Load feature profiling scorecard."""
+    p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_feature_scorecard.csv"
+    if not p.exists():
+        return None
+    return pd.read_csv(p)
+
+
+def load_baseline_definition(station, year):
+    """Load baseline period definition."""
+    p = PROJECT_ROOT / "results_annual" / station / f"{station}_{year}_baseline_definition.csv"
+    if not p.exists():
+        return None
+    df = pd.read_csv(p)
+    if len(df) == 0:
+        return None
+    return df.iloc[0].to_dict()
 
 
 def load_snr_features(station, year):

@@ -93,7 +93,7 @@ def create_app():
             dcc.Tab(label="Overview", value="overview", style=TAB_STYLE, selected_style=TAB_SELECTED),
             dcc.Tab(label="Time Series", value="timeseries", style=TAB_STYLE, selected_style=TAB_SELECTED),
             dcc.Tab(label="Polar", value="polar", style=TAB_STYLE, selected_style=TAB_SELECTED),
-            dcc.Tab(label="Ice Classification", value="ice", style=TAB_STYLE, selected_style=TAB_SELECTED),
+            dcc.Tab(label="Analysis", value="ice", style=TAB_STYLE, selected_style=TAB_SELECTED),
             dcc.Tab(label="Imagery", value="imagery", style=TAB_STYLE, selected_style=TAB_SELECTED),
             dcc.Tab(label="Features", value="features", style=TAB_STYLE, selected_style=TAB_SELECTED),
             dcc.Tab(label="Investigation", value="investigation", style=TAB_STYLE,
