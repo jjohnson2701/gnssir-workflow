@@ -53,8 +53,17 @@ def _render_analysis(station, year, scores, scorecard, baseline_def):
     feat_fig = _build_feature_values_figure(daily_feat, scores, scorecard,
                                             baseline_def, station, year)
 
-    # Scorecard summary + reliability heatmap (collapsible)
+    # Scorecard summary
     scorecard_panel = _build_scorecard_panel(scorecard, station, year) if scorecard is not None else html.Div()
+
+    # Confidence-filtered view: what remains when we remove unreliable periods
+    confidence_fig = _build_confidence_view(scores, scorecard, baseline_def,
+                                            station, year) if scorecard is not None else html.Div()
+
+    # Failure timeline: where and why features fail gates
+    failure_fig = _build_failure_timeline(scorecard, station, year) if scorecard is not None else html.Div()
+
+    # Reliability heatmap (collapsible)
     heatmap = _build_reliability_heatmap(scorecard, station, year) if scorecard is not None else html.Div()
 
     return html.Div([
@@ -62,6 +71,8 @@ def _render_analysis(station, year, scores, scorecard, baseline_def):
         dcc.Graph(figure=main_fig, config={"displayModeBar": True}),
         feat_fig,
         scorecard_panel,
+        confidence_fig,
+        failure_fig,
         html.Details([
             html.Summary("Feature Discriminability Heatmap",
                          style={"cursor": "pointer", "color": "#58a6ff",
@@ -200,7 +211,9 @@ def _add_mahal_panel(fig, scores, row, bl_start, bl_end):
         ), row=row, col=1)
 
     fig.update_yaxes(title_text="Mahal d", row=row, col=1, type="log",
-                     tickfont=dict(size=8), title_font=dict(size=9))
+                     tickfont=dict(size=8), title_font=dict(size=9),
+                     dtick=1,  # log scale: 1 = 10^1 steps (1, 10, 100)
+                     minor=dict(showgrid=False))
 
     # Baseline shading (blue)
     if bl_start and bl_end:
@@ -351,6 +364,175 @@ def _select_top_features(scorecard, daily_feat, n=5):
 
 
 # ---------------------------------------------------------------------------
+# Failure timeline
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Confidence-filtered view
+# ---------------------------------------------------------------------------
+
+def _build_confidence_view(scores, scorecard, baseline_def, station, year):
+    """Show anomaly scores filtered by feature reliability.
+
+    For each DOY, compute how many features have usable scorecard entries
+    in the window containing that DOY. Days with more usable features
+    have higher confidence. Shows the original Mahalanobis signal with
+    confidence shading and a "high-confidence anomalous" highlight.
+    """
+    if scores is None or scorecard is None or scorecard.empty:
+        return html.Div()
+
+    sc = scorecard[scorecard["window_size"] == "4w"].copy()
+    if sc.empty:
+        return html.Div()
+
+    # For each DOY, count usable features in any 4w window covering it
+    all_doys = sorted(scores["doy"].unique())
+    n_usable_per_doy = {}
+    total_features = sc["feature"].nunique()
+
+    for doy in all_doys:
+        # Find windows that contain this DOY (window_start <= doy < window_start + 28)
+        covering = sc[(sc["window_start_doy"] <= doy) & (sc["window_start_doy"] + 28 > doy)]
+        if covering.empty:
+            n_usable_per_doy[doy] = 0
+        else:
+            # Count features usable in ANY covering window
+            n_usable_per_doy[doy] = covering[covering["usable"] == True]["feature"].nunique()
+
+    scores_c = scores.copy()
+    scores_c["n_usable"] = scores_c["doy"].map(n_usable_per_doy).fillna(0).astype(int)
+    scores_c["confidence"] = scores_c["n_usable"] / max(total_features, 1)
+
+    # Threshold: "high confidence" = at least 30% of features usable
+    high_conf = scores_c["n_usable"] >= total_features * 0.3
+    low_conf = ~high_conf
+
+    fig = go.Figure()
+
+    # Low confidence days — faded
+    if low_conf.any():
+        sub = scores_c[low_conf]
+        fig.add_trace(go.Scatter(
+            x=sub["doy"], y=sub["mahal_distance"],
+            mode="markers", name="Low confidence",
+            marker=dict(size=5, color="#484f58", opacity=0.4,
+                        symbol="x"),
+            hovertemplate="DOY %{x}<br>d=%{y:.1f}<br>%{customdata} usable features<extra>Low confidence</extra>",
+            customdata=sub["n_usable"],
+        ))
+
+    # High confidence days — colored by state
+    if high_conf.any():
+        sub_hc = scores_c[high_conf]
+        for state in ["baseline", "anomalous", "transition_in", "transition_out"]:
+            mask = sub_hc["state"] == state
+            if mask.sum() == 0:
+                continue
+            sub = sub_hc[mask]
+            fig.add_trace(go.Scatter(
+                x=sub["doy"], y=sub["mahal_distance"],
+                mode="markers", name=f"{state} (confident)",
+                marker=dict(size=6, color=V3_COLORS.get(state, "#999"), opacity=0.9),
+                hovertemplate=(f"{state}<br>DOY %{{x}}<br>d=%{{y:.1f}}"
+                               f"<br>%{{customdata}} usable features<extra></extra>"),
+                customdata=sub["n_usable"],
+            ))
+
+    # Stats annotation
+    n_hc = high_conf.sum()
+    n_hc_anom = ((high_conf) & (scores_c["state"] == "anomalous")).sum()
+    n_total_anom = (scores_c["state"] == "anomalous").sum()
+
+    bl_start = baseline_def["start_doy"] if baseline_def else None
+    bl_end = baseline_def["end_doy"] if baseline_def else None
+    if bl_start and bl_end:
+        fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5,
+                      fillcolor="rgba(74,144,217,0.12)", line_width=0)
+
+    fig.update_layout(
+        title=f"Confidence-Filtered Anomaly Scores ({n_hc}/{len(scores_c)} days above 30% feature coverage, "
+              f"{n_hc_anom}/{n_total_anom} anomalous days confirmed)",
+        xaxis_title="Day of Year",
+        yaxis_title="Mahalanobis d",
+        yaxis_type="log", yaxis_dtick=1,
+        height=280,
+        margin=dict(l=60, r=20, t=50, b=30),
+        legend=dict(orientation="h", y=-0.2, font=dict(size=9)),
+        **PLOTLY_DARK,
+    )
+
+    return html.Div([
+        html.P("Days with fewer validated features are shown as faded X marks. "
+               "Only colored dots have enough usable features for confident anomaly detection.",
+               style={"color": "#8b949e", "fontSize": "0.8rem", "margin": "4px 0"}),
+        dcc.Graph(figure=fig, config={"displayModeBar": True}),
+    ], style={"marginTop": "8px"})
+
+
+_FAILURE_COLORS = {
+    "insufficient_data": "#d94452",       # red — not enough observations
+    "untrustworthy_computation": "#e07b39",  # orange — health check failed
+    "unstable_baseline": "#f0ad4e",       # yellow — noisy during calm period
+    "non_discriminant": "#8b949e",        # gray — no signal
+    "redundant": "#6e7681",              # dim gray — correlated with better feature
+}
+
+
+def _build_failure_timeline(scorecard, station, year):
+    """Stacked area chart showing failure counts by reason across DOY windows.
+
+    Shows WHERE features fail: are failures concentrated in winter
+    (data gaps) or distributed across the year (feature limitations)?
+    """
+    if scorecard is None or scorecard.empty:
+        return html.Div()
+
+    sc = scorecard[scorecard["window_size"] == "4w"].copy()
+    if sc.empty:
+        return html.Div()
+
+    fails = sc[sc["usable"] == False]
+    if fails.empty:
+        return html.Div()
+
+    # Count failures per window per reason
+    windows = sorted(sc["window_start_doy"].unique())
+    reasons = ["insufficient_data", "untrustworthy_computation",
+               "unstable_baseline", "non_discriminant", "redundant"]
+
+    fig = go.Figure()
+
+    for reason in reasons:
+        counts = []
+        for w in windows:
+            n = len(fails[(fails["window_start_doy"] == w) & (fails["failure_reason"] == reason)])
+            counts.append(n)
+
+        label = reason.replace("_", " ").title()
+        fig.add_trace(go.Scatter(
+            x=windows, y=counts, name=label,
+            mode="lines", stackgroup="failures",
+            line=dict(width=0.5, color=_FAILURE_COLORS.get(reason, "#666")),
+            fillcolor=_FAILURE_COLORS.get(reason, "#666"),
+            hovertemplate=f"{label}<br>DOY %{{x}}<br>%{{y}} features<extra></extra>",
+        ))
+
+    fig.update_layout(
+        title=f"{station} {year}: Gate Failures by Window (why features are excluded)",
+        xaxis_title="Window Start DOY",
+        yaxis_title="Features failing",
+        height=250,
+        margin=dict(l=60, r=20, t=40, b=30),
+        legend=dict(orientation="h", y=-0.2, font=dict(size=9)),
+        **PLOTLY_DARK,
+    )
+
+    return dcc.Graph(figure=fig, config={"displayModeBar": False},
+                     style={"marginTop": "8px"})
+
+
+# ---------------------------------------------------------------------------
 # Feature reliability heatmap
 # ---------------------------------------------------------------------------
 
@@ -448,8 +630,13 @@ def _build_reliability_heatmap(scorecard, station, year):
         **PLOTLY_DARK,
     )
 
-    return dcc.Graph(figure=fig, config={"displayModeBar": True},
-                     style={"marginTop": "8px"})
+    return html.Div([
+        html.P("Cohen's d measures how strongly a feature separates baseline from each "
+               "evaluation window. Brighter green = stronger separation (|d| > 0.8 is large). "
+               "Dark cells = feature failed a validation gate in that window.",
+               style={"color": "#8b949e", "fontSize": "0.8rem", "margin": "4px 0"}),
+        dcc.Graph(figure=fig, config={"displayModeBar": True}),
+    ], style={"marginTop": "4px"})
 
 
 # ---------------------------------------------------------------------------
