@@ -171,8 +171,16 @@ def print_summary(station: str, years: list[int], results_dir: Path):
 
 
 def main():
+    import warnings
+    warnings.warn(
+        "run_classification.py is deprecated. Use run_analysis.py instead:\n"
+        "  python scripts/run_analysis.py --station ROSS --year 2024\n",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     parser = argparse.ArgumentParser(
-        description="Run classification pipeline (Layers 2-3) for a station"
+        description="Run classification pipeline (Layers 2-3) for a station "
+                    "[DEPRECATED: use run_analysis.py]"
     )
     parser.add_argument("--station", required=True, help="Station ID (e.g., ROSS)")
     parser.add_argument("--year", type=int, default=None,
