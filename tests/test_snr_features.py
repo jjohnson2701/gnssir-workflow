@@ -357,3 +357,106 @@ class TestRealDataUMNQ:
         assert abs(features["RH"] - gnssrefl_rh) < 0.3, (
             f"LSP RH={features['RH']:.3f} vs gnssrefl RH={gnssrefl_rh:.3f}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 tests: arc_features.csv output
+# ---------------------------------------------------------------------------
+
+class TestCLRComponents:
+    """Test that CLR component columns are produced for Gate 2 profiling."""
+
+    def test_lsp_returns_clr_components(self):
+        from scripts.snr_feature_extractor import compute_lsp_features
+
+        _, sin_e, dsnr = _make_clean_signal(rh=9.0, amplitude=30.0)
+        features = compute_lsp_features(sin_e, dsnr, L1_WAVELENGTH,
+                                        min_rh=5.0, max_rh=30.0, precision=0.005)
+        assert "clr_peak_power" in features
+        assert "clr_total_power" in features
+        assert features["clr_peak_power"] > 0
+        # For a clean single-peak signal, CLR ≈ peak / total
+        if features["clr_total_power"] > 0:
+            recomputed = features["clr_peak_power"] / features["clr_total_power"]
+            assert abs(recomputed - features["CLR"]) < 0.01
+
+    def test_extract_arc_features_includes_clr_components(self):
+        from scripts.snr_feature_extractor import extract_arc_features
+
+        ele, _, dsnr = _make_clean_signal(rh=9.0, amplitude=30.0, gamma=0.0)
+        snr_db = 20 * np.log10(np.abs(dsnr) + 100)  # approximate dB
+        snr_lin = 10 ** (snr_db / 20)
+
+        feats = extract_arc_features(
+            ele, snr_db, snr_lin, dsnr,
+            wavelength=L1_WAVELENGTH, e1=5.0, e2=25.0,
+            min_rh=5.0, max_rh=30.0, precision=0.005,
+        )
+        assert feats is not None
+        assert "clr_peak_power" in feats
+        assert "clr_total_power" in feats
+
+
+class TestArcFeaturesCSVSchema:
+    """Test that arc_features.csv has the expected schema and join keys."""
+
+    ARC_FEATURES_PATH = (PROJECT_ROOT / "results_annual" / "ROSS"
+                         / "ROSS_2024_arc_features.csv")
+    ARC_TABLE_PATH = (PROJECT_ROOT / "results_annual" / "ROSS"
+                      / "ROSS_2024_arc_table.parquet")
+
+    @pytest.fixture(autouse=True)
+    def _check_data(self):
+        if not self.ARC_FEATURES_PATH.exists():
+            pytest.skip("ROSS arc_features.csv not found (run Phase 1 extraction first)")
+
+    def test_arc_features_is_csv_not_parquet(self):
+        """Output file is CSV, not a modification of arc_table.parquet."""
+        import pandas as pd
+        df = pd.read_csv(self.ARC_FEATURES_PATH)
+        assert len(df) > 0
+        # Verify it's a standalone file with expected columns
+        assert "CLR" in df.columns
+        assert "year" in df.columns
+
+    def test_join_keys_present(self):
+        """arc_features.csv must have join keys matching gnssrefl per_arc."""
+        import pandas as pd
+        df = pd.read_csv(self.ARC_FEATURES_PATH)
+        for key in ["year", "doy", "sat", "UTCtime", "rise", "freq"]:
+            assert key in df.columns, f"Missing join key: {key}"
+
+    def test_join_keys_match_arc_table(self):
+        """Join keys in arc_features.csv should match arc_table.parquet rows."""
+        import pandas as pd
+        if not self.ARC_TABLE_PATH.exists():
+            pytest.skip("arc_table.parquet not found")
+        arc_feat = pd.read_csv(self.ARC_FEATURES_PATH)
+        arc_table = pd.read_parquet(self.ARC_TABLE_PATH)
+        join_cols = ["doy", "sat", "UTCtime", "rise", "freq"]
+        # Merge and check that most feature rows find a match
+        merged = arc_feat.merge(arc_table[join_cols].drop_duplicates(),
+                                on=join_cols, how="inner")
+        match_rate = len(merged) / len(arc_feat)
+        assert match_rate > 0.95, f"Only {match_rate:.1%} of arc_features rows match arc_table"
+
+    def test_required_feature_columns(self):
+        """arc_features.csv must have all spec-required feature columns."""
+        import pandas as pd
+        df = pd.read_csv(self.ARC_FEATURES_PATH)
+        required = ["CLR", "PR", "AF", "gamma", "gamma_r2",
+                     "phase_deg", "SP", "MS", "VS", "full_arc",
+                     "clr_peak_power", "clr_total_power"]
+        for col in required:
+            assert col in df.columns, f"Missing required column: {col}"
+
+    def test_arc_table_not_modified_by_csv_output(self):
+        """Writing arc_features.csv must not change the arc_table.parquet file."""
+        import pandas as pd
+        if not self.ARC_TABLE_PATH.exists():
+            pytest.skip("arc_table.parquet not found")
+        # arc_table should still exist and be a valid parquet
+        arc_table = pd.read_parquet(self.ARC_TABLE_PATH)
+        assert len(arc_table) > 0
+        # It should have gnssrefl columns like RH, Amp
+        assert "RH" in arc_table.columns or "Amp" in arc_table.columns

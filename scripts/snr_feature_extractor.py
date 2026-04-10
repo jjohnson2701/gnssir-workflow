@@ -275,7 +275,9 @@ def compute_lsp_features(sin_elev, detrended, wavelength,
         # Fallback: use global max
         peak_idx = np.argmax(amp)
         return {"CLR": 1.0, "PR": 1.0, "SP": float(amp[peak_idx]),
-                "RH": float(rh_grid[peak_idx])}
+                "RH": float(rh_grid[peak_idx]),
+                "clr_peak_power": float(amp[peak_idx]),
+                "clr_total_power": 0.0}
 
     peak_amps = amp[peak_indices]
     sorted_idx = np.argsort(peak_amps)[::-1]
@@ -283,11 +285,15 @@ def compute_lsp_features(sin_elev, detrended, wavelength,
     p1 = peak_amps[sorted_idx[0]]
 
     # CLR = P1 / mean(all other peaks)
+    # Store components separately for Gate 2 decomposition (feature profiling)
     if len(peak_amps) > 1:
         other_peaks = np.delete(peak_amps, sorted_idx[0])
-        clr = float(p1 / np.mean(other_peaks))
+        clr_total_power = float(np.mean(other_peaks))
+        clr = float(p1 / clr_total_power)
     else:
+        clr_total_power = 0.0
         clr = float(p1)  # only one peak
+    clr_peak_power = float(p1)
 
     # PR = P1 / P2
     if len(peak_amps) >= 2:
@@ -301,6 +307,8 @@ def compute_lsp_features(sin_elev, detrended, wavelength,
         "PR": pr,
         "SP": float(p1),
         "RH": float(rh_grid[p1_idx]),
+        "clr_peak_power": clr_peak_power,
+        "clr_total_power": clr_total_power,
     }
 
 
@@ -612,6 +620,8 @@ def extract_arc_features(elevation, snr_db, snr_linear, detrended,
         "PR": lsp["PR"],
         "SP": lsp["SP"],
         "RH": lsp["RH"],
+        "clr_peak_power": lsp["clr_peak_power"],
+        "clr_total_power": lsp["clr_total_power"],
         "AF": af,
         "gamma": gamma,
         "gamma_r2": gamma_r2,
@@ -924,6 +934,32 @@ def extract_features(station, year, num_cores=1):
     logger.info(
         f"arc_table (Layer 1) updated: {arc_table_path} "
         f"({len(arc_table)} arcs, {arc_table_path.stat().st_size / 1024:.0f} KB)"
+    )
+
+    # --- Write separate arc_features.csv (never modifies gnssrefl output) ---
+    df_csv = df.copy()
+    df_csv["year"] = year
+    # Rename phase to phase_deg (degrees) for the CSV output
+    if "phase" in df_csv.columns:
+        df_csv["phase_deg"] = np.degrees(df_csv["phase"])
+    # Carry through raw amplitude from gnssrefl if available via arc_table merge
+    if "Amp" in arc_table.columns:
+        amp_lookup = arc_table.set_index(join_cols)["Amp"]
+        df_csv = df_csv.set_index(join_cols)
+        df_csv["amp_raw"] = amp_lookup
+        df_csv = df_csv.reset_index()
+    # Build final column list (only include columns that exist)
+    csv_cols = [c for c in [
+        "year", "doy", "sat", "UTCtime", "rise", "freq",
+        "CLR", "PR", "AF", "gamma", "gamma_r2",
+        "phase_deg", "SP", "MS", "VS", "full_arc",
+        "clr_peak_power", "clr_total_power", "amp_raw",
+    ] if c in df_csv.columns]
+    arc_features_path = results_dir / f"{station}_{year}_arc_features.csv"
+    df_csv[csv_cols].to_csv(arc_features_path, index=False, float_format="%.6f")
+    logger.info(
+        f"arc_features.csv written: {arc_features_path} "
+        f"({len(df_csv)} rows, {arc_features_path.stat().st_size / 1024:.0f} KB)"
     )
 
     return df
