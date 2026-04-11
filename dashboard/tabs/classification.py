@@ -368,13 +368,18 @@ def _select_top_features(scorecard, daily_feat, n=5):
 # ---------------------------------------------------------------------------
 
 def _build_confidence_view(scores, scorecard, baseline_def, station, year):
-    """Show per-DOY feature coverage: how many features pass each gate.
+    """Intersection view: arc density adequacy × feature gate reliability, per window.
 
-    For each evaluation window, we know how many features passed all 5 gates.
-    This plot shows that count over time, answering: when do we have the most
-    (and fewest) trustworthy features backing the anomaly signal?
+    Top panel: arc density (arcs/day) for each 4-week window vs the baseline rate.
+               Bars are green when window arc count >= baseline rate, red when below.
+               Dotted line shows baseline arc density.
 
-    Also breaks down failures by gate to show what's limiting confidence.
+    Bottom panel: stacked feature counts per window split into three categories:
+      - Usable (green): passed all 5 gates — arc density OK + feature quality OK
+      - Arc-limited (red): failed gate 1 only — would be usable if arc count were higher
+      - Quality-limited (yellow/gray stacked): passed gate 1 but failed gates 2-5
+
+    The green usable stack is the intersection of both criteria.
     """
     if scores is None or scorecard is None or scorecard.empty:
         return html.Div()
@@ -383,97 +388,156 @@ def _build_confidence_view(scores, scorecard, baseline_def, station, year):
     if sc.empty:
         return html.Div()
 
-    # Per-window stats
+    # Per-window aggregation
+    # gate1_n_arcs_window and gate1_n_arcs_baseline are the same for all features
+    # in a given window, so we take the first value per window.
     windows = sorted(sc["window_start_doy"].unique())
-    total_features = sc["feature"].nunique()
+
+    # Baseline arc rate: mean across all windows' baseline arcs
+    baseline_arc_rate = sc["gate1_n_arcs_baseline"].mean()
 
     w_data = []
     for w in windows:
         wsc = sc[sc["window_start_doy"] == w]
-        n_usable = wsc["usable"].sum()
-        n_total = len(wsc)
-        # Count by failure reason
-        fails = wsc[wsc["usable"] == False]
-        reason_counts = fails["failure_reason"].value_counts().to_dict()
+        arc_window = wsc["gate1_n_arcs_window"].mean()  # same for all features
+
+        n_usable = int(wsc["usable"].sum())
+        fails = wsc[~wsc["usable"]]
+
+        # Arc-limited: failed gate1 only (removing gate1, they'd be usable)
+        # Proxy: failure_reason == "insufficient_data"
+        n_arc_limited = int((fails["failure_reason"] == "insufficient_data").sum())
+
+        # Quality-limited: passed gate1 but failed gates 2-5
+        # i.e. gate1_pass=True but usable=False
+        passed_gate1_but_failed = fails[fails["gate1_pass"] == True]
+        reason_counts = passed_gate1_but_failed["failure_reason"].value_counts().to_dict()
+
         w_data.append({
-            "window_mid": w + 14,  # center of 4w window
+            "window_mid": w + 14,
+            "arc_window": arc_window,
+            "arc_ok": arc_window >= baseline_arc_rate * 0.7,  # >70% of baseline
             "n_usable": n_usable,
-            "n_total": n_total,
-            "pct_usable": n_usable / max(n_total, 1) * 100,
-            **{f"n_{r}": reason_counts.get(r, 0) for r in
-               ["insufficient_data", "untrustworthy_computation",
-                "unstable_baseline", "non_discriminant", "redundant"]},
+            "n_arc_limited": n_arc_limited,
+            "n_untrustworthy": reason_counts.get("untrustworthy_computation", 0),
+            "n_unstable": reason_counts.get("unstable_baseline", 0),
+            "n_nondiscriminant": reason_counts.get("non_discriminant", 0),
+            "n_redundant": reason_counts.get("redundant", 0),
         })
 
     wdf = pd.DataFrame(w_data)
+    total_features = sc["feature"].nunique()
+    trusted_mask = (wdf["n_usable"] >= max(1, total_features * 0.25)) & wdf["arc_ok"]
+    n_trusted = int(trusted_mask.sum())
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        row_heights=[0.6, 0.4], vertical_spacing=0.05,
-                        subplot_titles=["Usable Features per Window",
-                                        "Why Features Are Excluded"])
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.38, 0.62], vertical_spacing=0.06,
+        subplot_titles=["Arc Density per Window vs Baseline",
+                        "Feature Reliability (arc-limited vs quality-limited vs usable)"],
+    )
 
-    # Top: usable feature count as bar
+    # ── Panel 1: arc density bars ──────────────────────────────────────────
+    arc_colors = ["#2d9a6b" if ok else "#d94452" for ok in wdf["arc_ok"]]
     fig.add_trace(go.Bar(
-        x=wdf["window_mid"], y=wdf["n_usable"],
-        marker_color=["#2d9a6b" if p >= 50 else "#d29922" if p >= 25 else "#d94452"
-                       for p in wdf["pct_usable"]],
-        hovertemplate="DOY %{x}<br>%{y}/" + str(total_features) + " features usable (%{customdata:.0f}%)<extra></extra>",
-        customdata=wdf["pct_usable"],
+        x=wdf["window_mid"], y=wdf["arc_window"].round(1),
+        marker_color=arc_colors, name="Arc density",
+        hovertemplate="DOY %{x}<br>%{y:.1f} arcs/day<extra></extra>",
         showlegend=False,
     ), row=1, col=1)
 
-    fig.update_yaxes(title_text="usable features", row=1, col=1,
+    # Baseline reference line
+    fig.add_hline(
+        y=baseline_arc_rate, line_dash="dot",
+        line_color="rgba(74,144,217,0.7)", line_width=1.5,
+        annotation_text=f"baseline avg ({baseline_arc_rate:.1f})",
+        annotation_font_size=8, annotation_font_color="#8b949e",
+        row=1, col=1,
+    )
+    fig.update_yaxes(title_text="arcs/day", row=1, col=1,
                      tickfont=dict(size=8), title_font=dict(size=9))
 
-    # Bottom: failure breakdown stacked
-    reasons = [
-        ("n_insufficient_data", "Insufficient Data", _FAILURE_COLORS["insufficient_data"]),
-        ("n_untrustworthy_computation", "Untrustworthy", _FAILURE_COLORS["untrustworthy_computation"]),
-        ("n_unstable_baseline", "Unstable Baseline", _FAILURE_COLORS["unstable_baseline"]),
-        ("n_non_discriminant", "Non-Discriminant", _FAILURE_COLORS["non_discriminant"]),
-        ("n_redundant", "Redundant", _FAILURE_COLORS["redundant"]),
-    ]
+    # ── Panel 2: stacked feature breakdown ────────────────────────────────
+    # Order: arc-limited (bottom, red) → quality failures (middle) → usable (top, green)
+    fig.add_trace(go.Bar(
+        x=wdf["window_mid"], y=wdf["n_arc_limited"],
+        name="Arc-limited (gate 1 fail)", marker_color=_FAILURE_COLORS["insufficient_data"],
+        hovertemplate="DOY %{x}<br>%{y} features: insufficient arc density<extra></extra>",
+    ), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=wdf["window_mid"], y=wdf["n_untrustworthy"],
+        name="Computation health fail", marker_color=_FAILURE_COLORS["untrustworthy_computation"],
+        hovertemplate="DOY %{x}<br>%{y} features: untrustworthy computation<extra></extra>",
+    ), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=wdf["window_mid"], y=wdf["n_unstable"],
+        name="Unstable baseline", marker_color=_FAILURE_COLORS["unstable_baseline"],
+        hovertemplate="DOY %{x}<br>%{y} features: unstable baseline<extra></extra>",
+    ), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=wdf["window_mid"], y=wdf["n_nondiscriminant"],
+        name="Non-discriminant", marker_color=_FAILURE_COLORS["non_discriminant"],
+        hovertemplate="DOY %{x}<br>%{y} features: no signal vs baseline<extra></extra>",
+    ), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=wdf["window_mid"], y=wdf["n_redundant"],
+        name="Redundant", marker_color=_FAILURE_COLORS["redundant"],
+        hovertemplate="DOY %{x}<br>%{y} features: redundant with stronger feature<extra></extra>",
+    ), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=wdf["window_mid"], y=wdf["n_usable"],
+        name="Usable (all gates pass)", marker_color="#2d9a6b",
+        hovertemplate="DOY %{x}<br>%{y} features: arc density OK + feature quality OK<extra></extra>",
+    ), row=2, col=1)
 
-    for col_name, label, color in reasons:
-        if col_name in wdf.columns:
-            fig.add_trace(go.Bar(
-                x=wdf["window_mid"], y=wdf[col_name], name=label,
-                marker_color=color,
-                hovertemplate=f"{label}<br>DOY %{{x}}<br>%{{y}} features<extra></extra>",
-            ), row=2, col=1)
-
-    fig.update_yaxes(title_text="excluded", row=2, col=1,
+    fig.update_yaxes(title_text="feature count", row=2, col=1,
                      tickfont=dict(size=8), title_font=dict(size=9))
 
-    bl_start = baseline_def["start_doy"] if baseline_def else None
-    bl_end = baseline_def["end_doy"] if baseline_def else None
+    # Baseline shading both panels
+    bl_start = baseline_def.get("start_doy") if baseline_def else None
+    bl_end = baseline_def.get("end_doy") if baseline_def else None
     if bl_start and bl_end:
         for r in [1, 2]:
             fig.add_vrect(x0=bl_start - 0.5, x1=bl_end + 0.5, row=r, col=1,
-                          fillcolor="rgba(74,144,217,0.08)", line_width=0)
+                          fillcolor="rgba(74,144,217,0.10)", line_width=0)
 
-    fig.update_xaxes(title_text="Window Center DOY", row=2, col=1)
+    # Mark trusted windows (arc ok + usable features) in panel 2 with a small marker
+    trusted_doys = wdf.loc[trusted_mask, "window_mid"].tolist()
+    if trusted_doys:
+        max_stack = (wdf["n_arc_limited"] + wdf["n_untrustworthy"] + wdf["n_unstable"] +
+                     wdf["n_nondiscriminant"] + wdf["n_redundant"] + wdf["n_usable"]).max()
+        fig.add_trace(go.Scatter(
+            x=trusted_doys,
+            y=[max_stack * 1.08] * len(trusted_doys),
+            mode="markers", marker=dict(symbol="triangle-down", size=7, color="#58a6ff"),
+            name="Trusted window", showlegend=True,
+            hovertemplate="DOY %{x}: arc density OK + ≥25% features usable<extra></extra>",
+        ), row=2, col=1)
+
+    fig.update_xaxes(title_text="Window Center DOY", row=2, col=1,
+                     tickfont=dict(size=8))
     fig.update_layout(
-        height=350,
+        height=380,
         margin=dict(l=60, r=20, t=40, b=30),
         barmode="stack",
-        legend=dict(orientation="h", y=-0.15, font=dict(size=8)),
+        legend=dict(orientation="h", y=-0.18, font=dict(size=8)),
         **PLOTLY_DARK,
     )
-
     for ann in fig.layout.annotations:
         ann.update(font=dict(size=10, color="#8b949e"), x=0.01, xanchor="left")
 
-    # Summary text
-    max_usable = wdf["n_usable"].max()
-    min_usable = wdf["n_usable"].min()
-    best_window = wdf.loc[wdf["n_usable"].idxmax(), "window_mid"]
+    # Summary sentence
+    n_arc_fail_windows = int((~wdf["arc_ok"]).sum())
+    n_windows = len(wdf)
+    summary = (
+        f"{n_trusted}/{n_windows} windows are trusted (arc density ≥70% of baseline "
+        f"AND ≥25% of features usable). "
+        f"{n_arc_fail_windows} window(s) fail the arc-density threshold (red bars, top). "
+        f"Green stack = intersection of both criteria."
+    )
 
     return html.Div([
-        html.P(f"Per 4-week window: {min_usable}-{max_usable} features pass all 5 gates "
-               f"(out of {total_features}). Best coverage near DOY {int(best_window)}. "
-               f"Green = >50% usable, yellow = 25-50%, red = <25%.",
-               style={"color": "#8b949e", "fontSize": "0.8rem", "margin": "4px 0"}),
+        html.P(summary, style={"color": "#8b949e", "fontSize": "0.8rem", "margin": "4px 0"}),
         dcc.Graph(figure=fig, config={"displayModeBar": True}),
     ], style={"marginTop": "8px"})
 
@@ -697,53 +761,154 @@ def _build_analysis_metrics(scores, baseline_def):
 # ---------------------------------------------------------------------------
 
 def _build_scorecard_panel(scorecard, station, year):
-    """Collapsible panel showing top features with gate details."""
+    """Feature scorecard: top features table + per-window reliability dot chart.
+
+    Shows which features are most discriminating (by max Cohen's d across windows)
+    and a small heatmap-style dot chart showing per-window pass/fail for each top
+    feature — so you can immediately see WHICH DOY windows have reliable features.
+    """
     if scorecard is None or scorecard.empty:
         return html.Div()
 
-    usable = scorecard[scorecard["usable"] == True]
+    sc4 = scorecard[scorecard["window_size"] == "4w"].copy()
+    usable = sc4[sc4["usable"] == True]
     if usable.empty:
         return html.Div("No features passed all 5 gates.",
                         style={"color": DARK_TEXT, "padding": "8px"})
 
-    best_4w = usable[usable["window_size"] == "4w"]
-    if best_4w.empty:
-        best_4w = usable
-
-    best_per_feat = best_4w.groupby("feature").agg(
+    # Top features ranked by max |Cohen's d|
+    best_per_feat = usable.groupby("feature").agg(
         max_d=("gate4_cohens_d", lambda x: x.abs().max()),
         n_windows=("gate4_cohens_d", "count"),
         cv=("gate3_cv_baseline", "first"),
-    ).sort_values("max_d", ascending=False).head(10).reset_index()
+    ).sort_values("max_d", ascending=False).head(8).reset_index()
 
+    top_features = best_per_feat["feature"].tolist()
+    windows = sorted(sc4["window_start_doy"].unique())
+
+    # Build per-window reliability figure for top features
+    # Each cell: green = usable, colored by failure reason if not usable
+    fig = go.Figure()
+
+    # Arc density row (top row in chart)
+    baseline_arc_rate = sc4["gate1_n_arcs_baseline"].mean()
+    arc_per_window = {w: sc4[sc4["window_start_doy"] == w]["gate1_n_arcs_window"].mean()
+                      for w in windows}
+    arc_ok = {w: arc_per_window[w] >= baseline_arc_rate * 0.7 for w in windows}
+
+    arc_colors_dot = ["#2d9a6b" if arc_ok[w] else "#d94452" for w in windows]
+    arc_text = [f"{arc_per_window[w]:.1f} arcs/day" for w in windows]
+    fig.add_trace(go.Scatter(
+        x=[w + 14 for w in windows],
+        y=["Arc density"] * len(windows),
+        mode="markers+text",
+        marker=dict(
+            color=arc_colors_dot,
+            size=10,
+            symbol=["circle" if arc_ok[w] else "x" for w in windows],
+            line=dict(width=0.5, color="#30363d"),
+        ),
+        text=["✓" if arc_ok[w] else "✗" for w in windows],
+        textfont=dict(size=7, color="#ffffff"),
+        textposition="middle center",
+        hovertext=[f"DOY {w+14}: {t}" for w, t in zip(windows, arc_text)],
+        hoverinfo="text",
+        showlegend=False,
+        name="Arc density",
+    ))
+
+    # Feature rows
+    _reason_dot_color = {
+        "insufficient_data": "#d94452",
+        "untrustworthy_computation": "#e07b39",
+        "unstable_baseline": "#f0ad4e",
+        "non_discriminant": "#6e7681",
+        "redundant": "#444c56",
+        "": "#2d9a6b",
+    }
+
+    for feat in top_features:
+        label = FEATURE_LABELS.get(feat, feat)
+        feat_sc = sc4[sc4["feature"] == feat].set_index("window_start_doy")
+
+        colors, symbols, hover, texts = [], [], [], []
+        for w in windows:
+            if w in feat_sc.index:
+                row = feat_sc.loc[w]
+                reason = row.get("failure_reason", "")
+                if isinstance(reason, pd.Series):
+                    reason = reason.iloc[0]
+                is_usable = bool(row["usable"]) if not isinstance(row["usable"], pd.Series) \
+                    else bool(row["usable"].iloc[0])
+                d_val = row["gate4_cohens_d"] if not isinstance(row["gate4_cohens_d"], pd.Series) \
+                    else row["gate4_cohens_d"].iloc[0]
+                color = "#2d9a6b" if is_usable else _reason_dot_color.get(reason, "#444")
+                sym = "circle" if is_usable else "x"
+                label_text = f"|d|={abs(d_val):.2f}" if is_usable else (reason or "fail")
+                h = f"DOY {w+14}: {'USABLE |d|='+str(round(abs(d_val),2)) if is_usable else reason}"
+            else:
+                color, sym, label_text, h = "#1c2128", "circle", "", f"DOY {w+14}: no data"
+            colors.append(color)
+            symbols.append(sym)
+            hover.append(h)
+            texts.append(label_text)
+
+        fig.add_trace(go.Scatter(
+            x=[w + 14 for w in windows],
+            y=[label] * len(windows),
+            mode="markers",
+            marker=dict(color=colors, size=10, symbol=symbols,
+                        line=dict(width=0.5, color="#30363d")),
+            hovertext=hover, hoverinfo="text",
+            showlegend=False,
+            name=label,
+        ))
+
+    fig.update_layout(
+        height=max(220, (len(top_features) + 2) * 30 + 60),
+        margin=dict(l=140, r=20, t=30, b=40),
+        xaxis=dict(title="Window Center DOY", tickfont=dict(size=8)),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=8)),
+        **PLOTLY_DARK,
+    )
+
+    # Summary table (compact, same order)
     rows = []
     for _, r in best_per_feat.iterrows():
         feat = r["feature"]
         label = FEATURE_LABELS.get(feat, feat)
         rows.append(html.Tr([
-            html.Td(label, style={"color": "#58a6ff", "padding": "4px 12px 4px 0",
-                                   "fontSize": "0.85rem"}),
-            html.Td(f"|d|={r['max_d']:.2f}", style={"color": "#2d9a6b", "padding": "4px 8px",
-                                                      "fontSize": "0.85rem"}),
-            html.Td(f"CV={r['cv']:.3f}" if np.isfinite(r['cv']) else "",
-                    style={"color": "#8b949e", "padding": "4px 8px", "fontSize": "0.8rem"}),
+            html.Td(label, style={"color": "#58a6ff", "padding": "3px 10px 3px 0",
+                                   "fontSize": "0.82rem"}),
+            html.Td(f"|d|={r['max_d']:.2f}", style={"color": "#2d9a6b", "padding": "3px 8px",
+                                                      "fontSize": "0.82rem"}),
+            html.Td(f"CV={r['cv']:.3f}" if np.isfinite(r["cv"]) else "—",
+                    style={"color": "#8b949e", "padding": "3px 8px", "fontSize": "0.78rem"}),
             html.Td(f"{int(r['n_windows'])} windows",
-                    style={"color": "#8b949e", "padding": "4px 0", "fontSize": "0.8rem"}),
+                    style={"color": "#8b949e", "padding": "3px 0", "fontSize": "0.78rem"}),
         ]))
 
-    fails = scorecard[scorecard["usable"] == False]
+    fails = sc4[sc4["usable"] == False]
     fail_counts = fails["failure_reason"].value_counts()
-    fail_summary = " | ".join(f"{reason}: {count}" for reason, count in fail_counts.items())
+    fail_summary = " | ".join(f"{r}: {c}" for r, c in fail_counts.items())
 
     return html.Details([
-        html.Summary(f"Feature Scorecard: {len(best_per_feat)} top features, "
-                     f"{len(usable)} usable windows",
-                     style={"cursor": "pointer", "color": "#58a6ff", "fontWeight": "bold",
-                            "fontSize": "0.95rem", "padding": "8px 0"}),
+        html.Summary(
+            f"Feature Scorecard — top {len(best_per_feat)} features "
+            f"({int(usable['window_start_doy'].nunique())} windows with usable features)",
+            style={"cursor": "pointer", "color": "#58a6ff", "fontWeight": "bold",
+                   "fontSize": "0.9rem", "padding": "8px 0"},
+        ),
+        html.P(
+            "Each dot = one 4-week window. Green circle = passed all gates (arc density ok + "
+            "feature discriminates). Red ✗ = arc-density failure. Colored ✗ = quality gate failure.",
+            style={"color": "#8b949e", "fontSize": "0.78rem", "margin": "4px 0 6px 0"},
+        ),
+        dcc.Graph(figure=fig, config={"displayModeBar": False}),
         html.Table([html.Tbody(rows)],
-                   style={"borderCollapse": "collapse", "width": "100%", "color": DARK_TEXT}),
-        html.P(f"Failures: {fail_summary}",
-               style={"color": "#8b949e", "fontSize": "0.8rem", "marginTop": "8px"}),
+                   style={"borderCollapse": "collapse", "width": "100%", "marginTop": "8px"}),
+        html.P(f"Gate failures: {fail_summary}",
+               style={"color": "#8b949e", "fontSize": "0.78rem", "marginTop": "6px"}),
     ], open=True,
        style={"backgroundColor": DARK_CARD, "borderRadius": "6px",
               "border": f"1px solid {DARK_BORDER}", "padding": "8px 16px",
