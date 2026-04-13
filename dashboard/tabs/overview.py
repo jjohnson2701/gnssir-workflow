@@ -118,11 +118,9 @@ def render(station, year, stations, per_arc):
     context_map = _build_context_map(slat, slon, station)
 
     return html.Div([
-        # Top row: Context inset | Leaflet map | Polar + Info
+        # Top row: Map (context inset overlaid) + Polar + Info
         html.Div([
-            html.Div([context_map],
-                     style={"width": "160px", "flexShrink": "0", "display": "flex",
-                            "flexDirection": "column"}),
+            # Map container — position:relative so the inset can be absolutely pinned
             html.Div([
                 dl.Map([
                     dl.TileLayer(
@@ -139,7 +137,19 @@ def render(station, year, stations, per_arc):
                    id=f"map-{station}-{year}",
                    attributionControl=False,
                    style={"height": "100%", "minHeight": "400px", "borderRadius": "6px", "width": "100%"}),
-            ], style={"flex": "2", "display": "flex", "flexDirection": "column"}),
+                # Inset context map — absolutely positioned in bottom-left corner
+                html.Div(
+                    context_map,
+                    style={
+                        "position": "absolute", "bottom": "10px", "left": "10px",
+                        "width": "170px", "zIndex": "1000",
+                        "borderRadius": "6px", "overflow": "hidden",
+                        "boxShadow": "0 2px 8px rgba(0,0,0,0.6)",
+                        "pointerEvents": "none",  # clicks pass through to the main map
+                    },
+                ),
+            ], style={"flex": "2", "display": "flex", "flexDirection": "column",
+                      "position": "relative"}),
 
             html.Div([
                 dcc.Graph(id="overview-polar", figure=polar_fig, style={"height": "350px"},
