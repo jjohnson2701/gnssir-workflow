@@ -138,14 +138,17 @@ def render(station, year, stations, per_arc):
                    attributionControl=False,
                    style={"height": "100%", "minHeight": "400px", "borderRadius": "6px", "width": "100%"}),
                 # Inset context map — absolutely positioned in bottom-left corner
+                # resize:both gives a native drag handle; overflow:hidden clips content
                 html.Div(
                     context_map,
                     style={
                         "position": "absolute", "bottom": "10px", "left": "10px",
-                        "width": "170px", "zIndex": "1000",
+                        "width": "170px", "height": "180px",
+                        "minWidth": "100px", "minHeight": "100px",
+                        "zIndex": "1000",
                         "borderRadius": "6px", "overflow": "hidden",
                         "boxShadow": "0 2px 8px rgba(0,0,0,0.6)",
-                        "pointerEvents": "none",  # clicks pass through to the main map
+                        "resize": "both",
                     },
                 ),
             ], style={"flex": "2", "display": "flex", "flexDirection": "column",
@@ -286,7 +289,7 @@ def _build_context_map(lat, lon, station):
     fig.update_geos(**geo_kwargs)
     fig.update_layout(
         margin=dict(l=0, r=0, t=20, b=0),
-        height=200,
+        autosize=True,
         paper_bgcolor="#0d1117",
         title=dict(text="Regional context", font=dict(size=9, color="#8b949e"),
                    x=0.5, xanchor="center", y=0.98),
@@ -295,6 +298,6 @@ def _build_context_map(lat, lon, station):
     return dcc.Graph(
         figure=fig,
         config={"displayModeBar": False, "scrollZoom": False},
-        style={"height": "200px", "borderRadius": "6px",
-               "border": f"1px solid #30363d"},
+        responsive=True,
+        style={"height": "100%", "width": "100%"},
     )
