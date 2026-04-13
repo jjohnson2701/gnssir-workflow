@@ -6,15 +6,17 @@
 import json
 
 import numpy as np
+import plotly.graph_objects as go
 from dash import html, dcc
 import dash_leaflet as dl
 
 from dashboard.utils import (
     PROJECT_ROOT, DARK_BG, DARK_CARD, DARK_BORDER, DARK_TEXT,
-    V3_COLORS, V3_ORDER, get_mode,
+    PLOTLY_DARK, V3_COLORS, V3_ORDER, get_mode,
 )
 from dashboard.data_loader import (
     load_v3, load_stations_config, list_s1_images,
+    load_baseline_definition,
 )
 
 
@@ -50,6 +52,19 @@ def render(station, year, stations, per_arc):
     s1_images = list_s1_images(station)
     year_s1 = [img for img in s1_images if img["date"].startswith(str(year))]
     ts_fig = build_timeseries_figure(per_arc, v3, station, year, s1_dates=year_s1)
+
+    # Baseline shading on RH panel
+    baseline_def = load_baseline_definition(station, year)
+    if baseline_def:
+        import pandas as pd
+        bl_start = pd.Timestamp(f"{year}-01-01") + pd.Timedelta(days=baseline_def["start_doy"] - 1)
+        bl_end = pd.Timestamp(f"{year}-01-01") + pd.Timedelta(days=baseline_def["end_doy"] - 1)
+        ts_fig.add_vrect(
+            x0=bl_start, x1=bl_end, row=1, col=1,
+            fillcolor="rgba(74,144,217,0.12)", line_width=0,
+            annotation_text="baseline", annotation_position="top left",
+            annotation_font=dict(size=9, color="rgba(74,144,217,0.8)"),
+        )
 
     # Fresnel zone overlay
     fresnel_layers = []
@@ -99,9 +114,15 @@ def render(station, year, stations, per_arc):
     # Reference station markers and legend
     ref_markers, ref_legend = _build_reference_markers(station_cfg)
 
+    # Regional context inset
+    context_map = _build_context_map(slat, slon, station)
+
     return html.Div([
-        # Top row: Map + Polar + Info
+        # Top row: Context inset | Leaflet map | Polar + Info
         html.Div([
+            html.Div([context_map],
+                     style={"width": "160px", "flexShrink": "0", "display": "flex",
+                            "flexDirection": "column"}),
             html.Div([
                 dl.Map([
                     dl.TileLayer(
@@ -204,3 +225,66 @@ def _build_reference_markers(station_cfg):
         ], style={"fontSize": "0.75rem", "color": "#ccc"}))
 
     return ref_markers, ref_legend
+
+
+def _build_context_map(lat, lon, station):
+    """Small scattergeo panel showing regional location of the station.
+
+    Uses orthographic projection for polar sites (|lat| > 55), natural earth
+    for everything else. A star marker pinpoints the station; the map is
+    zoomed to roughly a 2000 km radius.
+    """
+    is_polar = abs(lat) > 55
+
+    if is_polar:
+        projection = dict(type="orthographic", rotation=dict(lon=lon, lat=lat, roll=0))
+    else:
+        projection = dict(type="natural earth")
+
+    # Approximate degree range for ~2000 km context window
+    lat_range = [max(-90, lat - 18), min(90, lat + 18)]
+    lon_range = [lon - 25, lon + 25]
+
+    fig = go.Figure()
+
+    # Landmass fill
+    fig.add_trace(go.Scattergeo(
+        lat=[lat], lon=[lon],
+        mode="markers+text",
+        marker=dict(size=10, color="#ff6b6b", symbol="star",
+                    line=dict(color="white", width=1)),
+        text=[station],
+        textposition="bottom center",
+        textfont=dict(size=9, color="white"),
+        showlegend=False,
+        hovertemplate=f"{station}<br>{lat:.2f}°, {lon:.2f}°<extra></extra>",
+    ))
+
+    geo_kwargs = dict(
+        showland=True, landcolor="#2d3748",
+        showocean=True, oceancolor="#1a2535",
+        showcoastlines=True, coastlinecolor="#4a5568", coastlinewidth=0.8,
+        showlakes=True, lakecolor="#1a2535",
+        showframe=False,
+        bgcolor="#0d1117",
+        projection=projection,
+    )
+    if not is_polar:
+        geo_kwargs["lataxis_range"] = lat_range
+        geo_kwargs["lonaxis_range"] = lon_range
+
+    fig.update_geos(**geo_kwargs)
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=20, b=0),
+        height=200,
+        paper_bgcolor="#0d1117",
+        title=dict(text="Regional context", font=dict(size=9, color="#8b949e"),
+                   x=0.5, xanchor="center", y=0.98),
+    )
+
+    return dcc.Graph(
+        figure=fig,
+        config={"displayModeBar": False, "scrollZoom": False},
+        style={"height": "200px", "borderRadius": "6px",
+               "border": f"1px solid #30363d"},
+    )
