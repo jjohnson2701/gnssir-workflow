@@ -6,13 +6,12 @@
 import json
 
 import numpy as np
-import plotly.graph_objects as go
 from dash import html, dcc
 import dash_leaflet as dl
 
 from dashboard.utils import (
     PROJECT_ROOT, DARK_BG, DARK_CARD, DARK_BORDER, DARK_TEXT,
-    PLOTLY_DARK, V3_COLORS, V3_ORDER, get_mode,
+    V3_COLORS, V3_ORDER, get_mode,
 )
 from dashboard.data_loader import (
     load_v3, load_stations_config, list_s1_images,
@@ -114,13 +113,9 @@ def render(station, year, stations, per_arc):
     # Reference station markers and legend
     ref_markers, ref_legend = _build_reference_markers(station_cfg)
 
-    # Regional context inset
-    context_map = _build_context_map(slat, slon, station)
-
     return html.Div([
-        # Top row: Map (context inset overlaid) + Polar + Info
+        # Top row: Map + Polar + Info
         html.Div([
-            # Map container — position:relative so the inset can be absolutely pinned
             html.Div([
                 dl.Map([
                     dl.TileLayer(
@@ -137,22 +132,7 @@ def render(station, year, stations, per_arc):
                    id=f"map-{station}-{year}",
                    attributionControl=False,
                    style={"height": "100%", "minHeight": "400px", "borderRadius": "6px", "width": "100%"}),
-                # Inset context map — absolutely positioned in bottom-left corner
-                # resize:both gives a native drag handle; overflow:hidden clips content
-                html.Div(
-                    context_map,
-                    style={
-                        "position": "absolute", "bottom": "10px", "left": "10px",
-                        "width": "170px", "height": "180px",
-                        "minWidth": "100px", "minHeight": "100px",
-                        "zIndex": "1000",
-                        "borderRadius": "6px", "overflow": "hidden",
-                        "boxShadow": "0 2px 8px rgba(0,0,0,0.6)",
-                        "resize": "both",
-                    },
-                ),
-            ], style={"flex": "2", "display": "flex", "flexDirection": "column",
-                      "position": "relative"}),
+            ], style={"flex": "2", "display": "flex", "flexDirection": "column"}),
 
             html.Div([
                 dcc.Graph(id="overview-polar", figure=polar_fig, style={"height": "350px"},
@@ -238,66 +218,3 @@ def _build_reference_markers(station_cfg):
         ], style={"fontSize": "0.75rem", "color": "#ccc"}))
 
     return ref_markers, ref_legend
-
-
-def _build_context_map(lat, lon, station):
-    """Small scattergeo panel showing regional location of the station.
-
-    Uses orthographic projection for polar sites (|lat| > 55), natural earth
-    for everything else. A star marker pinpoints the station; the map is
-    zoomed to roughly a 2000 km radius.
-    """
-    is_polar = abs(lat) > 55
-
-    if is_polar:
-        projection = dict(type="orthographic", rotation=dict(lon=lon, lat=lat, roll=0))
-    else:
-        projection = dict(type="natural earth")
-
-    # Approximate degree range for ~2000 km context window
-    lat_range = [max(-90, lat - 18), min(90, lat + 18)]
-    lon_range = [lon - 25, lon + 25]
-
-    fig = go.Figure()
-
-    # Landmass fill
-    fig.add_trace(go.Scattergeo(
-        lat=[lat], lon=[lon],
-        mode="markers+text",
-        marker=dict(size=10, color="#ff6b6b", symbol="star",
-                    line=dict(color="white", width=1)),
-        text=[station],
-        textposition="bottom center",
-        textfont=dict(size=9, color="white"),
-        showlegend=False,
-        hovertemplate=f"{station}<br>{lat:.2f}°, {lon:.2f}°<extra></extra>",
-    ))
-
-    geo_kwargs = dict(
-        showland=True, landcolor="#2d3748",
-        showocean=True, oceancolor="#1a2535",
-        showcoastlines=True, coastlinecolor="#4a5568", coastlinewidth=0.8,
-        showlakes=True, lakecolor="#1a2535",
-        showframe=False,
-        bgcolor="#0d1117",
-        projection=projection,
-    )
-    if not is_polar:
-        geo_kwargs["lataxis_range"] = lat_range
-        geo_kwargs["lonaxis_range"] = lon_range
-
-    fig.update_geos(**geo_kwargs)
-    fig.update_layout(
-        margin=dict(l=0, r=0, t=20, b=0),
-        autosize=True,
-        paper_bgcolor="#0d1117",
-        title=dict(text="Regional context", font=dict(size=9, color="#8b949e"),
-                   x=0.5, xanchor="center", y=0.98),
-    )
-
-    return dcc.Graph(
-        figure=fig,
-        config={"displayModeBar": False, "scrollZoom": False},
-        responsive=True,
-        style={"height": "100%", "width": "100%"},
-    )
