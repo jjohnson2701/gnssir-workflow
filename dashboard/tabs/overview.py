@@ -104,7 +104,10 @@ def render(station, year, stations, per_arc):
         html.Div([
             html.Div([
                 dl.Map([
-                    dl.TileLayer(url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"),
+                    dl.TileLayer(
+                        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                        attribution="",
+                    ),
                 ] + [
                     dl.Marker(
                         position=[info["lat"], info["lon"]],
@@ -113,8 +116,9 @@ def render(station, year, stations, per_arc):
                     ) for name, info in stations.items()
                 ] + fresnel_layers + ref_markers, center=center, zoom=map_zoom,
                    id=f"map-{station}-{year}",
-                   style={"height": "400px", "borderRadius": "6px", "width": "100%"}),
-            ], style={"flex": "2"}),
+                   attributionControl=False,
+                   style={"height": "100%", "minHeight": "400px", "borderRadius": "6px", "width": "100%"}),
+            ], style={"flex": "2", "display": "flex", "flexDirection": "column"}),
 
             html.Div([
                 dcc.Graph(id="overview-polar", figure=polar_fig, style={"height": "350px"},
@@ -133,7 +137,7 @@ def render(station, year, stations, per_arc):
                          style={"padding": "8px 12px", "backgroundColor": DARK_CARD,
                                 "borderRadius": "6px", "border": f"1px solid {DARK_BORDER}"}),
             ], style={"flex": "1", "display": "flex", "flexDirection": "column", "gap": "8px"}),
-        ], style={"display": "flex", "gap": "12px", "width": "100%"}),
+        ], style={"display": "flex", "gap": "12px", "width": "100%", "alignItems": "stretch"}),
 
         # Time series
         html.Div([
