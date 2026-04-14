@@ -494,17 +494,23 @@ def render_cached_basemaps(
             fresnel_rendered = True
 
     if not fresnel_rendered:
-        # Fall back to tile server imagery
+        # Fall back to tile server imagery.
+        # Use at least 200m buffer so zoom=auto stays ≤18 (Esri tiles available).
+        tile_buffer = max(buffer_close, 200)
         fig_sat, ax_sat = plt.subplots(figsize=(12, 12))
-        ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
-        ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
+        ax_sat.set_xlim(station_x - tile_buffer, station_x + tile_buffer)
+        ax_sat.set_ylim(station_y - tile_buffer, station_y + tile_buffer)
 
         try:
             ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom="auto")
-        except Exception:
+            print(f"  Reflection basemap: tile server OK (zoom=auto, tile_buffer={tile_buffer}m)")
+        except Exception as e1:
+            print(f"  Reflection basemap: zoom=auto failed ({e1}), trying zoom=18")
             try:
-                ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
-            except Exception:
+                ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=18)
+                print("  Reflection basemap: tile server OK (zoom=18)")
+            except Exception as e2:
+                print(f"  Reflection basemap: tile server failed ({e2}), using lightblue fallback")
                 ax_sat.set_facecolor("lightblue")
 
         ax_sat.set_aspect("equal")
@@ -515,10 +521,10 @@ def render_cached_basemaps(
 
         cache_paths["fresnel"] = sat_path
         cache_paths["fresnel_extent"] = [
-            station_x - buffer_close,
-            station_x + buffer_close,
-            station_y - buffer_close,
-            station_y + buffer_close,
+            station_x - tile_buffer,
+            station_x + tile_buffer,
+            station_y - tile_buffer,
+            station_y + tile_buffer,
         ]
         cache_paths["fresnel_local_coords"] = False
 
@@ -638,6 +644,16 @@ def load_data(station: str, year: int, results_dir: Path):
             gauge_lat = usgs_info["usgs_latitude"]
             gauge_lon = usgs_info["usgs_longitude"]
             print(f"Using USGS gauge {ref_site_id} at ({gauge_lat}, {gauge_lon})")
+        else:
+            # Coordinates not in config — query NWIS
+            try:
+                import dataretrieval.nwis as nwis
+                site_info, _ = nwis.get_info(sites=ref_site_id)
+                gauge_lat = float(site_info["dec_lat_va"].iloc[0])
+                gauge_lon = float(site_info["dec_long_va"].iloc[0])
+                print(f"Using USGS gauge {ref_site_id} at ({gauge_lat}, {gauge_lon}) [from NWIS]")
+            except Exception as e:
+                print(f"  Could not fetch USGS gauge coords for {ref_site_id}: {e}")
     elif coops_info and coops_info.get("target_station"):
         ref_source = "CO-OPS"
         ref_site_id = coops_info.get("target_station", "Unknown")
@@ -662,6 +678,18 @@ def load_data(station: str, year: int, results_dir: Path):
     print(f"  Actual elevation range: {actual_elev_min:.2f}°-{df['elev_avg'].max():.2f}°")
     print(f"  Max reflection distance: {outer_reflection_dist:.1f}m from antenna")
 
+    # Load azimuth limits from gnssir params
+    az_start, az_end = 0, 360
+    params_path = station_config.get("gnssir_json_params_path", "")
+    try:
+        with open(project_root / params_path) as _pf:
+            _params = json.load(_pf)
+        _azval = _params.get("azval2", [0, 360])
+        if len(_azval) >= 2:
+            az_start, az_end = _azval[0], _azval[1]
+    except Exception:
+        pass
+
     metadata = {
         "ref_source": ref_source,
         "ref_site_id": ref_site_id,
@@ -673,6 +701,8 @@ def load_data(station: str, year: int, results_dir: Path):
         "station_name": station,
         "outer_reflection_dist": outer_reflection_dist,
         "mean_rh": mean_rh,
+        "az_start": az_start,
+        "az_end": az_end,
     }
 
     df["WSE"] = antenna_height - df["RH"]
@@ -870,6 +900,65 @@ def render_cover_frame(metadata, frame_config, output_path):
     return output_path
 
 
+def _draw_reflection_wedge(ax, origin_x, origin_y, df_all):
+    """Draw azimuth wedge(s) showing the range of possible retrievals.
+
+    Finds contiguous azimuth clusters in the data (gaps > 30° separate clusters).
+    For each cluster draws an outer arc at the farthest reflection distance and
+    radial boundary lines, in the style of the original animation.
+    """
+    if df_all is None or len(df_all) == 0:
+        return
+
+    azimuths = np.sort(df_all["Azim"].dropna().values)
+    if len(azimuths) == 0:
+        return
+
+    # Compute outer/inner reflection distances to match the scatter plot geometry exactly.
+    # Each point is plotted at RH / tan(elev_avg), so use the same formula here.
+    df = df_all.copy()
+    df["elev_avg"] = (df["eminO"] + df["emaxO"]) / 2.0
+    df["refl_dist"] = df["RH"] / np.tan(np.radians(df["elev_avg"]))
+    outer_dist = df["refl_dist"].max()
+    inner_dist = df["refl_dist"].min()
+    elev_max = df["elev_avg"].max()  # kept for reference only
+
+    # Split azimuths into contiguous clusters at gaps > 30°
+    gaps = np.diff(azimuths)
+    gap_indices = np.where(gaps > 30)[0]
+    cluster_starts = np.concatenate([[0], gap_indices + 1])
+    cluster_ends = np.concatenate([gap_indices, [len(azimuths) - 1]])
+
+    for cs, ce in zip(cluster_starts, cluster_ends):
+        az_s = azimuths[cs]
+        az_e = azimuths[ce]
+        az_arc = np.linspace(az_s, az_e, max(int(az_e - az_s) + 1, 2))
+
+        # Outer arc
+        ax.plot(
+            origin_x + outer_dist * np.sin(np.radians(az_arc)),
+            origin_y + outer_dist * np.cos(np.radians(az_arc)),
+            color="cyan", linewidth=1.5, alpha=0.75, zorder=4,
+        )
+        # Inner arc (if meaningfully different from origin)
+        if inner_dist > 2:
+            ax.plot(
+                origin_x + inner_dist * np.sin(np.radians(az_arc)),
+                origin_y + inner_dist * np.cos(np.radians(az_arc)),
+                color="cyan", linewidth=0.8, alpha=0.4, linestyle="--", zorder=4,
+            )
+        # Radial boundary lines
+        for az_deg in [az_s, az_e]:
+            az_rad = np.radians(az_deg)
+            ax.plot(
+                [origin_x, origin_x + outer_dist * np.sin(az_rad)],
+                [origin_y, origin_y + outer_dist * np.cos(az_rad)],
+                color="cyan", linewidth=1.0, alpha=0.7, zorder=4,
+            )
+
+    return inner_dist, outer_dist
+
+
 def render_animation_frame(
     df_all,
     df_current,
@@ -1062,6 +1151,11 @@ def render_animation_frame(
         markersize=12, markeredgecolor="white", markeredgewidth=2, zorder=10,
     )
 
+    # Reflection wedge overlay
+    wedge_result = _draw_reflection_wedge(ax_refl, origin_x, origin_y, df_all)
+    inner_dist = wedge_result[0] if wedge_result else 0
+    outer_dist_wedge = wedge_result[1] if wedge_result else outer_refl_dist
+
     # Colormap for water level
     cmap = plt.cm.coolwarm
     norm = mcolors.Normalize(vmin=vmin_wl, vmax=vmax_wl)
@@ -1113,7 +1207,7 @@ def render_animation_frame(
     ax_refl.set_aspect("equal")
     ax_refl.axis("off")
     ax_refl.set_title(
-        f"Reflection Points ({outer_refl_dist:.0f}m) | Current: {len(df_current)} pts",
+        f"Fresnel Zone ({inner_dist:.0f}-{outer_dist_wedge:.0f}m) | Current: {len(df_current)} pts",
         fontsize=10,
     )
 
@@ -1628,6 +1722,11 @@ def create_frame(
         zorder=10,
     )
 
+    # Reflection wedge overlay
+    wedge_result = _draw_reflection_wedge(ax_sat, origin_x, origin_y, df_all)
+    inner_dist = wedge_result[0] if wedge_result else 0
+    outer_dist_wedge = wedge_result[1] if wedge_result else outer_refl_dist
+
     # Colormap for water level
     cmap = plt.cm.coolwarm
     norm = mcolors.Normalize(vmin=vmin_wl, vmax=vmax_wl)
@@ -1723,7 +1822,7 @@ def create_frame(
     ax_sat.set_aspect("equal")
     ax_sat.axis("off")
     ax_sat.set_title(
-        f"Reflection Points (max {outer_refl_dist:.0f}m) | "
+        f"Fresnel Zone ({inner_dist:.0f}-{outer_dist_wedge:.0f}m) | "
         f"Current: {len(df_current)} pts",
         fontsize=10,
     )
@@ -1811,6 +1910,7 @@ def create_animation(
     n_workers: int = 0,
     mode: str = "presentation",
     output_format: str = "gif",
+    wl_range: float = None,
 ):
     """Create the full animation. Uses multiprocessing when n_workers > 1."""
 
@@ -1850,6 +1950,9 @@ def create_animation(
             ref_max = ref_window["wl_dm"].max() * 100
             vmin_wl = min(vmin_wl, ref_min)
             vmax_wl = max(vmax_wl, ref_max)
+
+    if wl_range is not None:
+        vmin_wl, vmax_wl = -wl_range, wl_range
 
     print(f"Water level range: {vmin_wl:.1f} to {vmax_wl:.1f} cm")
 
@@ -2069,6 +2172,12 @@ def main():
         default="gif",
         help="Output format (default: gif)",
     )
+    parser.add_argument(
+        "--wl_range",
+        type=float,
+        default=None,
+        help="Symmetric water level axis range in cm, e.g. 30 for ±30 cm (default: auto from data)",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
@@ -2102,6 +2211,7 @@ def main():
                 n_workers=args.workers,
                 mode=args.mode,
                 output_format=args.format,
+                wl_range=args.wl_range,
             )
     else:
         output_path = (
@@ -2122,6 +2232,7 @@ def main():
             n_workers=args.workers,
             mode=args.mode,
             output_format=args.format,
+            wl_range=args.wl_range,
         )
 
 
