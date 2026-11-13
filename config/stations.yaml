@@ -110,3 +110,8 @@ TOBY:
   data_source: nrcan
   orbit_type: nav
   reference: coops:9075065   # Alpena
+
+SC02:   # Friday Harbor, WA. Open view, about 350 arcs a day, NOAA gauge with wind sensor at 300 m.
+  gnssrefl_json: config/sc02.json
+  data_source: earthscope
+  reference: coops:9449880   # Friday Harbor
