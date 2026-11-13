@@ -26,7 +26,7 @@ Further tools, each one command:
 Friday Harbor, Washington (station SC02), March 2024. Data from EarthScope, gauge from NOAA.
 
 ![Circular plot of reflections at SC02](docs/images/sc02_2024_076_circle.png)
-*Where the reflections come from, for one day. Left: the site with the reflection zones of the arcs that passed. Top row: distance from the water level, where a reflection from the water lies on the dashed ring at any tide. Bottom row: height above the surface. Site image: Esri World Imagery.*
+*Where the reflections come from, for one day. Left: the site with the reflection zones of the arcs that passed. Top row: distance from the water level, where a reflection from the water lies on the dashed ring at any tide. Bottom row: height above the surface. Site image: USDA NAIP air photo, from USGS The National Map (public domain).*
 
 ![Water level at SC02 against the NOAA gauge](docs/images/sc02_2024_series.png)
 *Water level for eight days. Grey points: one height per satellite arc. Blue: inverse method, a value every 5 minutes. Dark line: NOAA gauge 9449880. Below: inverse method minus gauge, 1.8 cm RMS over the month.*

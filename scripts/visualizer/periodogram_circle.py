@@ -220,7 +220,49 @@ def fresnel_zone(wavelength, ele_deg, h):
     return b / s, b, (h + d / s) / np.tan(np.radians(ele_deg))
 
 
-def draw_site(ax, cfg, mask, rows, half_width_m=None):
+US_BOXES = ((24.0, 50.0, -125.5, -66.0), (51.0, 72.0, -180.0, -129.0), (18.5, 22.5, -161.0, -154.5),
+            (17.5, 18.7, -67.5, -64.5))  # lat1, lat2, lon1, lon2: lower 48, Alaska, Hawaii, Puerto Rico
+
+
+def imagery_source(lat, lon, imagery="auto"):
+    """Tile provider, credit text and highest useful zoom for the site image.
+
+    "usgs" is the USGS National Map imagery (public domain, United States only). "esri" is
+    Esri World Imagery (worldwide; Esri terms of use apply). "auto" takes USGS inside the
+    United States and Esri elsewhere. "none" gives no image.
+    """
+    import contextily as cx
+
+    if imagery == "auto":
+        imagery = "usgs" if any(a <= lat <= b and c <= lon <= d for a, b, c, d in US_BOXES) else "esri"
+    if imagery == "usgs":
+        return cx.providers.USGS.USImagery, "Imagery: USGS, The National Map", 16
+    if imagery == "esri":
+        return cx.providers.Esri.WorldImagery, "Imagery: Esri World Imagery", 18
+    return None, "no imagery", None
+
+
+NAIP_URL = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage"
+
+
+def naip_image(x1, y1, x2, y2, pixels=800):
+    """Air photo (USDA NAIP, about 1 m, public domain) for a web-mercator box, from the USGS
+    image service. Returns an RGB array, or None where NAIP has no cover (it covers the
+    lower 48 states)."""
+    import io
+
+    import requests
+    from PIL import Image
+
+    r = requests.get(NAIP_URL, timeout=60, params={"bbox": f"{x1},{y1},{x2},{y2}", "bboxSR": 3857, "imageSR": 3857,
+                                                   "size": f"{pixels},{pixels}", "format": "png", "f": "image"})
+    if not r.ok or "image" not in r.headers.get("content-type", ""):
+        return None
+    img = np.asarray(Image.open(io.BytesIO(r.content)).convert("RGB"))
+    return img if img.std() > 2 else None   # one flat colour = no cover
+
+
+def draw_site(ax, cfg, mask, rows, half_width_m=None, imagery="auto"):
     """Image of the site with the reflection distances and the azimuth mask."""
     import contextily as cx
     from pyproj import Transformer
@@ -238,12 +280,23 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     k = 1.0 / np.cos(np.radians(cfg["lat"]))  # web-mercator metres per ground metre
     ax.set_xlim(x0 - half * k, x0 + half * k)
     ax.set_ylim(y0 - half * k, y0 + half * k)
-    source = "Esri World Imagery"
-    try:
-        cx.add_basemap(ax, source=cx.providers.Esri.WorldImagery, attribution=False)
-    except Exception as exc:  # no network: keep the geometry, say so
-        source = f"no imagery ({type(exc).__name__})"
-        ax.set_facecolor("#dddddd")
+    provider, source, max_zoom = imagery_source(cfg["lat"], cfg["lon"], imagery)
+    ax.set_facecolor("#55606b")
+    if provider is not None:
+        try:
+            naip = naip_image(x0 - half * k, y0 - half * k, x0 + half * k, y0 + half * k) if "USGS" in source else None
+        except Exception:
+            naip = None
+        if naip is not None:
+            ax.imshow(naip, extent=(x0 - half * k, x0 + half * k, y0 - half * k, y0 + half * k), zorder=0)
+            source, provider = "Imagery: USDA NAIP, from USGS The National Map", None
+    if provider is not None:
+        try:
+            # tiles for about 800 pixels across the image, not above the provider's best zoom
+            zoom = int(np.clip(np.floor(np.log2(40075016.7 * 800 / (256 * 2 * half * k))), 1, max_zoom))
+            cx.add_basemap(ax, source=provider, attribution=False, zoom=zoom)
+        except Exception as exc:  # no network: keep the geometry, say so
+            source = f"no imagery ({type(exc).__name__})"
     th = np.radians(np.linspace(0, 360, 361))
     for d, ls in ((d_near, "-"), (d_far, "-")):
         ax.plot(x0 + d * k * np.sin(th), y0 + d * k * np.cos(th), color="white", lw=1.0, ls=ls, alpha=0.9)
@@ -285,7 +338,7 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     ax.text(0.99, 0.01, source, transform=ax.transAxes, ha="right", va="bottom", fontsize=6, color="white")
 
 
-def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5):
+def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5, imagery="auto"):
     t0 = time.time()
     cfg, mask, rows = load_day(station, year, doy, freqs)
     t_data = time.time() - t0
@@ -311,7 +364,7 @@ def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5
     top, bottom = 1 - 2.0 / (6.6 * nrow + 0.8), 0.9 / (6.6 * nrow + 0.8)
     gs = fig.add_gridspec(nrow, ncol, left=0.03, right=0.98, top=top, bottom=bottom, hspace=0.62, wspace=0.18)
     if with_site:
-        draw_site(fig.add_subplot(gs[0, 0]), cfg, mask, rows)
+        draw_site(fig.add_subplot(gs[0, 0]), cfg, mask, rows, imagery=imagery)
     counts = {}
     for i, view in enumerate(views):
         first = 1 if with_site else 0
@@ -353,10 +406,12 @@ def main():
     ap.add_argument("--freqs", help="comma list of gnssrefl frequency codes; default: all in the station file")
     ap.add_argument("--out")
     ap.add_argument("--no_site", action="store_true", help="leave out the site image")
+    ap.add_argument("--imagery", default="auto", choices=["auto", "usgs", "esri", "none"],
+                    help="site image: USGS (United States, public domain), Esri (worldwide), auto (default) or none")
     a = ap.parse_args()
     freqs = [int(x) for x in a.freqs.split(",")] if a.freqs else None
     out = a.out or f"{a.station.lower()}_{a.year}_{a.doy:03d}_periodogram_circle.png"
-    make_figure(a.station.lower(), a.year, a.doy, out, freqs, not a.no_site)
+    make_figure(a.station.lower(), a.year, a.doy, out, freqs, not a.no_site, imagery=a.imagery)
 
 
 if __name__ == "__main__":
