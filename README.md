@@ -26,8 +26,6 @@ Further tools, each one command:
 ### Water Level Correlation Analysis
 ![Resolution Comparison](docs/images/GLBX_2024_resolution_comparison.png)
 *GLBX station (Bartlett Cove, AK) - Correlation and RMSE analysis at different temporal resolutions comparing GNSS-IR derived water levels to ERDDAP reference gauge.*
-
-### Polar Visualization Animation
 ![Polar Animation](docs/images/GLBX_2024_polar_animation_DOY1-31.gif)
 *Polar animation showing GNSS-IR reflection points on satellite imagery alongside water level time series.*
 
