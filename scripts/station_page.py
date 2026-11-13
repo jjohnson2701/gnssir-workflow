@@ -108,6 +108,10 @@ def read_gauge(path, time_col, level_col, year):
 
 def gauge_fit(t, rh, edotf, gauge):
     """Slope and robust scatter (m) of single heights against the gauge, with the height-rate term."""
+    from scripts.visualizer.station_figures import inside
+
+    ok = inside(t, gauge[0]) & np.isfinite(rh) & np.isfinite(edotf)
+    t, rh, edotf = t[ok], rh[ok], edotf[ok]
     wl = np.interp(t, *gauge)
     rate = (np.interp(t + 300 / 86400, *gauge) - np.interp(t - 300 / 86400, *gauge)) / 600 * 3600
     A = np.c_[wl, edotf * rate, np.ones(len(t))]
@@ -126,6 +130,8 @@ def station_block(sta, spec, top, refl_code, fig_dir):
     year, d1, d2 = top["year"], top["doy"], top["doy_end"]
     cfg = json.loads(Path(refl_code, "input", f"{sta}.json").read_text())
     d = load_results(refl_code, sta, year, d1, d2)
+    if len(d) == 0:
+        raise SystemExit(f"No gnssir results for {sta} {year} days {d1:03d} to {d2:03d} in {refl_code}. Run gnssir first.")
     t = d[:, 1] + d[:, 4] / 24.0
     fit = scatter_about_spline(t, d[:, 2], d[:, 12], 3.0, True)
     out = {"sta": sta, "cfg": cfg, "spec": spec, "arcs_per_day": len(d) / max(1, len(np.unique(d[:, 1]))),
@@ -135,6 +141,7 @@ def station_block(sta, spec, top, refl_code, fig_dir):
     if gauge:
         out["slope"], out["arc_scatter"] = gauge_fit(t, d[:, 2], d[:, 12], gauge)
         if inv is not None:
+            inv = inv[(inv.doy_fraction >= gauge[0].min()) & (inv.doy_fraction <= gauge[0].max())].reset_index(drop=True)
             wl = np.interp(inv.doy_fraction, *gauge)
             A = np.c_[-inv.rh_m.values, np.ones(len(inv))]
             c = np.linalg.lstsq(A, wl, rcond=None)[0]
@@ -149,20 +156,24 @@ def station_block(sta, spec, top, refl_code, fig_dir):
                   spec.get("gauge_name", "gauge").split(",")[0], year)
     if gauge and spec.get("open_extension"):
         q = load_results(refl_code, sta, year, d1, d2, spec["open_extension"])
-        rows = tuning_table(q[:, 1] + q[:, 4] / 24.0, q[:, 2], q[:, 13], q[:, 12], gauge[0], gauge[1])
+        limits = np.unique(np.r_[np.round(np.arange(0, 6.01, 0.2), 1), cfg["PkNoise"]])  # the limit in use is always a row
+        rows = tuning_table(q[:, 1] + q[:, 4] / 24.0, q[:, 2], q[:, 13], q[:, 12], gauge[0], gauge[1], limits)
         out["tuning_png"] = str(Path(fig_dir, f"{sta}_tuning.png"))
         tuning_figure(out["tuning_png"], rows, cfg["PkNoise"])
-        out["tuning"] = [r for r in rows if round(r["limit"], 1) in (0.0, round(cfg["PkNoise"], 1))]
+        out["tuning"] = [r for r in rows if r["limit"] == 0.0 or abs(r["limit"] - cfg["PkNoise"]) < 1e-9]
     if gauge and spec.get("wind_csv"):
         wind = read_gauge(spec["wind_csv"], spec.get("wind_time", "time"), spec.get("wind_speed", "speed"), year)
         out["wind"] = wind_table(t, d[:, 2], d[:, 13], d[:, 12], gauge[0], gauge[1], wind[0], wind[1])
         out["wind_png"] = str(Path(fig_dir, f"{sta}_wind.png"))
-        wind_figure(out["wind_png"], out["wind"])
+        if not wind_figure(out["wind_png"], out["wind"]):
+            del out["wind"], out["wind_png"]   # no wind bin has enough arcs: leave the block out
     # checks
     snr = sorted(glob.glob(f"{refl_code}/{year}/snr/{sta}/{sta}{d1:03d}0.{year % 100:02d}.snr*"))
     if snr:
         try:
             out["sampling"] = sampling_check(read_snr(snr[0]), cfg["e1"], cfg["e2"], cfg.get("azval2", [0, 360]), cfg["maxH"], cfg["freqs"])
+            if not out["sampling"]["signals"]:
+                del out["sampling"]
         except ValueError:
             pass
     if spec.get("rinex") and os.path.exists(spec["rinex"]):
@@ -180,10 +191,12 @@ def _az(a):
 
 
 def render(blocks, top):
-    e = html.escape
+    def e(value):
+        return html.escape(str(value))
+
     rows, secs = "", ""
     for b in blocks:
-        sp, cfg, sta = b["spec"], b["cfg"], b["sta"]
+        sp, cfg, sta = b["spec"], b["cfg"], e(b["sta"])
         has_g = "arc_scatter" in b
         rows += (f'<tr><th scope="row"><a href="#{sta}">{sta.upper()}</a><br><span class="sub">{e(sp.get("place", ""))}</span></th>'
                  f'<td class="n">{b["arcs_per_day"]:.0f}</td><td class="n">{b["arc_scatter"]:.3f} m</td>' if has_g else
@@ -200,7 +213,7 @@ def render(blocks, top):
                    f'<figcaption>Days {top["doy"]:03d} to {top["doy_end"]:03d}, processed with the amplitude and peak-to-noise limits off. Dashed line: the limit in the station file.</figcaption></figure>'
                    '<div class="tw"><table><thead><tr><th>Limit</th><th>Arcs per day</th><th>Scatter</th><th>Slope</th></tr></thead><tbody>'
                    f'<tr><td>off</td><td class="n">{a["per_day"]:.0f}</td><td class="n">{a["scatter_m"]:.3f} m</td><td class="n">{a["slope"]:.3f}</td></tr>'
-                   f'<tr><td>{cfg["PkNoise"]:g} (in use)</td><td class="n">{c["per_day"]:.0f}</td><td class="n">{c["scatter_m"]:.3f} m</td><td class="n">{c["slope"]:.3f}</td></tr>'
+                   f'<tr><td>{cfg["PkNoise"]:g} (the limit in use; amplitude limit still off)</td><td class="n">{c["per_day"]:.0f}</td><td class="n">{c["scatter_m"]:.3f} m</td><td class="n">{c["slope"]:.3f}</td></tr>'
                    '</tbody></table></div></div>')
         wnd = ""
         if "wind" in b:
@@ -220,12 +233,12 @@ def render(blocks, top):
                        f'the height window ends at {cfg["maxH"]:g} m. Slower sampling can still lose arcs to the limits.</li>')
         if "l2" in b:
             l2 = b["l2"]
-            codes = ", ".join(f'{k} on {v} satellites' for k, v in l2["satellites"].items() if v)
+            codes = ", ".join(f'{e(k)} on {v} satellites' for k, v in l2["satellites"].items() if v)
             checks += f'<li><b>L2 signal in the file.</b> {e(L2_VERDICT_TEXT[l2["verdict"]])} ({codes}; first {l2["epochs_read"]} epochs.)</li>'
         checks += f'<li><b>Scatter of single heights about a smooth curve (no gauge needed).</b> {b["spline_scatter"]:.3f} m.</li>'
         checks += "".join(f"<li>{e(n)}</li>" for n in sp.get("notes", []))
         series_cap = ("Grey points: one height per satellite arc, with the height-rate correction."
-                      + (" Blue: inverse method, 5-minute values; the line is broken where no arc exists within 1.5 hours on both sides." if sp.get("inverse_csv") else "")
+                      + (" Blue: inverse method; the line is broken where too few arcs support it." if sp.get("inverse_csv") else "")
                       + (" Dark line: gauge. Each series is shifted by one constant to the gauge; no scale is fitted." if has_g else " No gauge exists; levels are about the median."))
         secs += f'''<section id="{sta}">
 <h2>{sta.upper()} <span class="place">{e(sp.get("place", ""))}</span></h2>
@@ -260,7 +273,7 @@ def render(blocks, top):
 <main>
 <header style="display:flex;flex-direction:column;gap:10px">
 <h1>{title}</h1>
-<p class="lede">Water level from reflected GNSS signals. Each station has the same four blocks: where the reflections come from, the water level series, the effect of the peak-to-noise limit, and the station checks.</p>
+<p class="lede">Water level from reflected GNSS signals. Each station has the same blocks, where the data for them exist: where the reflections come from, the water level series, the effect of the peak-to-noise limit, and the station checks.</p>
 <p class="meta">Built {datetime.date.today().isoformat()} by <code>scripts/station_page.py</code> from gnssrefl results for {top["year"]}, days {top["doy"]:03d} to {top["doy_end"]:03d}.</p>
 </header>
 <div class="tw"><table>

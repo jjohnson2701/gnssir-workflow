@@ -31,6 +31,14 @@ def _style(ax):
     ax.tick_params(colors=INK, labelsize=9)
 
 
+def inside(t, ref_t):
+    """True where a time lies inside the time span of a reference series (gauge, wind).
+    Outside it an interpolation would repeat the first or the last value."""
+    ref_t = np.asarray(ref_t, float)
+    t = np.asarray(t, float)
+    return (t >= ref_t.min()) & (t <= ref_t.max()) if len(ref_t) else np.zeros(len(t), bool)
+
+
 def to_level(rh, offset):
     """Water level from reflector height: a higher surface gives a smaller height."""
     return offset - np.asarray(rh, float)
@@ -51,8 +59,14 @@ def series_figure(out, day1, day2, arc_t, arc_rh, inv_t=None, inv_rh=None, gauge
         inv_t, inv_rh = np.asarray(inv_t, float), np.asarray(inv_rh, float)
     if has_gauge:
         gauge_t, gauge_wl = np.asarray(gauge_t, float), np.asarray(gauge_wl, float)
-        off_arc = np.median(np.interp(arc_t, gauge_t, gauge_wl) + arc_rh)
-        off_inv = np.median(np.interp(inv_t, gauge_t, gauge_wl) + inv_rh) if has_inv else None
+        a_in = inside(arc_t, gauge_t)
+        off_arc = np.median(np.interp(arc_t[a_in], gauge_t, gauge_wl) + arc_rh[a_in])
+        if has_inv:
+            i_in = inside(inv_t, gauge_t)
+            inv_t, inv_rh = inv_t[i_in], inv_rh[i_in]
+            off_inv = np.median(np.interp(inv_t, gauge_t, gauge_wl) + inv_rh)
+        else:
+            off_inv = None
     else:
         off_inv = np.median(inv_rh) if has_inv else None
         off_arc = off_inv if has_inv else np.median(arc_rh)
@@ -99,14 +113,16 @@ def tuning_table(t, rh, pk, edotf, gauge_t, gauge_wl, limits=None):
     (-RH) = slope * gauge + k * edotF * (gauge rate) + constant.
     """
     t, rh, pk, edotf = (np.asarray(v, float) for v in (t, rh, pk, edotf))
+    ok = inside(t, gauge_t) & np.isfinite(rh) & np.isfinite(pk) & np.isfinite(edotf)
+    t, rh, pk, edotf = t[ok], rh[ok], pk[ok], edotf[ok]
     wl = np.interp(t, gauge_t, gauge_wl)
     rate = (np.interp(t + 300 / 86400, gauge_t, gauge_wl) - np.interp(t - 300 / 86400, gauge_t, gauge_wl)) / 600 * 3600
-    days = len(np.unique(np.floor(t)))
+    days = max(1, len(np.unique(np.floor(t))))
     limits = np.arange(0, 6.01, 0.2) if limits is None else limits
     rows = []
     for lim in limits:
         m = pk > lim
-        row = {"limit": float(lim), "n": int(m.sum()), "kept": float(m.mean()), "per_day": m.sum() / days,
+        row = {"limit": float(lim), "n": int(m.sum()), "kept": float(m.mean()) if len(m) else 0.0, "per_day": m.sum() / days,
                "scatter_m": np.nan, "slope": np.nan}
         if m.sum() >= 30:
             A = np.c_[wl[m], edotf[m] * rate[m], np.ones(m.sum())]
@@ -154,6 +170,10 @@ def wind_table(t, rh, pk, edotf, gauge_t, gauge_wl, wind_t, wind_speed, bins=WIN
     arcs have scatter_m = None.
     """
     t, rh, pk, edotf = (np.asarray(v, float) for v in (t, rh, pk, edotf))
+    ok = inside(t, gauge_t) & inside(t, wind_t) & np.isfinite(rh) & np.isfinite(pk) & np.isfinite(edotf)
+    t, rh, pk, edotf = t[ok], rh[ok], pk[ok], edotf[ok]
+    if len(t) < 3:
+        return []
     wl = np.interp(t, gauge_t, gauge_wl)
     rate = (np.interp(t + 300 / 86400, gauge_t, gauge_wl) - np.interp(t - 300 / 86400, gauge_t, gauge_wl)) / 600 * 3600
     A = np.c_[wl, edotf * rate, np.ones(len(t))]
@@ -174,8 +194,11 @@ def wind_table(t, rh, pk, edotf, gauge_t, gauge_wl, wind_t, wind_speed, bins=WIN
 
 
 def wind_figure(out, rows):
-    """Scatter of single heights against the gauge, and share of arcs, per wind bin."""
+    """Scatter of single heights against the gauge, and share of arcs, per wind bin.
+    Returns False, with no figure, when no bin has enough arcs."""
     ok = [r for r in rows if r["scatter_m"] is not None]
+    if not ok:
+        return False
     x = np.arange(len(rows))
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(5.6, 4.4), sharex=True, gridspec_kw={"height_ratios": [2, 1]})
     a1.plot([rows.index(r) for r in ok], [r["scatter_m"] for r in ok], "o-", color=BLUE, lw=2, ms=6)
@@ -194,4 +217,5 @@ def wind_figure(out, rows):
     fig.tight_layout()
     fig.savefig(out, dpi=130)
     plt.close(fig)
+    return True
 

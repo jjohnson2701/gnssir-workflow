@@ -10,6 +10,22 @@ from .workspace_setup import setup_gnssrefl_workspace, register_station_coordina
 from ..visualizer.timeseries import plot_annual_rh_timeseries
 
 
+def _failed_day(doy, message):
+    return {"doy": doy, "status": "failed", "errors": [message], "skipped_steps": []}
+
+
+def _safe_day(args):
+    """Run one day. An exception becomes a failed result for that day, so one bad day cannot
+    stop the other days or drop out of the summary."""
+    try:
+        return process_single_day_wrapper(args)
+    except BaseException as e:  # SystemExit included: a lost pool task would block the pool
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        logging.error(f"Exception for day {args[2]}: {type(e).__name__}: {e}")
+        return _failed_day(args[2], f"{type(e).__name__}: {e}")
+
+
 def process_station_parallel(
     station_config,
     year,
@@ -75,12 +91,19 @@ def process_station_parallel(
 
     logging.info(f"Pass 1: download and translation using {num_cores} cores")
     translate_options = {**skip_options, "translate_only": True}
-    first_pass = []
+    if station_config.get("data_source") == "earthscope":
+        try:  # refresh the saved EarthScope login once here, not in every worker at the same time
+            from ..earthscope_rinex3 import access_token
+
+            access_token()
+        except Exception as e:
+            logging.warning(f"EarthScope login could not be refreshed: {e}")
     try:
         with multiprocessing.Pool(processes=num_cores) as pool:
-            first_pass = pool.map(process_single_day_wrapper, [args_for(d, translate_options) for d in days])
-    except Exception as e:
+            first_pass = pool.map(_safe_day, [args_for(d, translate_options) for d in days])
+    except Exception as e:  # the pool itself failed; no day can go on
         logging.error(f"Exception during parallel translation: {e}")
+        first_pass = [_failed_day(d, f"translation pool failed: {e}") for d in days]
 
     logging.info("Pass 2: gnssir, one day at a time")
     want_quicklook = not skip_options.get("skip_quicklook", False)
@@ -90,19 +113,13 @@ def process_station_parallel(
         if first.get("status") != "translated":
             task_results.append(first)  # failed in pass 1; keep its errors
             continue
-        try:
-            task_results.append(process_single_day_wrapper(args_for(doy, height_options)))
-        except Exception as e:
-            logging.error(f"Exception in gnssir for day {doy}: {e}")
+        task_results.append(_safe_day(args_for(doy, height_options)))
     if want_quicklook:
         logging.info("Pass 3: quickLook plots")
         plot_options = {**height_options, "skip_rh": True, "skip_quicklook": False}
         for doy, res in zip(days, task_results):
             if res.get("status") == "success":
-                try:
-                    process_single_day_wrapper(args_for(doy, plot_options))
-                except Exception as e:
-                    logging.error(f"Exception in quickLook for day {doy}: {e}")
+                _safe_day(args_for(doy, plot_options))
 
     # Process results, aggregate data, and generate plots
     results = finalize_station_processing(

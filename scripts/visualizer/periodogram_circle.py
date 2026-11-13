@@ -127,7 +127,8 @@ def expected_heights(station, year, doy, rows, knot_hours=3.0):
         return None
     t = d[:, 1] + d[:, 4] / 24.0
     fit = scatter_about_spline(t, d[:, 2], d[:, 12], knot_hours, True)
-    sp = _spline(t, fit["rh_corrected"], knot_hours)
+    keep = fit["used"]   # without the arcs that the robust fit rejected
+    sp = _spline(t[keep], fit["rh_corrected"][keep], knot_hours) if keep.sum() >= 20 else None
     if sp is None:
         return None
     for r in rows:
@@ -342,6 +343,8 @@ def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5
     t0 = time.time()
     cfg, mask, rows = load_day(station, year, doy, freqs)
     t_data = time.time() - t0
+    if rows and all(r["state"] == "masked" for r in rows):
+        raise ValueError(f"No gnssir record for {station} {year} day {doy:03d}. Run gnssir for this day first.")
     freqs = freqs or [f for f in cfg["freqs"] if any(r["freq"] == f for r in rows)]
     try:
         day_range = expected_heights(station, year, doy, rows)

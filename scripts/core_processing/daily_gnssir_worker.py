@@ -20,7 +20,17 @@ MIN_SNR_SIZE_BYTES = 50 * 1024  # 50 KB
 MIN_RH_RESULT_SIZE_BYTES = 500  # 500 bytes (small text file)
 
 
-def process_single_day(
+def process_single_day(*args, **kwargs):
+    """Process one day (see _process_single_day) and remove its temporary files, also on failure."""
+    temp_files = []
+    try:
+        return _process_single_day(*args, temp_files=temp_files, **kwargs)
+    finally:
+        for f in temp_files:
+            Path(f).unlink(missing_ok=True)
+
+
+def _process_single_day(
     station_config,
     year,
     doy,
@@ -29,6 +39,7 @@ def process_single_day(
     refl_code_base,
     orbits_base,
     skip_options=None,
+    temp_files=None,
 ):
     """
     Process a single DOY for a given station.
@@ -192,6 +203,9 @@ def process_single_day(
     earthscope_unpacked = None
     snr_exists = check_file_exists(snr_file_path, min_size_bytes=MIN_SNR_SIZE_BYTES) or check_file_exists(
         snr_file_path_gz, min_size_bytes=MIN_SNR_SIZE_BYTES)
+    if data_source == "earthscope" and snr_exists:
+        # the SNR file is there; do not start the gnssrefl archive download for it
+        skip_options = {**(skip_options or {}), "skip_snr": True}
     if data_source == "earthscope" and not snr_exists:
         try:
             from ..earthscope_rinex3 import download as es_download, unpack as es_unpack
@@ -200,6 +214,8 @@ def process_single_day(
             packed = es_download(long_name, year, doy, rinex3_dir)
             if packed is not None:
                 earthscope_unpacked = es_unpack(packed, rinex3_dir)
+                if temp_files is not None:
+                    temp_files.append(earthscope_unpacked)  # the packed download is kept
                 rinex_input_file = earthscope_unpacked
                 day_logger.info(f"Step 1: EarthScope RINEX 3 file {packed.name}")
             else:
@@ -285,9 +301,6 @@ def process_single_day(
             day_logger.error(f"Exception during rinex2snr step: {e}")
             result["errors"].append(f"Exception during rinex2snr step: {e}")
             return result
-
-    if earthscope_unpacked is not None:
-        Path(earthscope_unpacked).unlink(missing_ok=True)  # the packed download is kept
 
     # Translation pass only: the orchestrator runs gnssir afterwards, one day at a time and in
     # order. gnssir reads the SNR files of the neighbour days (arcs that cross midnight) and

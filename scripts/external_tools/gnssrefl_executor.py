@@ -220,7 +220,8 @@ def execute_gnssir(
 
         # Execute gnssir with capture_output=True to capture stdout/stderr
         process_gnssir = subprocess.run(
-            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_gnssir, env=my_env
+            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_gnssir, env=my_env,
+            timeout=3600,  # one day takes minutes; a job that hangs must not block the days after it
         )
 
         # Log the direct output from the command
@@ -406,7 +407,8 @@ def execute_quicklook(
 
         # Execute quickLook with capture_output=True to capture stdout/stderr
         process_quicklook = subprocess.run(
-            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_quicklook, env=my_env
+            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_quicklook, env=my_env,
+            timeout=900,
         )
 
         # Log the direct output from the command

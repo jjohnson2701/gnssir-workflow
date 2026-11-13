@@ -330,6 +330,7 @@ Examples:
     print()
 
     # Load configuration
+    args.station = args.station.upper()
     logger.info(f"Loading configuration from {config_path}")
     station_config = load_config(args.station, config_path)
 
@@ -417,7 +418,7 @@ Examples:
 
             # Load station-specific configuration for processing
             processing_config = load_station_config(
-                DEFAULT_STATIONS_CONFIG_PATH, args.station.upper(), project_root
+                config_path, args.station.upper(), project_root
             )
 
             # Process station in parallel

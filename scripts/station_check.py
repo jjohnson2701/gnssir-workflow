@@ -183,13 +183,17 @@ def scatter_about_spline(t_days, rh, edotf=None, knot_hours=3.0, rate_correction
 
     t_days: time of each arc in days. rh: reflector height (m). edotf: the gnssir edotF
     column (hours); needed for the rate correction. Returns a dict with n, n_rejected,
-    robust scatter and RMS (m) of the residuals, and the corrected heights.
+    robust scatter and RMS (m) of the residuals, the corrected heights, and `used`: which
+    arcs the last fit kept (False for rejected arcs and for arcs with a missing value).
     """
     t, y = np.asarray(t_days, float), np.asarray(rh, float)
     use = np.isfinite(t) & np.isfinite(y)
+    if rate_correction and edotf is not None:
+        use &= np.isfinite(np.asarray(edotf, float))
+    n_valid = int(use.sum())
     corr = np.zeros_like(y)
     if use.sum() < 20:
-        return {"n": int(use.sum()), "n_rejected": 0, "robust_scatter_m": np.nan, "rms_m": np.nan, "rh_corrected": y}
+        return {"n": n_valid, "n_rejected": 0, "robust_scatter_m": np.nan, "rms_m": np.nan, "rh_corrected": y, "used": use}
     for _ in range(3):
         sp = _spline(t[use], (y - corr)[use], knot_hours)
         if sp is None:
@@ -198,16 +202,18 @@ def scatter_about_spline(t_days, rh, edotf=None, knot_hours=3.0, rate_correction
         sd = 1.4826 * np.median(np.abs(res[use] - np.median(res[use])))
         use = np.isfinite(res) & (np.abs(res - np.median(res[use])) <= reject * sd)
         if rate_correction and edotf is not None:
-            corr = np.asarray(edotf, float) * sp.derivative()(t) / 24.0  # edotF (h) * dRH/dt (m/h)
+            corr = np.nan_to_num(np.asarray(edotf, float) * sp.derivative()(t) / 24.0)  # edotF (h) * dRH/dt (m/h)
+            use &= np.isfinite(np.asarray(edotf, float))
     if sp is None:
-        return {"n": int(use.sum()), "n_rejected": 0, "robust_scatter_m": np.nan, "rms_m": np.nan, "rh_corrected": y}
+        return {"n": n_valid, "n_rejected": 0, "robust_scatter_m": np.nan, "rms_m": np.nan, "rh_corrected": y, "used": use}
     res = (y - corr) - sp(t)
     return {
         "n": int(use.sum()),
-        "n_rejected": int(np.isfinite(y).sum() - use.sum()),
+        "n_rejected": int(n_valid - use.sum()),
         "robust_scatter_m": float(1.4826 * np.median(np.abs(res[use] - np.median(res[use])))),
         "rms_m": float(np.sqrt(np.mean(res[use] ** 2))),
         "rh_corrected": y - corr,
+        "used": use,
     }
 
 

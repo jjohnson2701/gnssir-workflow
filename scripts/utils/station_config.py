@@ -24,6 +24,7 @@ The station position comes from the gnssrefl file, so it is stored once.
 """
 import copy
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -173,7 +174,8 @@ def set_reference(station: str, reference: str, config_path=None) -> None:
     lines = path.read_text().splitlines()
     out, in_station, done = [], False, False
     for line in lines:
-        top = line and not line[0].isspace() and line.rstrip().endswith(":") and not line.startswith("#")
+        # a station header: "NAME:" at the start of a line, with or without a comment after it
+        top = bool(re.match(r"^[A-Za-z0-9_]+:\s*(#.*)?$", line))
         if top:
             if in_station and not done:
                 out.append(f"  reference: {reference}")

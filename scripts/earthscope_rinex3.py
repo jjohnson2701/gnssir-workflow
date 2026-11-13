@@ -35,34 +35,47 @@ def access_token():
 
 
 def crx2rnx_path():
-    for cand in (Path(os.environ.get("EXE", "")) / "CRX2RNX", shutil.which("CRX2RNX")):
-        if cand and Path(cand).exists():
-            return str(cand)
-    raise SystemExit("CRX2RNX not found in $EXE or on PATH.")
+    exe = os.environ.get("EXE")
+    for name in ("CRX2RNX", "crx2rnx"):
+        for cand in (Path(exe) / name if exe else None, shutil.which(name)):
+            if cand and Path(cand).exists():
+                return str(cand)
+    raise FileNotFoundError("CRX2RNX not found in $EXE or on PATH.")
 
 
 def download(station9, year, doy, out_dir, interval="15S", tries=3):
-    """Download one day. Returns the path, or None when the archive has no file."""
+    """Download one day. Returns the path, or None when the archive has no file (answer 404).
+
+    Any other failure (login refused, server error, no connection) raises RuntimeError, so
+    that it is not taken for a missing file.
+    """
     import requests
 
     name = file_name(station9, year, doy, interval)
     path = Path(out_dir) / name
     if path.exists() and path.stat().st_size > 100_000:
         return path
+    problem = "no answer"
     for _ in range(tries):
         try:
             r = requests.get(URL.format(year=year, doy=doy, name=name),
                              headers={"Authorization": f"Bearer {access_token()}"}, timeout=300)
-        except requests.RequestException:
+        except requests.RequestException as e:
+            problem = type(e).__name__
             time.sleep(5)
             continue
         if r.status_code == 200:
-            path.write_bytes(r.content)
+            part = path.with_name(path.name + ".part")   # a stopped download must not look complete
+            part.write_bytes(r.content)
+            part.replace(path)
             return path
-        if r.status_code in (403, 404):
+        if r.status_code == 404:
             return None
+        problem = f"HTTP {r.status_code}"
+        if r.status_code in (401, 403):   # the login is refused; a new try does not help
+            break
         time.sleep(5)
-    return None
+    raise RuntimeError(f"EarthScope download of {name} failed: {problem}")
 
 
 def unpack(crx_gz, work_dir):
@@ -111,7 +124,12 @@ def main(argv=None):
     keep.mkdir(parents=True, exist_ok=True)
     ok, missing, failed = 0, [], []
     for doy in range(a.doy, (a.doy_end or a.doy) + 1):
-        f = download(station9, a.year, doy, keep, a.interval)
+        try:
+            f = download(station9, a.year, doy, keep, a.interval)
+        except RuntimeError as e:
+            print(e)
+            failed.append(doy)
+            continue
         if f is None:
             missing.append(doy)
             continue
@@ -123,7 +141,7 @@ def main(argv=None):
     if missing:
         print("No file in the archive for days:", ", ".join(f"{d:03d}" for d in missing))
     if failed:
-        print("Translation failed for days:", ", ".join(f"{d:03d}" for d in failed))
+        print("Download or translation failed for days:", ", ".join(f"{d:03d}" for d in failed))
 
 
 if __name__ == "__main__":
