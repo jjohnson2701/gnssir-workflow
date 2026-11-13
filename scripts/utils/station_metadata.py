@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, Tuple
 from functools import lru_cache
 
 # Project root for config loading
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @lru_cache(maxsize=1)

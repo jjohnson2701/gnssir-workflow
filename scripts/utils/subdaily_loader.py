@@ -148,8 +148,8 @@ def annotate_confidence(spline_df, obs_times, threshold_hours=3.0):
         DataFrame with added columns: nearest_obs_hours, is_interpolated
     """
     result = spline_df.copy()
-    obs_ns = obs_times.values.astype("int64")
-    spline_ns = result["datetime"].values.astype("int64")
+    obs_ns = np.asarray(obs_times.values, dtype="datetime64[ns]").astype("int64")
+    spline_ns = np.asarray(result["datetime"].values, dtype="datetime64[ns]").astype("int64")
 
     nearest_hours = np.empty(len(spline_ns))
     for i, t in enumerate(spline_ns):
@@ -176,7 +176,7 @@ def detect_observation_gaps(obs_times, min_gap_hours=6.0):
         return []
 
     sorted_times = obs_times.sort_values()
-    diffs = np.diff(sorted_times.values).astype("float64") / 3.6e12  # to hours
+    diffs = np.diff(sorted_times.values) / np.timedelta64(1, "h")  # to hours
 
     gaps = []
     for i, diff_hours in enumerate(diffs):

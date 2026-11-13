@@ -38,7 +38,6 @@ def load_tool_paths(tool_paths_config_path, project_root):
     """
     # Define default tool paths
     default_tool_paths = {
-        "gfzrnx_path": "gfzrnx",
         "rinex2snr_path": "rinex2snr",
         "gnssir_path": "gnssir",
         "quicklook_path": "quickLook",

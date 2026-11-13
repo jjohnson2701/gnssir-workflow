@@ -1,5 +1,4 @@
 {
-    "gfzrnx_path": "/net/tiampostorage3/volume3/JoelShare3E/GNSSIR/GNSSIRWorkflow-standalone/tools/gfzrnx",
     "rinex2snr_path": "rinex2snr",
     "gnssir_path": "gnssir",
     "quicklook_path": "quickLook"

@@ -21,9 +21,10 @@ def execute_rinex2snr(
     rinex2_filename_override=None,
     archive=None,
     orbit=None,
+    input_file=None,
 ):
     """
-    Execute rinex2snr command to extract SNR data from RINEX 2 file.
+    Execute rinex2snr to extract SNR data from a RINEX file (version 2.11 or 3).
 
     Args:
         rinex2snr_exe_path (str): Path to rinex2snr executable
@@ -35,6 +36,8 @@ def execute_rinex2snr(
         logs_dir (str or Path): Directory for logs
         snr_code (str, optional): SNR code. Defaults to "66".
         rinex2_filename_override (str, optional): Override the default RINEX 2 filename.
+        input_file (str or Path, optional): Local RINEX file (version 2.11 or 3) to translate.
+            gnssrefl 4 reads both versions, so no conversion step is needed.
 
     Returns:
         bool: True on success, False on failure
@@ -53,19 +56,22 @@ def execute_rinex2snr(
 
     try:
         # Construct the rinex2snr command
-        cmd = [
-            rinex2snr_exe_path,
-            station_4char_lower,
-            str(year),
-            doy_padded,
-            "-snr",
-            snr_code,
-        ]
-
-        if archive:
-            cmd.extend(["-archive", archive])
+        if input_file:
+            # Local file: gnssrefl takes station, year and day from the file itself
+            cmd = [rinex2snr_exe_path, "-input_file", str(input_file), "-snr", snr_code]
         else:
-            cmd.extend(["-nolook", "T"])
+            cmd = [
+                rinex2snr_exe_path,
+                station_4char_lower,
+                str(year),
+                doy_padded,
+                "-snr",
+                snr_code,
+            ]
+            if archive:
+                cmd.extend(["-archive", archive])
+            else:
+                cmd.extend(["-nolook", "T"])
 
         if orbit:
             cmd.extend(["-orb", orbit])

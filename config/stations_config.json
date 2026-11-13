@@ -84,13 +84,13 @@
       "threshold_source": "default",
       "validated_against": [],
       "mahal_features": {
-        "amp_mean":  "winter_high",
-        "rh_std":    "winter_high",
-        "af_med":    "winter_high",
+        "amp_mean": "winter_high",
+        "rh_std": "winter_high",
+        "af_med": "winter_high",
         "gamma_med": "winter_high",
-        "pr_med":    "winter_high",
-        "p2n_mean":  "winter_high",
-        "_notes": "clr_med excluded: d=0.057 at 70.7N (geometry-driven — all sats in narrow elevation band, CLR structurally high for both states). af_z excluded: r=0.991 with af_med post-baseline-correction."
+        "pr_med": "winter_high",
+        "p2n_mean": "winter_high",
+        "_notes": "clr_med excluded: d=0.057 at 70.7N (geometry-driven \u2014 all sats in narrow elevation band, CLR structurally high for both states). af_z excluded: r=0.991 with af_med post-baseline-correction."
       }
     }
   },
@@ -225,14 +225,14 @@
       "threshold_source": "default",
       "validated_against": [],
       "mahal_features": {
-        "amp_mean":  "winter_low",
-        "rh_std":    "winter_high",
-        "clr_med":   "winter_low",
-        "af_med":    "winter_low",
+        "amp_mean": "winter_low",
+        "rh_std": "winter_high",
+        "clr_med": "winter_low",
+        "af_med": "winter_low",
         "gamma_med": "winter_high",
-        "pr_med":    "winter_low",
-        "p2n_mean":  "winter_high",
-        "_notes": "Tidal station (M2 confirmed, LS power=0.74). Anomalous periods are seasonal (Jan-Apr, amp_mean 22 vs 34 in summer) not ice. amp/clr/af/pr all winter_low — inverted from Great Lakes. Mahalanobis still detects seasonal departure correctly (sign-agnostic). Polarity annotations flag the inversion for validation checks."
+        "pr_med": "winter_low",
+        "p2n_mean": "winter_high",
+        "_notes": "Tidal station (M2 confirmed, LS power=0.74). Anomalous periods are seasonal (Jan-Apr, amp_mean 22 vs 34 in summer) not ice. amp/clr/af/pr all winter_low \u2014 inverted from Great Lakes. Mahalanobis still detects seasonal departure correctly (sign-agnostic). Polarity annotations flag the inversion for validation checks."
       }
     }
   },
@@ -490,6 +490,10 @@
       "usgs_parameter_code_to_use": "00065",
       "usgs_gauge_stated_datum": "Unknown"
     },
+    "baseline_period": [
+      7,
+      8
+    ],
     "classification": {
       "validated": false,
       "use_case": null,
@@ -500,7 +504,7 @@
   },
   "CBRG": {
     "station_id_4char_lower": "cbrg",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 42.469,
     "latitude_deg": 43.956469883,
     "longitude_deg": -78.164386572,
@@ -561,6 +565,17 @@
         "distance_km": 1,
         "latitude": 43.95,
         "longitude": -78.17
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc3eb",
+        "code": "13590",
+        "name": "Cobourg",
+        "lat": 43.956475,
+        "lon": -78.164399,
+        "distance_km": 0.0,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -571,11 +586,12 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "CLWD": {
     "station_id_4char_lower": "clwd",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 144.78,
     "latitude_deg": 44.508356439,
     "longitude_deg": -80.220072889,
@@ -657,6 +673,17 @@
         "distance_km": 1,
         "latitude": 44.5,
         "longitude": -80.22
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc397",
+        "code": "11500",
+        "name": "Collingwood",
+        "lat": 44.508407,
+        "lon": -80.220098,
+        "distance_km": 0.01,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -667,11 +694,12 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "GOD2": {
     "station_id_4char_lower": "god2",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 144.78,
     "latitude_deg": 43.745362806,
     "longitude_deg": -81.727891083,
@@ -745,6 +773,17 @@
         "distance_km": 1,
         "latitude": 43.77,
         "longitude": -81.72
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc3a3",
+        "code": "11860",
+        "name": "Goderich",
+        "lat": 43.745354,
+        "lon": -81.727796,
+        "distance_km": 0.01,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -755,11 +794,12 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "KNGV": {
     "station_id_4char_lower": "kngv",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 142.36,
     "latitude_deg": 42.026906111,
     "longitude_deg": -82.734903889,
@@ -834,6 +874,17 @@
         "distance_km": 5,
         "latitude": 42.04,
         "longitude": -82.67
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc3c0",
+        "code": "12065",
+        "name": "Kingsville",
+        "lat": 42.026942,
+        "lon": -82.734844,
+        "distance_km": 0.01,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -844,11 +895,12 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "MCHN": {
     "station_id_4char_lower": "mchn",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 152.02,
     "latitude_deg": 47.961338056,
     "longitude_deg": -84.900938056,
@@ -936,6 +988,17 @@
           "station_name": "Lake Superior Provincial Park",
           "distance_km": 28
         }
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc37e",
+        "code": "10750",
+        "name": "Michipicoten",
+        "lat": 47.961326,
+        "lon": -84.900844,
+        "distance_km": 0.01,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -946,11 +1009,12 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "PARY": {
     "station_id_4char_lower": "pary",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 145.02,
     "latitude_deg": 45.338641167,
     "longitude_deg": -80.035889583,
@@ -1030,6 +1094,17 @@
         "distance_km": 0.5,
         "latitude": 45.34,
         "longitude": -80.04
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc487",
+        "code": "11375",
+        "name": "Parry Sound",
+        "lat": 45.33855,
+        "lon": -80.035882,
+        "distance_km": 0.01,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -1040,11 +1115,12 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "PSTA": {
     "station_id_4char_lower": "psta",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 145.02,
     "latitude_deg": 42.657893028,
     "longitude_deg": -81.213844833,
@@ -1120,6 +1196,17 @@
         "latitude": 43.03,
         "longitude": -81.15,
         "notes": "Port Stanley EC station (4677) ended 1993; London A is nearest active"
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc3c8",
+        "code": "12400",
+        "name": "Port Stanley",
+        "lat": 42.657883,
+        "lon": -81.213833,
+        "distance_km": 0.0,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -1130,11 +1217,12 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "PWEL": {
     "station_id_4char_lower": "pwel",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 43.9,
     "latitude_deg": 43.236668694,
     "longitude_deg": -79.219728306,
@@ -1214,6 +1302,17 @@
         "distance_km": 0.5,
         "latitude": 43.25,
         "longitude": -79.22
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc3d8",
+        "code": "13030",
+        "name": "Port Weller",
+        "lat": 43.236713,
+        "lon": -79.219639,
+        "distance_km": 0.01,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -1224,7 +1323,8 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   },
   "ROSS": {
     "station_id_4char_lower": "ross",
@@ -1314,6 +1414,17 @@
         "distance_km": 50,
         "latitude": 48.37,
         "longitude": -89.32
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc376",
+        "code": "10220",
+        "name": "Rossport",
+        "lat": 48.833665,
+        "lon": -87.519593,
+        "distance_km": 0.0,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -1325,20 +1436,23 @@
         "GLERL"
       ],
       "mahal_features": {
-        "amp_mean":  "winter_high",
-        "rh_std":    "winter_high",
-        "clr_med":   "winter_high",
-        "af_med":    "winter_high",
+        "amp_mean": "winter_high",
+        "rh_std_raw": "winter_high",
+        "rh_std_norm": "winter_high",
+        "p2n_mean": "winter_high",
+        "clr_med": "winter_high",
+        "pr_med": "winter_high",
+        "af_med": "winter_high",
         "gamma_med": "winter_high",
-        "pr_med":    "winter_high",
-        "p2n_mean":  "winter_high",
-        "_notes": "Full DEFAULT_FEATURES. All features confirmed discriminating (Cohen d > 0.7). gamma, clr, pr inverted from naive expectation per feature_overrides — but Mahalanobis distance is sign-agnostic so no changes needed here."
+        "ms_mean": "winter_low_predicted",
+        "vs_mean": "winter_high_predicted",
+        "_notes": "10-feature vector (post-Phase 2B 2026-04-28). Phase-2B station \u2014 8 features computed on per-(PRN, signal) z-scored arc columns; rh_std_raw vs rh_std_norm split exposes the within-day RH spread before vs after PRN-systematic offset removal."
       }
     }
   },
   "TOBY": {
     "station_id_4char_lower": "toby",
-    "data_source": "unknown",
+    "data_source": "nrcan",
     "ellipsoidal_height_m": 143.845,
     "latitude_deg": 45.256779392,
     "longitude_deg": -81.662830938,
@@ -1419,6 +1533,17 @@
         "distance_km": 3,
         "latitude": 45.23,
         "longitude": -81.63
+      },
+      "dfo_iwls": {
+        "iwls_id": "5cebf1e43d0f4a073c4bc39d",
+        "code": "11690",
+        "name": "Tobermory",
+        "lat": 45.256768,
+        "lon": -81.662811,
+        "distance_km": 0.0,
+        "wlo_recent_rows": 3360,
+        "wlf_recent_rows": 0,
+        "wlp_recent_rows": -1
       }
     },
     "classification": {
@@ -1429,6 +1554,7 @@
       "validated_against": [
         "GLERL"
       ]
-    }
+    },
+    "orbit_type": "nav"
   }
 }

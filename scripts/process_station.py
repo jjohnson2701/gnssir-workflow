@@ -161,7 +161,6 @@ def validate_configuration(station: str, station_config: dict, project_root: Pat
             tool_paths = json.load(f)
 
     required_tools = {
-        "gfzrnx_path": "gfzrnx",
         "rinex2snr_path": "rinex2snr",
         "gnssir_path": "gnssir",
     }
@@ -208,7 +207,11 @@ def run_command(cmd: list, description: str) -> bool:
     logger.info(f"  Command: {' '.join(cmd)}")
 
     try:
-        subprocess.run(cmd, check=True, capture_output=False)
+        # Sub-steps import "scripts.*", so the project root must be on the path
+        root = str(Path(__file__).resolve().parent.parent)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
+        subprocess.run(cmd, check=True, capture_output=False, env=env)
         logger.info(f"  {description} completed successfully")
         return True
     except subprocess.CalledProcessError as e:
@@ -420,7 +423,6 @@ Examples:
                 results_handler=results_handler,
                 skip_options={
                     "skip_download": args.skip_download,
-                    "skip_rinex_conversion": False,
                     "skip_snr": False,
                     "skip_rh": False,
                     "skip_quicklook": False,
@@ -605,7 +607,7 @@ Examples:
 
     print()
     print("Next step: Run the dashboard")
-    print("  streamlit run dashboard.py")
+    print("  python -m dashboard")
 
     # Exit with error if any step failed
     if not all(results.values()):

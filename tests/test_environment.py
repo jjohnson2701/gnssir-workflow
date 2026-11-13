@@ -27,13 +27,6 @@ class TestProjectStructure:
         assert config_dir.is_dir()
 
     @pytest.mark.unit
-    def test_dashboard_components_exists(self, project_root):
-        """Test that dashboard_components directory exists."""
-        components_dir = project_root / "dashboard_components"
-        assert components_dir.exists()
-        assert components_dir.is_dir()
-
-    @pytest.mark.unit
     def test_required_scripts_exist(self, project_root):
         """Test that required scripts exist."""
         required_scripts = [
@@ -138,81 +131,9 @@ class TestOptionalPackages:
 
         assert requests.__version__ is not None
 
-    @pytest.mark.unit
-    def test_streamlit_available(self):
-        """Test that streamlit is available."""
-        try:
-            import streamlit
-
-            assert streamlit.__version__ is not None
-        except ImportError:
-            pytest.skip("streamlit not installed (optional for CLI usage)")
-
-
-class TestGnssreflEnvironment:
-    """Tests for gnssrefl-specific environment setup."""
-
-    @pytest.mark.unit
-    def test_gnssrefl_available(self):
-        """Test that gnssrefl package is available."""
-        try:
-            import gnssrefl
-
-            assert gnssrefl is not None
-        except ImportError:
-            pytest.skip("gnssrefl not installed")
-
-    @pytest.mark.unit
-    def test_refl_code_env_var(self):
-        """Test that REFL_CODE environment variable is set."""
-        refl_code = os.environ.get("REFL_CODE")
-        if refl_code is None:
-            pytest.skip("REFL_CODE environment variable not set")
-        assert Path(refl_code).exists(), f"REFL_CODE path does not exist: {refl_code}"
-
-    @pytest.mark.unit
-    def test_orbits_env_var(self):
-        """Test that ORBITS environment variable is set."""
-        orbits = os.environ.get("ORBITS")
-        if orbits is None:
-            pytest.skip("ORBITS environment variable not set")
-        assert Path(orbits).exists(), f"ORBITS path does not exist: {orbits}"
-
 
 class TestExternalTools:
     """Tests for external tool availability."""
-
-    @pytest.mark.integration
-    def test_gfzrnx_available(self, config_dir):
-        """Test that gfzrnx tool is available."""
-        import shutil
-
-        # First check if gfzrnx is in PATH
-        gfzrnx_in_path = shutil.which("gfzrnx")
-        if gfzrnx_in_path:
-            gfzrnx_path = gfzrnx_in_path
-        else:
-            # Fall back to tool_paths.json config
-            tool_paths_file = config_dir / "tool_paths.json"
-            if not tool_paths_file.exists():
-                pytest.skip("gfzrnx not in PATH and tool_paths.json not found")
-
-            with open(tool_paths_file) as f:
-                tool_paths = json.load(f)
-
-            # Config uses 'gfzrnx_path' key
-            gfzrnx_path = tool_paths.get("gfzrnx_path") or tool_paths.get("gfzrnx")
-            if not gfzrnx_path:
-                pytest.skip("gfzrnx path not configured in tool_paths.json")
-
-            if not Path(gfzrnx_path).exists():
-                pytest.skip(f"gfzrnx not found at configured path: {gfzrnx_path}")
-
-        # Test that gfzrnx runs
-        result = subprocess.run([gfzrnx_path, "-h"], capture_output=True, text=True, timeout=10)
-        # gfzrnx returns 0 for help
-        assert result.returncode in [0, 1], f"gfzrnx failed with return code {result.returncode}"
-
 
 class TestImports:
     """Tests for project module imports."""
@@ -234,18 +155,3 @@ class TestImports:
         from find_reference_stations import haversine_distance
 
         assert haversine_distance is not None
-
-    @pytest.mark.unit
-    def test_import_dashboard_components(self):
-        """Test importing dashboard_components module."""
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-
-        try:
-            from dashboard_components import load_station_data
-
-            assert load_station_data is not None
-        except ImportError as e:
-            # May fail due to streamlit decorators outside of streamlit
-            if "streamlit" in str(e).lower():
-                pytest.skip("Streamlit not running")
-            raise

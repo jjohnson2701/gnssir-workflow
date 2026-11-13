@@ -36,7 +36,7 @@ def process_station_parallel(
         num_cores (int): Number of cores to use for parallel processing
         results_handler (module, optional): Module with combine_daily_rh_results func.
         skip_options (dict, optional): Boolean flags for skipping steps if output
-            exists. Keys: skip_download, skip_rinex_conversion, skip_snr, skip_rh,
+            exists. Keys: skip_download, skip_snr, skip_rh,
             skip_quicklook
 
     Returns:
@@ -58,7 +58,6 @@ def process_station_parallel(
     if skip_options is None:
         skip_options = {
             "skip_download": False,
-            "skip_rinex_conversion": False,
             "skip_snr": False,
             "skip_rh": False,
             "skip_quicklook": False,

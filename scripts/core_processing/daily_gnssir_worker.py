@@ -6,7 +6,6 @@ from pathlib import Path
 
 # Import utilities from project modules using relative imports
 from ..utils.data_manager import download_rinex, check_file_exists
-from ..external_tools.preprocessor import convert_rinex3_to_rinex2
 from ..external_tools.gnssrefl_executor import (
     execute_rinex2snr,
     execute_gnssir,
@@ -17,7 +16,6 @@ from .workspace_setup import setup_gnssrefl_workspace, copy_json_params
 
 # Define minimum file sizes for validating output files
 MIN_RINEX3_SIZE_BYTES = 500 * 1024  # 500 KB
-MIN_RINEX2_SIZE_BYTES = 500 * 1024  # 500 KB
 MIN_SNR_SIZE_BYTES = 50 * 1024  # 50 KB
 MIN_RH_RESULT_SIZE_BYTES = 500  # 500 bytes (small text file)
 
@@ -44,7 +42,7 @@ def process_single_day(
         refl_code_base (Path): Path to the REFL_CODE base directory
         orbits_base (Path): Path to the ORBITS base directory
         skip_options (dict, optional): Dictionary of boolean flags for skipping steps
-            if output exists. Keys: skip_download, skip_rinex_conversion, skip_snr,
+            if output exists. Keys: skip_download, skip_snr,
             skip_rh, skip_quicklook
 
     Returns:
@@ -54,7 +52,6 @@ def process_single_day(
     if skip_options is None:
         skip_options = {
             "skip_download": False,
-            "skip_rinex_conversion": False,
             "skip_snr": False,
             "skip_rh": False,
             "skip_quicklook": False,
@@ -76,7 +73,6 @@ def process_single_day(
     quicklook_plots_daily_dir = station_data_dir / "quicklook_plots_daily"
 
     # Define paths for gnssrefl workspace
-    refl_code_rinex_dir = gnssrefl_paths["refl_code_rinex"]
     refl_code_results_dir = gnssrefl_paths["refl_code_results"]
     refl_code_snr_dir = gnssrefl_paths["refl_code_snr"]
 
@@ -111,8 +107,6 @@ def process_single_day(
     rinex3_file_path = rinex3_dir / rinex3_filename
 
     # Define RINEX 2.11 output path
-    rinex2_filename = f"{station_id}{doy_padded}0.{yy}o"
-    rinex2_file_path = refl_code_rinex_dir / rinex2_filename
 
     # Define SNR file path
     snr_file_path = refl_code_snr_dir / f"{station_id}{doy_padded}0.{yy}.snr66"
@@ -144,14 +138,12 @@ def process_single_day(
         return result
 
     # Get tool paths
-    gfzrnx_exe_path = tool_paths.get("gfzrnx_path", "gfzrnx")
     rinex2snr_exe_path = tool_paths.get("rinex2snr_path", "rinex2snr")
     gnssir_exe_path = tool_paths.get("gnssir_path", "gnssir")
     quicklook_exe_path = tool_paths.get("quicklook_path", "quickLook")
 
     # Log the actual paths being used
     day_logger.info("Tool paths being used:")
-    day_logger.info(f"gfzrnx: {gfzrnx_exe_path}")
     day_logger.info(f"rinex2snr: {rinex2snr_exe_path}")
     day_logger.info(f"gnssir: {gnssir_exe_path}")
     day_logger.info(f"quickLook: {quicklook_exe_path}")
@@ -162,10 +154,10 @@ def process_single_day(
     if data_source != "nps":
         archive_label = "unavco" if data_source == "earthscope" else data_source
         day_logger.info(
-            f"Steps 1-2: SKIPPING download/convert "
+            f"Step 1: SKIPPING download "
             f"(data acquired via rinex2snr -archive {archive_label})"
         )
-        result["skipped_steps"].extend(["download", "rinex_conversion"])
+        result["skipped_steps"].append("download")
     else:
         # Step 1: Download RINEX 3 file
         if skip_options.get("skip_download", False) and check_file_exists(
@@ -190,75 +182,9 @@ def process_single_day(
                 result["errors"].append(f"Exception during download step: {e}")
                 return result
 
-    # Step 2: Convert RINEX 3 to RINEX 2.11 (NPS only; EarthScope already skipped above)
-    rinex2_path = None  # Default for skipping case
-    if data_source == "nps":
-        if skip_options.get("skip_rinex_conversion", False):
-            day_logger.info(
-                "Step 2: RINEX 3 to RINEX 2.11 conversion - SKIPPING as requested."
-            )
-            if not check_file_exists(rinex2_file_path, min_size_bytes=MIN_RINEX2_SIZE_BYTES):
-                day_logger.error(
-                    f"RINEX conversion skipped, but expected file {rinex2_file_path} "
-                    "is missing or too small."
-                )
-                day_logger.warning("Attempting RINEX conversion despite skip flag...")
-                try:
-                    rinex2_path = convert_rinex3_to_rinex2(
-                        gfzrnx_exe_path=gfzrnx_exe_path,
-                        rinex3_file_path=rinex3_file_path,
-                        rinex2_output_dir=refl_code_rinex_dir,
-                        station_4char_lower=station_id.lower(),
-                        year=year,
-                        doy=doy,
-                    )
-
-                    if rinex2_path is None or not rinex2_path.exists():
-                        day_logger.error(
-                            f"Failed to convert RINEX 3 to RINEX 2.11 for "
-                            f"{station_id.upper()} {year} {doy_padded}"
-                        )
-                        result["errors"].append("Failed to convert RINEX 3 to RINEX 2.11")
-                        return result
-
-                    day_logger.info(f"RINEX 2.11 file created at {rinex2_path}")
-                except Exception as e:
-                    day_logger.error(f"Exception during RINEX conversion step: {e}")
-                    result["errors"].append(f"Exception during RINEX conversion step: {e}")
-                    return result
-            else:
-                day_logger.info(
-                    f"RINEX 2.11 file exists at {rinex2_file_path} with sufficient size"
-                )
-                rinex2_path = rinex2_file_path
-                result["skipped_steps"].append("rinex_conversion")
-        else:
-            try:
-                day_logger.info("Step 2: Converting RINEX 3 to RINEX 2.11")
-
-                rinex2_path = convert_rinex3_to_rinex2(
-                    gfzrnx_exe_path=gfzrnx_exe_path,
-                    rinex3_file_path=rinex3_file_path,
-                    rinex2_output_dir=refl_code_rinex_dir,
-                    station_4char_lower=station_id.lower(),
-                    year=year,
-                    doy=doy,
-                )
-
-                if rinex2_path is None or not rinex2_path.exists():
-                    day_logger.error(
-                        f"Failed to convert RINEX 3 to RINEX 2.11 for "
-                        f"{station_id.upper()} {year} {doy_padded}"
-                    )
-                    result["errors"].append("Failed to convert RINEX 3 to RINEX 2.11")
-                    return result
-
-                day_logger.info(f"RINEX 2.11 file created at {rinex2_path}")
-
-            except Exception as e:
-                day_logger.error(f"Exception during RINEX conversion step: {e}")
-                result["errors"].append(f"Exception during RINEX conversion step: {e}")
-                return result
+    # Step 2 (removed): gnssrefl 4 reads RINEX 3 and RINEX 2.11 directly, so the
+    # downloaded file is given to rinex2snr as it is (-input_file).
+    rinex_input_file = rinex3_file_path if data_source == "nps" else None
 
     # Step 3: Run rinex2snr
     # Non-NPS sources: pass data_source as -archive flag to rinex2snr.
@@ -297,6 +223,7 @@ def process_single_day(
                     snr_code="66",
                     archive=rinex2snr_archive,
                     orbit=rinex2snr_orbit,
+                    input_file=rinex_input_file,
                 )
 
                 if not rinex2snr_success:
@@ -324,6 +251,7 @@ def process_single_day(
                 snr_code="66",
                 archive=rinex2snr_archive,
                 orbit=rinex2snr_orbit,
+                input_file=rinex_input_file,
             )
 
             if not rinex2snr_success:

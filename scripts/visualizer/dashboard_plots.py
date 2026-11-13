@@ -846,7 +846,7 @@ def create_multi_scale_performance(
         else:
             # Create mock datetime column
             sub_hourly_df["datetime"] = pd.date_range(
-                start="2024-01-01", periods=len(sub_hourly_df), freq="H"
+                start="2024-01-01", periods=len(sub_hourly_df), freq="h"
             )
 
     daily_df["date"] = pd.to_datetime(daily_df["date"])

@@ -17,7 +17,6 @@ from scripts.utils.data_manager import (
     EARTHSCOPE_BASE_URL,
     EARTHSCOPE_PATH_PATTERN,
 )
-from scripts.external_tools.preprocessor import decompress_unix_z
 from scripts.external_tools.gnssrefl_executor import execute_rinex2snr
 
 
@@ -131,63 +130,6 @@ class TestDownloadFromUrlHeaders:
 
         call_kwargs = mock_get.call_args[1]
         assert call_kwargs["headers"] is None
-
-
-class TestDecompressUnixZ:
-    """Tests for Unix .Z decompression."""
-
-    @pytest.mark.unit
-    def test_decompress_in_place(self, tmp_path):
-        """Decompressing a .gz file returns the decompressed path."""
-        content = b"fake rinex data\n" * 100
-        compressed = tmp_path / "test.o.gz"
-        with gzip.open(compressed, "wb") as f:
-            f.write(content)
-        assert compressed.exists()
-
-        decompressed = decompress_unix_z(compressed)
-
-        assert decompressed is not None
-        assert decompressed.exists()
-        assert decompressed.name == "test.o"
-        assert not compressed.exists()  # compressed file removed by gzip -d
-
-    @pytest.mark.unit
-    def test_decompress_to_output_dir(self, tmp_path):
-        """Decompressing to a different output directory moves the file."""
-        content = b"fake rinex data\n" * 100
-        compressed = tmp_path / "test.o.gz"
-        with gzip.open(compressed, "wb") as f:
-            f.write(content)
-
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-
-        decompressed = decompress_unix_z(compressed, output_dir=output_dir)
-
-        assert decompressed is not None
-        assert decompressed.parent == output_dir
-        assert decompressed.name == "test.o"
-        assert decompressed.exists()
-
-    @pytest.mark.unit
-    def test_decompress_nonexistent_file_returns_none(self, tmp_path):
-        """Decompressing a nonexistent file returns None."""
-        fake_path = tmp_path / "nonexistent.o.Z"
-        result = decompress_unix_z(fake_path)
-        assert result is None
-
-    @pytest.mark.unit
-    def test_decompress_preserves_content(self, tmp_path):
-        """Content is preserved through compress/decompress cycle."""
-        original_content = "     2.11           OBSERVATION DATA    M (MIXED)\n" * 50
-        compressed = tmp_path / "umnq1000.25o.gz"
-        with gzip.open(compressed, "wt") as f:
-            f.write(original_content)
-
-        decompressed = decompress_unix_z(compressed)
-
-        assert decompressed.read_text() == original_content
 
 
 class TestRinex2snrArchiveFlag:

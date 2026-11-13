@@ -123,14 +123,9 @@ environment_py39.yml
 # Working analysis documents
 docs/gnssrefl_upgrade_analysis.md
 
-# Deprecated classifier v2 model artifacts (pkl files)
-# Water-state models trained by classifier_v2.py; core math preserved in utils/mahalanobis.py
+# Per-station classifier_v2 water-state model artifacts (regeneratable pkl files)
 models/
 
-# Generated notebooks (depend on deprecated classifier_v2 models)
-# Novel code (SNR reconstruction, Hilbert envelope, wind rose) noted in project memory
+# Generated executed notebooks (large outputs; source notebooks gitignored too)
 notebooks/
 
-# Deprecated classifiers (superseded by ice_classifier.py + utils/mahalanobis.py)
-scripts/classifier_v2.py
-scripts/analyze_classifier_v2.py
