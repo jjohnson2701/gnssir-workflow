@@ -105,26 +105,69 @@ def load_day(station, year, doy, freqs=None):
         step = max(1, len(data["ele"]) // 40)
         rows.append({"freq": int(meta["freq"]), "sat": int(meta["sat"]), "az": float(meta["az_min_ele"]),
                      "px": px, "pz": pz, "rh": rh, "state": state,
+                     "hour": float(meta.get("arc_timestamp", np.nan)), "edotf": float(meta.get("edot_factor", np.nan)),
                      "ele": np.asarray(data["ele"])[::step], "azi": np.asarray(data["azi"])[::step],
                      "wavelength": 2.0 * float(meta["cf"])})
     return cfg, mask, rows
 
 
-def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0):
-    """Mean periodogram per azimuth bin, with one marker per arc."""
-    h = np.arange(cfg["minH"], cfg["maxH"] + 1e-9, 0.02)
+def expected_heights(station, year, doy, rows, knot_hours=3.0):
+    """Attach to each arc the reflector height expected from the water level at its time.
+
+    The water level curve is a spline through the arcs that gnssir passed on the day before,
+    the day itself and the day after, with the height-rate correction. No gauge is used.
+    Returns the range (m) of that curve during the day, or None when too few arcs exist.
+    """
+    import os
+
+    from scripts.station_check import _spline, load_results, scatter_about_spline
+
+    d = load_results(os.environ["REFL_CODE"], station, year, doy - 1, doy + 1)
+    if len(d) < 20:
+        return None
+    t = d[:, 1] + d[:, 4] / 24.0
+    fit = scatter_about_spline(t, d[:, 2], d[:, 12], knot_hours, True)
+    sp = _spline(t, fit["rh_corrected"], knot_hours)
+    if sp is None:
+        return None
+    for r in rows:
+        tt = doy + r["hour"] / 24.0
+        r["expect"] = float(sp(tt) + r["edotf"] * sp.derivative()(tt) / 24.0) if np.isfinite(r["hour"]) else np.nan
+    day = sp(np.linspace(max(doy, t.min()), min(doy + 1, t.max()), 200))
+    return float(day.max() - day.min())
+
+
+def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0, relative=False, half=2.0):
+    """Mean periodogram per azimuth bin, with one marker per arc.
+
+    relative=False: the radius is the reflector height (antenna above the surface).
+    relative=True:  the radius is the height of the reflecting surface above (+) or below (-)
+                    the water level at the time of the arc; a ring is drawn at zero.
+    """
+    mine = [r for r in rows if r["freq"] == freq]
+    if relative:
+        h = np.arange(-half, half + 1e-9, 0.02)
+        lo_r, hi_r = -half, half
+        mine = [r for r in mine if np.isfinite(r.get("expect", np.nan))]
+        pos = lambda r: r["expect"] - r["rh"]                      # noqa: E731
+        spec_of = lambda r: np.interp(h, (r["expect"] - r["px"])[::-1], r["pz"][::-1], left=np.nan, right=np.nan)  # noqa: E731
+    else:
+        h = np.arange(cfg["minH"], cfg["maxH"] + 1e-9, 0.02)
+        lo_r, hi_r = cfg["minH"], cfg["maxH"]
+        pos = lambda r: r["rh"]                                     # noqa: E731
+        spec_of = lambda r: np.interp(h, r["px"], r["pz"])          # noqa: E731
     edges = np.arange(0, 360 + bin_deg, bin_deg)
     grid = np.full((len(h), len(edges) - 1), np.nan)
-    mine = [r for r in rows if r["freq"] == freq]
     for b in range(len(edges) - 1):
-        spec = [np.interp(h, r["px"], r["pz"]) for r in mine
-                if r["pz"] is not None and edges[b] <= r["az"] % 360 < edges[b + 1]]
+        spec = [spec_of(r) for r in mine if r["pz"] is not None and edges[b] <= r["az"] % 360 < edges[b + 1]]
         if spec:
-            grid[:, b] = np.mean(spec, axis=0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                grid[:, b] = np.nanmean(spec, axis=0)
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
-    ax.set_rorigin(cfg["minH"] - 0.35 * (cfg["maxH"] - cfg["minH"]))
-    ax.set_rlim(cfg["minH"], cfg["maxH"])
+    ax.set_rorigin(lo_r - 0.35 * (hi_r - lo_r))
+    ax.set_rlim(lo_r, hi_r)
     ax.set_facecolor("white")
     vmax = max(2.0 * req_amp, np.nanpercentile(grid, 99.5) if np.isfinite(grid).any() else 1.0)
     mesh = ax.pcolormesh(np.radians(edges), np.append(h, h[-1] + 0.02), np.ma.masked_invalid(grid),
@@ -136,19 +179,28 @@ def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0):
         hi = mask[2 * i] if 2 * i < len(mask) else 360.0
         if hi - lo > 0.5:
             th = np.radians(np.linspace(lo, hi, 60))
-            ax.fill_between(th, cfg["minH"], cfg["maxH"], facecolor="none", edgecolor="#c8c8c8",
+            ax.fill_between(th, lo_r, hi_r, facecolor="none", edgecolor="#c8c8c8",
                             hatch="////", linewidth=0, zorder=2)
+    if relative:
+        ax.plot(np.linspace(0, 2 * np.pi, 361), np.zeros(361), color="#111111", lw=1.0, ls=(0, (4, 2)), zorder=4)
     for state, kw in (
         ("masked", dict(marker="x", ms=3.5, mec=MASKED, mew=0.8, ls="none")),
         ("fail", dict(marker="o", ms=5, mfc="none", mec=FAIL, mew=1.0, ls="none")),
         ("pass", dict(marker="o", ms=5.5, mfc=PASS, mec="white", mew=0.7, ls="none")),
     ):
-        sel = [r for r in mine if r["state"] == state]
+        sel = [r for r in mine if r["state"] == state and lo_r <= pos(r) <= hi_r]
         if sel:
-            ax.plot(np.radians([r["az"] for r in sel]), [r["rh"] for r in sel], zorder=5, **kw)
+            ax.plot(np.radians([r["az"] for r in sel]), [pos(r) for r in sel], zorder=5, **kw)
     n = {s: sum(r["state"] == s for r in mine) for s in ("pass", "fail", "masked")}
-    ax.set_title(f"{FREQ_LABEL.get(freq, freq)}\n{n['pass']} pass, {n['fail']} fail, "
-                 f"{n['masked']} outside mask", fontsize=10, pad=12)
+    if relative:
+        near = sum(r["state"] == "pass" and abs(pos(r)) <= 0.5 for r in mine)
+        ax.set_title(f"{FREQ_LABEL.get(freq, freq)}\n{near} of {n['pass']} passed arcs within 0.5 m of the water level",
+                     fontsize=10, pad=12)
+        ax.set_yticks([t for t in (-half, -half / 2, 0, half / 2, half)])
+        ax.set_yticklabels([f"{t:+g}" if t else "0" for t in (-half, -half / 2, 0, half / 2, half)])
+    else:
+        ax.set_title(f"{FREQ_LABEL.get(freq, freq)}\n{n['pass']} pass, {n['fail']} fail, "
+                     f"{n['masked']} outside mask", fontsize=10, pad=12)
     ax.set_xticks(np.radians([0, 90, 180, 270]))
     ax.set_xticklabels(["N", "", "", ""], fontsize=9)
     ax.set_rlabel_position(next((0.5 * (mask[2 * i - 1] + mask[2 * i]) for i in range(1, len(mask) // 2)
@@ -228,40 +280,64 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     n_pass = sum(r["state"] == "pass" for r in rows)
     ax.set_title(f"Site (height {rh:.1f} m, {cfg['e2']:g} to {cfg['e1']:g} deg)\n"
                  f"rings: reach of first Fresnel zone, {d_near:.0f} to {d_far:.0f} m\n"
-                 f"shading: first Fresnel zones of the {n_pass} arcs that passed (most of the sensitivity)",
+                 f"shading: first Fresnel zones of the\n{n_pass} arcs that passed (most of the sensitivity)",
                  fontsize=8.5, pad=8)
     ax.text(0.99, 0.01, source, transform=ax.transAxes, ha="right", va="bottom", fontsize=6, color="white")
 
 
-def make_figure(station, year, doy, out, freqs=None, with_site=True):
+def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5):
     t0 = time.time()
     cfg, mask, rows = load_day(station, year, doy, freqs)
     t_data = time.time() - t0
     freqs = freqs or [f for f in cfg["freqs"] if any(r["freq"] == f for r in rows)]
+    try:
+        day_range = expected_heights(station, year, doy, rows)
+    except Exception:
+        day_range = None
+    # Which view comes first: where the surface moves by more than tidal_m in the day, the view
+    # relative to the water level; elsewhere the reflector height.
+    views = ["height"] if day_range is None else (["water", "height"] if day_range > tidal_m else ["height", "water"])
+    head = {
+        "height": ("HEIGHT ABOVE THE SURFACE",
+                   f"radius = reflector height: how far the antenna is above the reflecting surface,\n"
+                   f"{cfg['minH']:g} m at the inner edge to {cfg['maxH']:g} m at the outer edge"),
+        "water": ("DISTANCE FROM THE WATER LEVEL",
+                  "radius = height of the reflecting surface above (+) or below (-) the water level at the time of the pass;\n"
+                  "dashed ring = on the water. The water level comes from this station's passed arcs, not from a gauge."),
+    }
     ncol = len(freqs) + (1 if with_site else 0)
-    fig = plt.figure(figsize=(4.6 * ncol, 5.6))
-    col = 1
+    nrow = len(views)
+    fig = plt.figure(figsize=(4.6 * ncol, 6.6 * nrow + 0.8))
+    top, bottom = 1 - 2.0 / (6.6 * nrow + 0.8), 0.9 / (6.6 * nrow + 0.8)
+    gs = fig.add_gridspec(nrow, ncol, left=0.03, right=0.98, top=top, bottom=bottom, hspace=0.62, wspace=0.18)
     if with_site:
-        draw_site(fig.add_subplot(1, ncol, col), cfg, mask, rows)
-        col += 1
+        draw_site(fig.add_subplot(gs[0, 0]), cfg, mask, rows)
     counts = {}
-    for f in freqs:
-        ax = fig.add_subplot(1, ncol, col, projection="polar")
-        req = cfg["reqAmp"][cfg["freqs"].index(f)] if f in cfg["freqs"] else cfg["reqAmp"][0]
-        mesh, counts[f] = draw_circle(ax, rows, cfg, mask, f, req)
-        cb = fig.colorbar(mesh, ax=ax, orientation="horizontal", fraction=0.045, pad=0.13)
-        cb.set_label("reflection strength (periodogram amplitude, volts/volts)\ntan = below the required amplitude, blue = above", fontsize=7.5)
-        cb.ax.tick_params(labelsize=7)
-        cb.ax.axvline(req, color="#222222", lw=1.2)
-        cb.ax.text(req, 1.25, f"required {req:g}", color="#222222", fontsize=7, ha="center", va="bottom",
-                   transform=cb.ax.get_xaxis_transform())
-        col += 1
+    for i, view in enumerate(views):
+        first = 1 if with_site else 0
+        for k, f in enumerate(freqs):
+            ax = fig.add_subplot(gs[i, first + k], projection="polar")
+            req = cfg["reqAmp"][cfg["freqs"].index(f)] if f in cfg["freqs"] else cfg["reqAmp"][0]
+            mesh, n = draw_circle(ax, rows, cfg, mask, f, req, relative=(view == "water"))
+            if view == "height":
+                counts[f] = n
+            cb = fig.colorbar(mesh, ax=ax, orientation="horizontal", fraction=0.045, pad=0.11)
+            vmax = mesh.norm.vmax
+            cb.set_ticks([0, req, vmax])
+            cb.set_ticklabels(["0", f"{req:g}\nrequired", f"{vmax:.0f}"])
+            cb.set_label("reflection strength (periodogram amplitude, volts/volts)\ntan = below the required amplitude, blue = above", fontsize=7.5)
+            cb.ax.tick_params(labelsize=7)
+            cb.ax.axvline(req, color="#222222", lw=1.2)
+        # row heading, above the circles of this row
+        box = gs[i, first].get_position(fig)
+        inch = 1.0 / (6.6 * nrow + 0.8)
+        fig.text(box.x0, box.y1 + 1.22 * inch, head[view][0], fontsize=13, fontweight="bold", ha="left", va="bottom")
+        fig.text(box.x0, box.y1 + 0.72 * inch, head[view][1], fontsize=8.5, ha="left", va="bottom", color="#333333")
+    note = "" if day_range is None else f"   The water level moved by {day_range:.1f} m on this day."
     fig.suptitle(
-        f"{station.upper()}  {year} day {doy:03d}    angle = azimuth, radius = reflector height "
-        f"{cfg['minH']:g} to {cfg['maxH']:g} m, elevation {cfg['e1']:g} to {cfg['e2']:g} deg\n"
+        f"{station.upper()}  {year} day {doy:03d}    angle = azimuth; elevation {cfg['e1']:g} to {cfg['e2']:g} deg.{note}\n"
         "filled = arc passed gnssir checks;  open = failed;  x = outside the azimuth mask (hatched)",
-        fontsize=10)
-    fig.tight_layout(rect=(0, 0, 1, 0.91))
+        fontsize=10, y=0.995)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=130)
     plt.close(fig)
