@@ -149,7 +149,7 @@ def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0):
     ax.set_title(f"{FREQ_LABEL.get(freq, freq)}\n{n['pass']} pass, {n['fail']} fail, "
                  f"{n['masked']} outside mask", fontsize=10, pad=12)
     ax.set_xticks(np.radians([0, 90, 180, 270]))
-    ax.set_xticklabels(["N", "E", "S", "W"], fontsize=9)
+    ax.set_xticklabels(["N", "", "", ""], fontsize=9)
     ax.set_rlabel_position(next((0.5 * (mask[2 * i - 1] + mask[2 * i]) for i in range(1, len(mask) // 2)
                                  if mask[2 * i] - mask[2 * i - 1] > 20), 135))
     ax.tick_params(axis="y", labelsize=7, colors="#555555")
