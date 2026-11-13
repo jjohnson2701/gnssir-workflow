@@ -21,13 +21,15 @@ Further tools, each one command:
 | `python -m scripts.visualizer.periodogram_circle` | Circular plot of the reflections by azimuth, next to an image of the site with the reflection zones. Two views: height above the surface, and distance from the water level. |
 | `python -m scripts.station_page` | One static HTML page for a list of stations: circular plot, water level series, effect of the peak-to-noise limit, station checks. Example input: `docs/station_page_example.yaml`. |
 
-## Example Output
+## Example output
 
-### Water Level Correlation Analysis
-![Resolution Comparison](docs/images/GLBX_2024_resolution_comparison.png)
-*GLBX station (Bartlett Cove, AK) - Correlation and RMSE analysis at different temporal resolutions comparing GNSS-IR derived water levels to ERDDAP reference gauge.*
-![Polar Animation](docs/images/GLBX_2024_polar_animation_DOY1-31.gif)
-*Polar animation showing GNSS-IR reflection points on satellite imagery alongside water level time series.*
+Friday Harbor, Washington (station SC02), March 2024. Data from EarthScope, gauge from NOAA.
+
+![Circular plot of reflections at SC02](docs/images/sc02_2024_076_circle.png)
+*Where the reflections come from, for one day. Left: the site with the reflection zones of the arcs that passed. Top row: distance from the water level, where a reflection from the water lies on the dashed ring at any tide. Bottom row: height above the surface. Site image: Esri World Imagery.*
+
+![Water level at SC02 against the NOAA gauge](docs/images/sc02_2024_series.png)
+*Water level for eight days. Grey points: one height per satellite arc. Blue: inverse method, a value every 5 minutes. Dark line: NOAA gauge 9449880. Below: inverse method minus gauge, 1.8 cm RMS over the month.*
 
 ## Setup
 
