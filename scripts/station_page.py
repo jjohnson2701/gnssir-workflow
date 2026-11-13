@@ -48,8 +48,14 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.station_check import (L2_VERDICT_TEXT, l2_signal_check, load_results, read_snr, sampling_check,
-                                   scatter_about_spline)
+from scripts.station_check import (
+    L2_VERDICT_TEXT,
+    l2_signal_check,
+    load_results,
+    read_snr,
+    sampling_check,
+    scatter_about_spline,
+)
 
 CSS = """
 :root{--bg:#fbfcfd;--panel:#f1f4f7;--fg:#18222c;--muted:#5a6875;--line:#d5dce3;--accent:#1b6fb5;
@@ -89,7 +95,8 @@ CIRCLE_CAPTION = (
     "above the reflecting surface. <b>Distance from the water level:</b> the radius is the height of the reflecting "
     "surface above or below the water level at the time of the pass, and the dashed ring is the water. The water level "
     "comes from this station's own passed arcs. The water-level row is first where the water moved by more than 0.5 m "
-    "in the day. Filled marker: the arc passed. Open marker: it failed. Hatched: outside the azimuth mask.")
+    "in the day. Filled marker: the arc passed. Open marker: it failed. Hatched: outside the azimuth mask."
+)
 
 
 def read_gauge(path, time_col, level_col, year):
@@ -125,53 +132,102 @@ def station_block(sta, spec, top, refl_code, fig_dir):
     import pandas as pd
 
     from scripts.visualizer.periodogram_circle import make_figure
-    from scripts.visualizer.station_figures import series_figure, tuning_figure, tuning_table, wind_figure, wind_table
+    from scripts.visualizer.station_figures import (
+        series_figure,
+        tuning_figure,
+        tuning_table,
+        wind_figure,
+        wind_table,
+    )
 
     year, d1, d2 = top["year"], top["doy"], top["doy_end"]
     cfg = json.loads(Path(refl_code, "input", f"{sta}.json").read_text())
     d = load_results(refl_code, sta, year, d1, d2)
     if len(d) == 0:
-        raise SystemExit(f"No gnssir results for {sta} {year} days {d1:03d} to {d2:03d} in {refl_code}. Run gnssir first.")
+        raise SystemExit(
+            f"No gnssir results for {sta} {year} days {d1:03d} to {d2:03d} in {refl_code}. Run gnssir first."
+        )
     t = d[:, 1] + d[:, 4] / 24.0
     fit = scatter_about_spline(t, d[:, 2], d[:, 12], 3.0, True)
-    out = {"sta": sta, "cfg": cfg, "spec": spec, "arcs_per_day": len(d) / max(1, len(np.unique(d[:, 1]))),
-           "spline_scatter": fit["robust_scatter_m"], "rh": (float(np.percentile(d[:, 2], 1)), float(np.percentile(d[:, 2], 99)))}
-    gauge = read_gauge(spec["gauge_csv"], spec["gauge_time"], spec["gauge_level"], year) if spec.get("gauge_csv") else None
+    out = {
+        "sta": sta,
+        "cfg": cfg,
+        "spec": spec,
+        "arcs_per_day": len(d) / max(1, len(np.unique(d[:, 1]))),
+        "spline_scatter": fit["robust_scatter_m"],
+        "rh": (float(np.percentile(d[:, 2], 1)), float(np.percentile(d[:, 2], 99))),
+    }
+    gauge = (
+        read_gauge(spec["gauge_csv"], spec["gauge_time"], spec["gauge_level"], year)
+        if spec.get("gauge_csv")
+        else None
+    )
     inv = pd.read_csv(spec["inverse_csv"]) if spec.get("inverse_csv") else None
     if gauge:
         out["slope"], out["arc_scatter"] = gauge_fit(t, d[:, 2], d[:, 12], gauge)
         if inv is not None:
-            inv = inv[(inv.doy_fraction >= gauge[0].min()) & (inv.doy_fraction <= gauge[0].max())].reset_index(drop=True)
+            inv = inv[
+                (inv.doy_fraction >= gauge[0].min()) & (inv.doy_fraction <= gauge[0].max())
+            ].reset_index(drop=True)
             wl = np.interp(inv.doy_fraction, *gauge)
             A = np.c_[-inv.rh_m.values, np.ones(len(inv))]
             c = np.linalg.lstsq(A, wl, rcond=None)[0]
-            out["inv_rms"], out["inv_slope"] = float(np.sqrt(np.mean((wl - A @ c) ** 2))), float(c[0])
+            out["inv_rms"], out["inv_slope"] = float(np.sqrt(np.mean((wl - A @ c) ** 2))), float(
+                c[0]
+            )
     # figures
     out["circle"] = str(Path(fig_dir, f"{sta}_circle.png"))
     make_figure(sta, year, top["circle_doy"], out["circle"], top.get("circle_freqs"))
     s1, s2 = top["series_days"]
     out["series"] = str(Path(fig_dir, f"{sta}_series.png"))
-    series_figure(out["series"], s1, s2, t, fit["rh_corrected"], None if inv is None else inv.doy_fraction.values,
-                  None if inv is None else inv.rh_m.values, gauge[0] if gauge else None, gauge[1] if gauge else None,
-                  spec.get("gauge_name", "gauge").split(",")[0], year)
+    series_figure(
+        out["series"],
+        s1,
+        s2,
+        t,
+        fit["rh_corrected"],
+        None if inv is None else inv.doy_fraction.values,
+        None if inv is None else inv.rh_m.values,
+        gauge[0] if gauge else None,
+        gauge[1] if gauge else None,
+        spec.get("gauge_name", "gauge").split(",")[0],
+        year,
+    )
     if gauge and spec.get("open_extension"):
         q = load_results(refl_code, sta, year, d1, d2, spec["open_extension"])
-        limits = np.unique(np.r_[np.round(np.arange(0, 6.01, 0.2), 1), cfg["PkNoise"]])  # the limit in use is always a row
-        rows = tuning_table(q[:, 1] + q[:, 4] / 24.0, q[:, 2], q[:, 13], q[:, 12], gauge[0], gauge[1], limits)
+        limits = np.unique(
+            np.r_[np.round(np.arange(0, 6.01, 0.2), 1), cfg["PkNoise"]]
+        )  # the limit in use is always a row
+        rows = tuning_table(
+            q[:, 1] + q[:, 4] / 24.0, q[:, 2], q[:, 13], q[:, 12], gauge[0], gauge[1], limits
+        )
         out["tuning_png"] = str(Path(fig_dir, f"{sta}_tuning.png"))
         tuning_figure(out["tuning_png"], rows, cfg["PkNoise"])
-        out["tuning"] = [r for r in rows if r["limit"] == 0.0 or abs(r["limit"] - cfg["PkNoise"]) < 1e-9]
+        out["tuning"] = [
+            r for r in rows if r["limit"] == 0.0 or abs(r["limit"] - cfg["PkNoise"]) < 1e-9
+        ]
     if gauge and spec.get("wind_csv"):
-        wind = read_gauge(spec["wind_csv"], spec.get("wind_time", "time"), spec.get("wind_speed", "speed"), year)
-        out["wind"] = wind_table(t, d[:, 2], d[:, 13], d[:, 12], gauge[0], gauge[1], wind[0], wind[1], freq=d[:, 10])
+        wind = read_gauge(
+            spec["wind_csv"], spec.get("wind_time", "time"), spec.get("wind_speed", "speed"), year
+        )
+        out["wind"] = wind_table(
+            t, d[:, 2], d[:, 13], d[:, 12], gauge[0], gauge[1], wind[0], wind[1], freq=d[:, 10]
+        )
         out["wind_png"] = str(Path(fig_dir, f"{sta}_wind.png"))
         if not wind_figure(out["wind_png"], out["wind"]):
-            del out["wind"], out["wind_png"]   # no wind bin has enough arcs: leave the block out
+            del out["wind"], out["wind_png"]  # no wind bin has enough arcs: leave the block out
     # checks
     snr = sorted(glob.glob(f"{refl_code}/{year}/snr/{sta}/{sta}{d1:03d}0.{year % 100:02d}.snr*"))
     if snr:
         try:
-            out["sampling"] = sampling_check(read_snr(snr[0]), cfg["e1"], cfg["e2"], cfg.get("azval2", [0, 360]), cfg["maxH"], cfg["freqs"])
+            out["sampling"] = sampling_check(
+                read_snr(snr[0]),
+                cfg["e1"],
+                cfg["e2"],
+                cfg.get("azval2", [0, 360]),
+                cfg["maxH"],
+                cfg["freqs"],
+            )
             if not out["sampling"]["signals"]:
                 del out["sampling"]
         except ValueError:
@@ -198,49 +254,77 @@ def render(blocks, top):
     for b in blocks:
         sp, cfg, sta = b["spec"], b["cfg"], e(b["sta"])
         has_g = "arc_scatter" in b
-        rows += (f'<tr><th scope="row"><a href="#{sta}">{sta.upper()}</a><br><span class="sub">{e(sp.get("place", ""))}</span></th>'
-                 f'<td class="n">{b["arcs_per_day"]:.0f}</td><td class="n">{b["arc_scatter"]:.3f} m</td>' if has_g else
-                 f'<tr><th scope="row"><a href="#{sta}">{sta.upper()}</a><br><span class="sub">{e(sp.get("place", ""))}</span></th>'
-                 f'<td class="n">{b["arcs_per_day"]:.0f}</td><td class="n">no gauge</td>')
-        rows += (f'<td class="n">{b["spline_scatter"]:.3f} m</td>'
-                 f'<td class="n">{b["inv_rms"]:.3f} m</td>' if "inv_rms" in b else f'<td class="n">{b["spline_scatter"]:.3f} m</td><td class="n">{"no gauge" if not has_g else "not run"}</td>')
+        rows += (
+            f'<tr><th scope="row"><a href="#{sta}">{sta.upper()}</a><br><span class="sub">{e(sp.get("place", ""))}</span></th>'
+            f'<td class="n">{b["arcs_per_day"]:.0f}</td><td class="n">{b["arc_scatter"]:.3f} m</td>'
+            if has_g
+            else f'<tr><th scope="row"><a href="#{sta}">{sta.upper()}</a><br><span class="sub">{e(sp.get("place", ""))}</span></th>'
+            f'<td class="n">{b["arcs_per_day"]:.0f}</td><td class="n">no gauge</td>'
+        )
+        rows += (
+            f'<td class="n">{b["spline_scatter"]:.3f} m</td>'
+            f'<td class="n">{b["inv_rms"]:.3f} m</td>'
+            if "inv_rms" in b
+            else f'<td class="n">{b["spline_scatter"]:.3f} m</td><td class="n">{"no gauge" if not has_g else "not run"}</td>'
+        )
         rows += f'<td class="n">{b["slope"]:.3f}</td>' if has_g else '<td class="n">no gauge</td>'
         rows += f'<td>{e(sp.get("gauge_name", "none"))}</td></tr>'
         tun = ""
         if "tuning" in b and len(b["tuning"]) == 2:
             a, c = b["tuning"]
-            tun = (f'<h3>Peak-to-noise limit</h3><div class="pair"><figure>{_img(b["tuning_png"], "Scatter against the gauge and arcs per day against the peak-to-noise limit")}'
-                   f'<figcaption>Days {top["doy"]:03d} to {top["doy_end"]:03d}, processed with the amplitude and peak-to-noise limits off. Dashed line: the limit in the station file.</figcaption></figure>'
-                   '<div class="tw"><table><thead><tr><th>Limit</th><th>Arcs per day</th><th>Scatter</th><th>Slope</th></tr></thead><tbody>'
-                   f'<tr><td>off</td><td class="n">{a["per_day"]:.0f}</td><td class="n">{a["scatter_m"]:.3f} m</td><td class="n">{a["slope"]:.3f}</td></tr>'
-                   f'<tr><td>{cfg["PkNoise"]:g} (the limit in use; amplitude limit still off)</td><td class="n">{c["per_day"]:.0f}</td><td class="n">{c["scatter_m"]:.3f} m</td><td class="n">{c["slope"]:.3f}</td></tr>'
-                   '</tbody></table></div></div>')
+            tun = (
+                f'<h3>Peak-to-noise limit</h3><div class="pair"><figure>{_img(b["tuning_png"], "Scatter against the gauge and arcs per day against the peak-to-noise limit")}'
+                f'<figcaption>Days {top["doy"]:03d} to {top["doy_end"]:03d}, processed with the amplitude and peak-to-noise limits off. Dashed line: the limit in the station file.</figcaption></figure>'
+                '<div class="tw"><table><thead><tr><th>Limit</th><th>Arcs per day</th><th>Scatter</th><th>Slope</th></tr></thead><tbody>'
+                f'<tr><td>off</td><td class="n">{a["per_day"]:.0f}</td><td class="n">{a["scatter_m"]:.3f} m</td><td class="n">{a["slope"]:.3f}</td></tr>'
+                f'<tr><td>{cfg["PkNoise"]:g} (the limit in use; amplitude limit still off)</td><td class="n">{c["per_day"]:.0f}</td><td class="n">{c["scatter_m"]:.3f} m</td><td class="n">{c["slope"]:.3f}</td></tr>'
+                "</tbody></table></div></div>"
+            )
         wnd = ""
         if "wind" in b:
             trs = "".join(
-                f'<tr><td>{r["label"]} m/s</td><td class="n">{r["n"]}</td><td class="n">{r["scatter_m"]:.3f} m</td>'
-                f'<td class="n">{100 * r["outliers"]:.1f}%</td><td class="n">{r["pk"]:.1f}</td></tr>' if r["scatter_m"] is not None else
-                f'<tr><td>{r["label"]} m/s</td><td class="n">{r["n"]}</td><td colspan="3">too few arcs</td></tr>' for r in b["wind"])
-            wnd = (f'<h3>Wind</h3><div class="pair"><figure>{_img(b["wind_png"], "Scatter of single heights against the gauge, and share of arcs, by wind speed")}'
-                   f'<figcaption>Days {top["doy"]:03d} to {top["doy_end"]:03d}. Wind: {e(sp.get("wind_name", "wind sensor"))}, at the time of each arc. '
-                   'Scatter of single heights against the gauge, from one fit over all arcs with one offset per signal.</figcaption></figure>'
-                   '<div class="tw"><table><thead><tr><th>Wind</th><th>Arcs</th><th>Scatter</th><th>Above 0.30 m</th><th>Peak-to-noise</th></tr></thead>'
-                   f'<tbody>{trs}</tbody></table></div></div>')
+                (
+                    f'<tr><td>{r["label"]} m/s</td><td class="n">{r["n"]}</td><td class="n">{r["scatter_m"]:.3f} m</td>'
+                    f'<td class="n">{100 * r["outliers"]:.1f}%</td><td class="n">{r["pk"]:.1f}</td></tr>'
+                    if r["scatter_m"] is not None
+                    else f'<tr><td>{r["label"]} m/s</td><td class="n">{r["n"]}</td><td colspan="3">too few arcs</td></tr>'
+                )
+                for r in b["wind"]
+            )
+            wnd = (
+                f'<h3>Wind</h3><div class="pair"><figure>{_img(b["wind_png"], "Scatter of single heights against the gauge, and share of arcs, by wind speed")}'
+                f'<figcaption>Days {top["doy"]:03d} to {top["doy_end"]:03d}. Wind: {e(sp.get("wind_name", "wind sensor"))}, at the time of each arc. '
+                "Scatter of single heights against the gauge, from one fit over all arcs with one offset per signal.</figcaption></figure>"
+                '<div class="tw"><table><thead><tr><th>Wind</th><th>Arcs</th><th>Scatter</th><th>Above 0.30 m</th><th>Peak-to-noise</th></tr></thead>'
+                f"<tbody>{trs}</tbody></table></div></div>"
+            )
         checks = ""
         if "sampling" in b:
             s = min(b["sampling"]["signals"].values(), key=lambda v: v["wavelength_m"])
-            checks += (f'<li><b>Sampling.</b> {b["sampling"]["interval_s"]:.0f} s. It resolves heights to {s["resolvable_height_m"]:.0f} m; '
-                       f'the height window ends at {cfg["maxH"]:g} m. Slower sampling can still lose arcs to the limits.</li>')
+            checks += (
+                f'<li><b>Sampling.</b> {b["sampling"]["interval_s"]:.0f} s. It resolves heights to {s["resolvable_height_m"]:.0f} m; '
+                f'the height window ends at {cfg["maxH"]:g} m. Slower sampling can still lose arcs to the limits.</li>'
+            )
         if "l2" in b:
             l2 = b["l2"]
-            codes = ", ".join(f'{e(k)} on {v} satellites' for k, v in l2["satellites"].items() if v)
+            codes = ", ".join(f"{e(k)} on {v} satellites" for k, v in l2["satellites"].items() if v)
             checks += f'<li><b>L2 signal in the file.</b> {e(L2_VERDICT_TEXT[l2["verdict"]])} ({codes}; first {l2["epochs_read"]} epochs.)</li>'
         checks += f'<li><b>Scatter of single heights about a smooth curve (no gauge needed).</b> {b["spline_scatter"]:.3f} m.</li>'
         checks += "".join(f"<li>{e(n)}</li>" for n in sp.get("notes", []))
-        series_cap = ("Grey points: one height per satellite arc, with the height-rate correction."
-                      + (" Blue: inverse method; the line is broken where too few arcs support it." if sp.get("inverse_csv") else "")
-                      + (" Dark line: gauge. Each series is shifted by one constant to the gauge; no scale is fitted." if has_g else " No gauge exists; levels are about the median."))
-        secs += f'''<section id="{sta}">
+        series_cap = (
+            "Grey points: one height per satellite arc, with the height-rate correction."
+            + (
+                " Blue: inverse method; the line is broken where too few arcs support it."
+                if sp.get("inverse_csv")
+                else ""
+            )
+            + (
+                " Dark line: gauge. Each series is shifted by one constant to the gauge; no scale is fitted."
+                if has_g
+                else " No gauge exists; levels are about the median."
+            )
+        )
+        secs += f"""<section id="{sta}">
 <h2>{sta.upper()} <span class="place">{e(sp.get("place", ""))}</span></h2>
 <p class="role">{e(sp.get("role", ""))}</p>
 <dl class="facts">
@@ -264,9 +348,9 @@ def render(blocks, top):
 <h3>Station checks</h3>
 <ul>{checks}</ul>
 </section>
-'''
+"""
     title = e(top.get("title", "GNSS-IR Station Results"))
-    return f'''<title>{title}</title>
+    return f"""<title>{title}</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>{CSS}</style>
@@ -282,7 +366,7 @@ def render(blocks, top):
 <p class="meta">Scatter is robust (1.4826 times the median absolute deviation). One height is the result of one satellite arc. The inverse method fits one smooth height curve to the signal of all arcs and gives 5-minute values. A slope of 1 means no scale error.</p>
 {secs}
 </main>
-'''
+"""
 
 
 def main(argv=None):
@@ -291,7 +375,11 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Build a static results page for a list of stations.")
     p.add_argument("--spec", required=True, help="YAML file; see the module text")
     p.add_argument("--out", required=True)
-    p.add_argument("--fragment", action="store_true", help="write the page body only, without the html and body tags")
+    p.add_argument(
+        "--fragment",
+        action="store_true",
+        help="write the page body only, without the html and body tags",
+    )
     a = p.parse_args(argv)
     rc = os.environ.get("REFL_CODE")
     if not rc:
@@ -304,11 +392,18 @@ def main(argv=None):
     fig_dir = Path(a.out).with_suffix("")
     fig_dir = fig_dir.parent / (fig_dir.name + "_figures")
     fig_dir.mkdir(parents=True, exist_ok=True)
-    blocks = [station_block(sta.lower(), spec or {}, top, rc, fig_dir) for sta, spec in top["stations"].items()]
+    blocks = [
+        station_block(sta.lower(), spec or {}, top, rc, fig_dir)
+        for sta, spec in top["stations"].items()
+    ]
     body = render(blocks, top)
     if not a.fragment:
-        body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
-                '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>' + body + "</body></html>")
+        body = (
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>'
+            + body
+            + "</body></html>"
+        )
     Path(a.out).write_text(body, encoding="utf8")
     print(f"Written {a.out} ({len(body) / 1e6:.1f} MB); figures in {fig_dir}")
 

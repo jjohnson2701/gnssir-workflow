@@ -1,7 +1,6 @@
 # ABOUTME: Tests for EarthScope GAGE archive integration
 # ABOUTME: Covers rinex2snr archive routing, download helpers, and data source config
 
-import gzip
 import pytest
 import sys
 from pathlib import Path
@@ -11,13 +10,13 @@ from unittest.mock import patch, MagicMock
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from scripts.utils.data_manager import (
+from scripts.utils.data_manager import (  # noqa: E402
     download_rinex_earthscope,
     download_from_url,
     EARTHSCOPE_BASE_URL,
     EARTHSCOPE_PATH_PATTERN,
 )
-from scripts.external_tools.gnssrefl_executor import execute_rinex2snr
+from scripts.external_tools.gnssrefl_executor import execute_rinex2snr  # noqa: E402
 
 
 class TestEarthScopeConstants:
@@ -30,9 +29,7 @@ class TestEarthScopeConstants:
     @pytest.mark.unit
     def test_path_pattern_format(self):
         """Test that the path pattern produces correct URLs."""
-        result = EARTHSCOPE_PATH_PATTERN.format(
-            year=2025, doy=100, station_lower="umnq", yy="25"
-        )
+        result = EARTHSCOPE_PATH_PATTERN.format(year=2025, doy=100, station_lower="umnq", yy="25")
         assert result == "2025/100/umnq1000.25o.Z"
 
 
@@ -62,8 +59,7 @@ class TestDownloadRinexEarthscope:
         call_args = mock_dl.call_args
         url = call_args[0][0]
         assert url == (
-            "https://gage-data.earthscope.org/archive/gnss/rinex/obs"
-            "/2025/100/umnq1000.25o.Z"
+            "https://gage-data.earthscope.org/archive/gnss/rinex/obs" "/2025/100/umnq1000.25o.Z"
         )
         headers = call_args[1]["headers"]
         assert headers == {"Authorization": "Bearer fake_token"}
@@ -106,7 +102,9 @@ class TestDownloadFromUrlHeaders:
         mock_response.status_code = 200
         mock_response.iter_content.return_value = [b"fake data"]
 
-        with patch("scripts.utils.data_manager.requests.get", return_value=mock_response) as mock_get:
+        with patch(
+            "scripts.utils.data_manager.requests.get", return_value=mock_response
+        ) as mock_get:
             download_from_url(
                 "https://example.com/file.Z",
                 target,
@@ -125,7 +123,9 @@ class TestDownloadFromUrlHeaders:
         mock_response.status_code = 200
         mock_response.iter_content.return_value = [b"fake data"]
 
-        with patch("scripts.utils.data_manager.requests.get", return_value=mock_response) as mock_get:
+        with patch(
+            "scripts.utils.data_manager.requests.get", return_value=mock_response
+        ) as mock_get:
             download_from_url("https://example.com/file.dat", target)
 
         call_kwargs = mock_get.call_args[1]
@@ -140,13 +140,16 @@ class TestRinex2snrArchiveFlag:
         """Without archive param, command uses -nolook T."""
         logs_dir = tmp_path / "logs"
         logs_dir.mkdir()
-        with patch(
-            "scripts.external_tools.gnssrefl_executor.subprocess.run"
-        ) as mock_run:
+        with patch("scripts.external_tools.gnssrefl_executor.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
             execute_rinex2snr(
-                "rinex2snr", "umnq", 2025, "100",
-                tmp_path, tmp_path, logs_dir,
+                "rinex2snr",
+                "umnq",
+                2025,
+                "100",
+                tmp_path,
+                tmp_path,
+                logs_dir,
             )
         cmd = mock_run.call_args[0][0]
         assert "-nolook" in cmd
@@ -158,13 +161,16 @@ class TestRinex2snrArchiveFlag:
         """With archive='unavco', command uses -archive unavco instead of -nolook T."""
         logs_dir = tmp_path / "logs"
         logs_dir.mkdir()
-        with patch(
-            "scripts.external_tools.gnssrefl_executor.subprocess.run"
-        ) as mock_run:
+        with patch("scripts.external_tools.gnssrefl_executor.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
             execute_rinex2snr(
-                "rinex2snr", "umnq", 2025, "100",
-                tmp_path, tmp_path, logs_dir,
+                "rinex2snr",
+                "umnq",
+                2025,
+                "100",
+                tmp_path,
+                tmp_path,
+                logs_dir,
                 archive="unavco",
             )
         cmd = mock_run.call_args[0][0]
@@ -181,13 +187,16 @@ class TestRinex2snrOrbitFlag:
         """Without orbit param, command omits -orb flag (gnssrefl picks default)."""
         logs_dir = tmp_path / "logs"
         logs_dir.mkdir()
-        with patch(
-            "scripts.external_tools.gnssrefl_executor.subprocess.run"
-        ) as mock_run:
+        with patch("scripts.external_tools.gnssrefl_executor.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
             execute_rinex2snr(
-                "rinex2snr", "umnq", 2025, "100",
-                tmp_path, tmp_path, logs_dir,
+                "rinex2snr",
+                "umnq",
+                2025,
+                "100",
+                tmp_path,
+                tmp_path,
+                logs_dir,
             )
         cmd = mock_run.call_args[0][0]
         assert "-orb" not in cmd
@@ -197,13 +206,16 @@ class TestRinex2snrOrbitFlag:
         """With orbit='gnss3', command includes -orb gnss3."""
         logs_dir = tmp_path / "logs"
         logs_dir.mkdir()
-        with patch(
-            "scripts.external_tools.gnssrefl_executor.subprocess.run"
-        ) as mock_run:
+        with patch("scripts.external_tools.gnssrefl_executor.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
             execute_rinex2snr(
-                "rinex2snr", "umnq", 2025, "223",
-                tmp_path, tmp_path, logs_dir,
+                "rinex2snr",
+                "umnq",
+                2025,
+                "223",
+                tmp_path,
+                tmp_path,
+                logs_dir,
                 archive="unavco",
                 orbit="gnss3",
             )

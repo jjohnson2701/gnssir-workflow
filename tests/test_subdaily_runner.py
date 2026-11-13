@@ -1,8 +1,7 @@
-# ABOUTME: Tests for the subdaily processing phase that integrates gnssrefl subdaily into the pipeline.
+# ABOUTME: Tests for the subdaily processing phase (gnssrefl subdaily in the pipeline).
 # ABOUTME: Validates output CSV format, file discovery, and confidence annotation inclusion.
 
 import pytest
-import numpy as np
 import pandas as pd
 import sys
 from pathlib import Path
@@ -89,8 +88,10 @@ class TestProcessSubdailyOutput:
         output_dir.mkdir()
 
         result_path = process_subdaily_output(
-            station="test", year=2024,
-            refl_code_base=tmp_path, output_dir=output_dir,
+            station="test",
+            year=2024,
+            refl_code_base=tmp_path,
+            output_dir=output_dir,
         )
 
         assert result_path is not None
@@ -114,8 +115,10 @@ class TestProcessSubdailyOutput:
         output_dir.mkdir()
 
         result_path = process_subdaily_output(
-            station="test", year=2024,
-            refl_code_base=tmp_path, output_dir=output_dir,
+            station="test",
+            year=2024,
+            refl_code_base=tmp_path,
+            output_dir=output_dir,
         )
 
         df = pd.read_csv(result_path)
@@ -130,8 +133,10 @@ class TestProcessSubdailyOutput:
         output_dir.mkdir()
 
         result = process_subdaily_output(
-            station="nonexistent", year=2024,
-            refl_code_base=tmp_path, output_dir=output_dir,
+            station="nonexistent",
+            year=2024,
+            refl_code_base=tmp_path,
+            output_dir=output_dir,
         )
         assert result is None
 
@@ -151,9 +156,7 @@ class TestProcessSubdailyOutput:
             h = i // 2
             m = (i % 2) * 30
             mjd = 60310.0 + i * (0.5 / 24.0)
-            lines.append(
-                f"{mjd:.6f}  7.500  2024  1  1  {h}  {m}  0  -22.500\n"
-            )
+            lines.append(f"{mjd:.6f}  7.500  2024  1  1  {h}  {m}  0  -22.500\n")
         spline_file.write_text("".join(lines))
 
         # Create IF-corrected observation file (21+ columns)
@@ -169,8 +172,10 @@ class TestProcessSubdailyOutput:
         output_dir.mkdir()
 
         result_path = process_subdaily_output(
-            station=station, year=2024,
-            refl_code_base=tmp_path, output_dir=output_dir,
+            station=station,
+            year=2024,
+            refl_code_base=tmp_path,
+            output_dir=output_dir,
         )
 
         df = pd.read_csv(result_path)
@@ -191,8 +196,10 @@ class TestProcessSubdailyOutput:
         output_dir.mkdir()
 
         result_path = process_subdaily_output(
-            station=station, year=2024,
-            refl_code_base=tmp_path, output_dir=output_dir,
+            station=station,
+            year=2024,
+            refl_code_base=tmp_path,
+            output_dir=output_dir,
         )
 
         df = pd.read_csv(result_path)
@@ -212,8 +219,10 @@ class TestProcessSubdailyOutput:
         output_dir.mkdir()
 
         result_path = process_subdaily_output(
-            station="glbx", year=2024,
-            refl_code_base=tmp_path, output_dir=output_dir,
+            station="glbx",
+            year=2024,
+            refl_code_base=tmp_path,
+            output_dir=output_dir,
         )
 
         assert result_path.name == "glbx_2024_subdaily.csv"

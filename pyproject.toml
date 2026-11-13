@@ -52,13 +52,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dashboard = [
-    "dash>=2.17.0",
-    "dash-leaflet>=1.0.0",
+figures = [
+    # site image in the circular plot and the station page
     "contextily>=1.4.0",
-    "rasterio>=1.3.0",
     "pyproj>=3.6.0",
-    "plotly>=5.18.0",
+    "pillow>=10.0.0",
+]
+earthscope = [
+    # scripts/earthscope_rinex3.py; the login is made once with "es login" (earthscope-cli)
+    "earthscope-sdk>=0.2.1,<1.0",
+    "earthscope-cli",
 ]
 animation = [
     "imageio>=2.31.0",
@@ -78,7 +81,7 @@ dev = [
     "geopandas>=0.14.0",
 ]
 all = [
-    "gnssir-workflow[dashboard,animation,dev]",
+    "gnssir-workflow[figures,earthscope,animation,dev]",
 ]
 
 [project.urls]
@@ -95,7 +98,7 @@ gnssir-coops = "scripts.coops_comparison:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["scripts*", "dashboard*"]
+include = ["scripts*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json"]

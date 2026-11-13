@@ -18,7 +18,6 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 import argparse
-import json
 
 # Add project modules
 sys.path.append(str(Path(__file__).resolve().parent))

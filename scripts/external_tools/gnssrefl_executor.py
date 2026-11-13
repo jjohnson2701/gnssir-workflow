@@ -150,14 +150,24 @@ def execute_rinex2snr(
             )
             day_logger.error("rinex2snr returned success (code 0) but no SNR file was created")
             if retry:
-                # Seen when two runs fetch the same orbit file at the same time: wait, then try once more
+                # Seen when two runs fetch the same orbit file at the same time: wait, then try
+                # once more
                 day_logger.warning("Retrying rinex2snr once after 20 s")
                 time.sleep(20)
                 return execute_rinex2snr(
-                    rinex2snr_exe_path, station_4char_lower, year, doy_padded, refl_code_base,
-                    orbits_base, logs_dir, snr_code=snr_code,
-                    rinex2_filename_override=rinex2_filename_override, archive=archive, orbit=orbit,
-                    input_file=input_file, retry=False,
+                    rinex2snr_exe_path,
+                    station_4char_lower,
+                    year,
+                    doy_padded,
+                    refl_code_base,
+                    orbits_base,
+                    logs_dir,
+                    snr_code=snr_code,
+                    rinex2_filename_override=rinex2_filename_override,
+                    archive=archive,
+                    orbit=orbit,
+                    input_file=input_file,
+                    retry=False,
                 )
             return False
 
@@ -220,8 +230,14 @@ def execute_gnssir(
 
         # Execute gnssir with capture_output=True to capture stdout/stderr
         process_gnssir = subprocess.run(
-            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_gnssir, env=my_env,
-            timeout=3600,  # one day takes minutes; a job that hangs must not block the days after it
+            cmd,
+            capture_output=True,
+            text=True,
+            shell=False,
+            cwd=cwd_for_gnssir,
+            env=my_env,
+            # one day takes minutes; a job that hangs must not block the days after it
+            timeout=3600,
         )
 
         # Log the direct output from the command
@@ -407,7 +423,12 @@ def execute_quicklook(
 
         # Execute quickLook with capture_output=True to capture stdout/stderr
         process_quicklook = subprocess.run(
-            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_quicklook, env=my_env,
+            cmd,
+            capture_output=True,
+            text=True,
+            shell=False,
+            cwd=cwd_for_quicklook,
+            env=my_env,
             timeout=900,
         )
 

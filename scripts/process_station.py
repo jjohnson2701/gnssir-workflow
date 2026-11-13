@@ -39,7 +39,10 @@ sys.path.insert(0, str(project_root))
 from scripts.core_processing.config_loader import load_tool_paths, load_station_config  # noqa: E402
 from scripts.utils.logging_config import setup_main_logger  # noqa: E402
 from scripts.core_processing.parallel_orchestrator import process_station_parallel  # noqa: E402
-from scripts.utils.subdaily_runner import run_subdaily_command, process_subdaily_output  # noqa: E402
+from scripts.utils.subdaily_runner import (  # noqa: E402
+    run_subdaily_command,
+    process_subdaily_output,
+)  # noqa: E402
 import scripts.results_handler as results_handler  # noqa: E402
 
 # Default paths - use ~/gnssir_ws symlink to keep paths short for Fortran string limits
@@ -77,8 +80,14 @@ def get_reference_source(station_config: dict) -> tuple:
     # The `reference:` line of stations.yaml decides, when it is present
     chosen = station_config.get("reference")
     if isinstance(chosen, dict) and chosen.get("source"):
-        return (chosen["source"], f"reference: {chosen['source']}:{chosen.get('id')}"
-                if chosen["source"] != "none" else "reference: none")
+        return (
+            chosen["source"],
+            (
+                f"reference: {chosen['source']}:{chosen.get('id')}"
+                if chosen["source"] != "none"
+                else "reference: none"
+            ),
+        )
 
     # Old single-file format: ERDDAP first (highest priority)
     erddap = station_config.get("erddap", {})
@@ -184,7 +193,8 @@ def validate_configuration(station: str, station_config: dict, project_root: Pat
             found = shutil.which(tool_path)
             if not found:
                 issues.append(
-                    f"Tool '{tool_path}' not found in PATH. Activate the environment that has gnssrefl "
+                    f"Tool '{tool_path}' not found in PATH. Activate the environment that has "
+                    "gnssrefl "
                     "(for example: conda activate <your gnssrefl environment>) and run again."
                 )
 
@@ -417,9 +427,7 @@ Examples:
             tool_paths = load_tool_paths(DEFAULT_TOOL_PATHS_CONFIG_PATH, project_root)
 
             # Load station-specific configuration for processing
-            processing_config = load_station_config(
-                config_path, args.station.upper(), project_root
-            )
+            processing_config = load_station_config(config_path, args.station.upper(), project_root)
 
             # Process station in parallel
             gnssir_results = process_station_parallel(
@@ -474,8 +482,10 @@ Examples:
 
             # Check local workspace first, then REFL_CODE env var
             local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
-            refl_code_base = local_refl if local_refl.exists() else Path(
-                os.environ.get("REFL_CODE", str(local_refl))
+            refl_code_base = (
+                local_refl
+                if local_refl.exists()
+                else Path(os.environ.get("REFL_CODE", str(local_refl)))
             )
 
             # Run gnssrefl subdaily

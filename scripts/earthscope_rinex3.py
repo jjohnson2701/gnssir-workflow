@@ -1,4 +1,4 @@
-# ABOUTME: Downloads daily RINEX 3 files of one station from EarthScope and translates them to SNR files.
+# ABOUTME: Downloads daily RINEX 3 files of one station from EarthScope and makes SNR files.
 # ABOUTME: For stations whose multi-GNSS data are in the EarthScope rinex3 archive (15 s files).
 """EarthScope RINEX 3 to SNR files.
 
@@ -10,7 +10,8 @@ You need a free EarthScope account and a saved login. Make it once with:
 The token is read from the saved login and is never printed.
 
 Usage:
-    python -m scripts.earthscope_rinex3 --station sc02 --year 2024 --doy 60 --doy_end 91 --keep downloads/
+    python -m scripts.earthscope_rinex3 --station sc02 --year 2024 --doy 60 --doy_end 91 \
+        --keep downloads/
     (REFL_CODE, ORBITS and EXE must be set; CRX2RNX must be in $EXE or on PATH)
 """
 import argparse
@@ -31,7 +32,9 @@ def file_name(station9, year, doy, interval="15S"):
 def access_token():
     from earthscope_sdk.auth.device_code_flow import DeviceCodeFlowSimple
 
-    return DeviceCodeFlowSimple(Path.home() / ".config/earthscope").get_access_token_refresh_if_necessary()
+    return DeviceCodeFlowSimple(
+        Path.home() / ".config/earthscope"
+    ).get_access_token_refresh_if_necessary()
 
 
 def crx2rnx_path():
@@ -58,21 +61,24 @@ def download(station9, year, doy, out_dir, interval="15S", tries=3):
     problem = "no answer"
     for _ in range(tries):
         try:
-            r = requests.get(URL.format(year=year, doy=doy, name=name),
-                             headers={"Authorization": f"Bearer {access_token()}"}, timeout=300)
+            r = requests.get(
+                URL.format(year=year, doy=doy, name=name),
+                headers={"Authorization": f"Bearer {access_token()}"},
+                timeout=300,
+            )
         except requests.RequestException as e:
             problem = type(e).__name__
             time.sleep(5)
             continue
         if r.status_code == 200:
-            part = path.with_name(path.name + ".part")   # a stopped download must not look complete
+            part = path.with_name(path.name + ".part")  # a stopped download must not look complete
             part.write_bytes(r.content)
             part.replace(path)
             return path
         if r.status_code == 404:
             return None
         problem = f"HTTP {r.status_code}"
-        if r.status_code in (401, 403):   # the login is refused; a new try does not help
+        if r.status_code in (401, 403):  # the login is refused; a new try does not help
             break
         time.sleep(5)
     raise RuntimeError(f"EarthScope download of {name} failed: {problem}")
@@ -98,8 +104,12 @@ def translate(crx_gz, work_dir, snr_type=66, orbit="gnss"):
     """
     rnx = unpack(crx_gz, work_dir)
     try:
-        done = subprocess.run(["rinex2snr", "-input_file", str(rnx), "-snr", str(snr_type), "-orb", orbit], cwd=work_dir,
-                              capture_output=True, text=True)
+        done = subprocess.run(
+            ["rinex2snr", "-input_file", str(rnx), "-snr", str(snr_type), "-orb", orbit],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+        )
         return "SUCCESS" in done.stdout
     finally:
         rnx.unlink(missing_ok=True)
@@ -112,8 +122,14 @@ def main(argv=None):
     p.add_argument("--year", type=int, required=True)
     p.add_argument("--doy", type=int, required=True)
     p.add_argument("--doy_end", type=int)
-    p.add_argument("--interval", default="15S", help="sample interval in the file name (default 15S)")
-    p.add_argument("--orbit", default="gnss", help="rinex2snr orbit choice (default gnss: all systems, BeiDou included)")
+    p.add_argument(
+        "--interval", default="15S", help="sample interval in the file name (default 15S)"
+    )
+    p.add_argument(
+        "--orbit",
+        default="gnss",
+        help="rinex2snr orbit choice (default gnss: all systems, BeiDou included)",
+    )
     p.add_argument("--keep", default="earthscope_rinex3", help="folder for the downloaded files")
     a = p.parse_args(argv)
     for var in ("REFL_CODE", "ORBITS"):
@@ -137,7 +153,10 @@ def main(argv=None):
             ok += 1
         else:
             failed.append(doy)
-    print(f"{ok} days translated to SNR files in {os.environ['REFL_CODE']}/{a.year}/snr/{a.station.lower()}/")
+    print(
+        f"{ok} days translated to SNR files in "
+        f"{os.environ['REFL_CODE']}/{a.year}/snr/{a.station.lower()}/"
+    )
     if missing:
         print("No file in the archive for days:", ", ".join(f"{d:03d}" for d in missing))
     if failed:

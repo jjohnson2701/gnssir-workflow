@@ -3,8 +3,6 @@
 
 import pytest
 import sys
-import os
-import subprocess
 from pathlib import Path
 import json
 
@@ -134,6 +132,7 @@ class TestOptionalPackages:
 
 class TestExternalTools:
     """Tests for external tool availability."""
+
 
 class TestImports:
     """Tests for project module imports."""

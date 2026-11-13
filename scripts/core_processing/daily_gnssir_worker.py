@@ -165,8 +165,7 @@ def _process_single_day(
     if data_source != "nps":
         archive_label = "unavco" if data_source == "earthscope" else data_source
         day_logger.info(
-            f"Step 1: SKIPPING download "
-            f"(data acquired via rinex2snr -archive {archive_label})"
+            f"Step 1: SKIPPING download " f"(data acquired via rinex2snr -archive {archive_label})"
         )
         result["skipped_steps"].append("download")
     else:
@@ -201,8 +200,9 @@ def _process_single_day(
     # rinex2snr as a file. `rinex2snr -archive unavco` was seen to hang with no message.
     # If the archive has no RINEX 3 file for the day, the old route is used.
     earthscope_unpacked = None
-    snr_exists = check_file_exists(snr_file_path, min_size_bytes=MIN_SNR_SIZE_BYTES) or check_file_exists(
-        snr_file_path_gz, min_size_bytes=MIN_SNR_SIZE_BYTES)
+    snr_exists = check_file_exists(
+        snr_file_path, min_size_bytes=MIN_SNR_SIZE_BYTES
+    ) or check_file_exists(snr_file_path_gz, min_size_bytes=MIN_SNR_SIZE_BYTES)
     if data_source == "earthscope" and snr_exists:
         # the SNR file is there; do not start the gnssrefl archive download for it
         skip_options = {**(skip_options or {}), "skip_snr": True}
@@ -219,9 +219,13 @@ def _process_single_day(
                 rinex_input_file = earthscope_unpacked
                 day_logger.info(f"Step 1: EarthScope RINEX 3 file {packed.name}")
             else:
-                day_logger.warning("No EarthScope RINEX 3 file for this day; using rinex2snr -archive unavco")
+                day_logger.warning(
+                    "No EarthScope RINEX 3 file for this day; using rinex2snr -archive unavco"
+                )
         except Exception as e:
-            day_logger.warning(f"EarthScope RINEX 3 download failed ({e}); using rinex2snr -archive unavco")
+            day_logger.warning(
+                f"EarthScope RINEX 3 download failed ({e}); using rinex2snr -archive unavco"
+            )
 
     # Step 3: Run rinex2snr
     # Non-NPS sources: pass data_source as -archive flag to rinex2snr.

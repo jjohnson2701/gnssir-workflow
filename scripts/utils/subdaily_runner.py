@@ -42,12 +42,7 @@ def find_observation_file(station: str, year: int, refl_code_base: Path) -> Opti
     Returns:
         Path to observation file, or None if not found
     """
-    path = (
-        refl_code_base
-        / "Files"
-        / station
-        / f"{station}_{year}_subdaily_edit.txt.withrhdotIF"
-    )
+    path = refl_code_base / "Files" / station / f"{station}_{year}_subdaily_edit.txt.withrhdotIF"
     return path if path.exists() else None
 
 
@@ -82,9 +77,7 @@ def process_subdaily_output(
     if obs_path is not None:
         obs_times = load_observation_times(obs_path)
         df = annotate_confidence(df, obs_times)
-        logger.info(
-            f"Added confidence annotations from {len(obs_times)} observations"
-        )
+        logger.info(f"Added confidence annotations from {len(obs_times)} observations")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{station}_{year}_subdaily.csv"
@@ -120,10 +113,14 @@ def run_subdaily_command(
         "subdaily",
         station,
         str(year),
-        "-plt", str(plt),
-        "-knots", str(knots),
-        "-doy1", str(doy_start),
-        "-doy2", str(doy_end),
+        "-plt",
+        str(plt),
+        "-knots",
+        str(knots),
+        "-doy1",
+        str(doy_start),
+        "-doy2",
+        str(doy_end),
     ]
 
     logger.info(f"Running subdaily: {' '.join(cmd)}")

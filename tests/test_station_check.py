@@ -48,7 +48,7 @@ def _rinex3(tmp_path, values):
     for _ in range(3):
         body.append("> 2024 02 29 00 00  0.0000000  0  %d" % len(values))
         for sat, (w, x) in values.items():
-            f = lambda v: ("%14.3f  " % v) if v is not None else " " * 16
+            f = lambda v: ("%14.3f  " % v) if v is not None else " " * 16  # noqa: E731
             body.append(sat + f(2.0e7) + f(45.0) + f(w) + f(x))
     p = tmp_path / "test.24o"
     p.write_text("\n".join(hdr + body) + "\n")
@@ -72,7 +72,8 @@ def test_l2_check_rinex2(tmp_path):
     p.write_text(
         "     2.11           OBSERVATION DATA    G (GPS)             RINEX VERSION / TYPE\n"
         "     5    L1    L2    C1    S1    S2                        # / TYPES OF OBSERV\n"
-        "                                                            END OF HEADER\n")
+        "                                                            END OF HEADER\n"
+    )
     assert l2_signal_check(p)["verdict"] == "unknown_rinex2"
 
 

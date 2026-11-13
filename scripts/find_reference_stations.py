@@ -27,7 +27,6 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import math
 import sys
@@ -490,7 +489,9 @@ def print_results(results: List[ReferenceStation], gnss_station: str = None):
         print("=" * 80)
         print("CONFIGURATION INSTRUCTIONS")
         print("-" * 60)
-        ref_line = {"USGS": "usgs", "CO-OPS": "coops"}.get(best.source, "erddap") + f":{best.station_id}"
+        ref_line = {"USGS": "usgs", "CO-OPS": "coops"}.get(
+            best.source, "erddap"
+        ) + f":{best.station_id}"
         print("Set this line for the station in config/stations.yaml:")
         print()
         print(f"  reference: {ref_line}")
@@ -504,7 +505,10 @@ def print_results(results: List[ReferenceStation], gnss_station: str = None):
 
 
 def update_station_config(
-    station: str, best_ref: ReferenceStation, config_path: Path, all_refs: Optional[List[ReferenceStation]] = None
+    station: str,
+    best_ref: ReferenceStation,
+    config_path: Path,
+    all_refs: Optional[List[ReferenceStation]] = None,
 ) -> bool:
     """Write the reference catalog of the station and set its `reference:` line.
 
@@ -515,13 +519,22 @@ def update_station_config(
 
     references_dir = config_path.parent / "references"
     catalog = sc.load_catalog(station, references_dir)
-    catalog.setdefault("note", "Reference catalog. Written by find_reference_stations; safe to regenerate.")
+    catalog.setdefault(
+        "note", "Reference catalog. Written by find_reference_stations; safe to regenerate."
+    )
     usgs = catalog.setdefault("usgs_comparison", {})
     external = catalog.setdefault("external_data_sources", {})
     if all_refs:
         catalog["candidates"] = [
-            {"source": r.source, "id": r.station_id, "name": r.station_name, "distance_km": r.distance_km,
-             "datum": r.datum, "latitude": r.latitude, "longitude": r.longitude}
+            {
+                "source": r.source,
+                "id": r.station_id,
+                "name": r.station_name,
+                "distance_km": r.distance_km,
+                "datum": r.datum,
+                "latitude": r.latitude,
+                "longitude": r.longitude,
+            }
             for r in all_refs
         ]
 
@@ -535,20 +548,24 @@ def update_station_config(
         coops["enabled"] = True
         coops["preferred_stations"] = [best_ref.station_id]
         coops["nearest_station"] = {
-            "id": best_ref.station_id, "name": best_ref.station_name, "distance_km": best_ref.distance_km,
+            "id": best_ref.station_id,
+            "name": best_ref.station_name,
+            "distance_km": best_ref.distance_km,
         }
         reference = f"coops:{best_ref.station_id}"
     elif "ERDDAP" in best_ref.source:
         erddap = external.setdefault("erddap", {})
-        erddap.update({
-            "enabled": True,
-            "dataset_id": best_ref.station_id,
-            "station_name": best_ref.station_name,
-            "distance_km": best_ref.distance_km,
-            "server": best_ref.source.split("-")[-1] if "-" in best_ref.source else "Unknown",
-            "latitude": best_ref.latitude,
-            "longitude": best_ref.longitude,
-        })
+        erddap.update(
+            {
+                "enabled": True,
+                "dataset_id": best_ref.station_id,
+                "station_name": best_ref.station_name,
+                "distance_km": best_ref.distance_km,
+                "server": best_ref.source.split("-")[-1] if "-" in best_ref.source else "Unknown",
+                "latitude": best_ref.latitude,
+                "longitude": best_ref.longitude,
+            }
+        )
         reference = f"erddap:{best_ref.station_id}"
     else:
         logger.error(f"Unknown reference source {best_ref.source}")

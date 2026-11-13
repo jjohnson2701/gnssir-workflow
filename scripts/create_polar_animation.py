@@ -9,7 +9,6 @@ from matplotlib.cm import ScalarMappable
 from pathlib import Path
 import argparse
 from datetime import timedelta
-import imageio.v2 as imageio
 import json
 import multiprocessing as mp
 import subprocess
@@ -20,6 +19,7 @@ from matplotlib.colors import LightSource
 
 # Approximate number of days per season (quarter year)
 SEASONAL_CHUNK_DAYS = 91
+
 
 def _find_ffmpeg():
     """Locate ffmpeg binary, checking conda base env if not on PATH."""
@@ -147,15 +147,13 @@ def build_frame_windows(mode, ref_df, df, start_time, end_time, bin_hours, windo
     if ref_df is not None and "wl_dm" in ref_df.columns and len(ref_df) > 10:
         extremes = detect_tidal_extremes(ref_df)
         extremes = extremes[
-            (extremes >= np.datetime64(start_time))
-            & (extremes <= np.datetime64(end_time))
+            (extremes >= np.datetime64(start_time)) & (extremes <= np.datetime64(end_time))
         ]
 
     if len(extremes) < 2 and df is not None:
         extremes = detect_tidal_extremes_from_gnssir(df)
         extremes = extremes[
-            (extremes >= np.datetime64(start_time))
-            & (extremes <= np.datetime64(end_time))
+            (extremes >= np.datetime64(start_time)) & (extremes <= np.datetime64(end_time))
         ]
 
     if mode == "analysis" and len(extremes) >= 2:
@@ -551,7 +549,9 @@ def load_data(station: str, year: int, results_dir: Path):
     station_lower = station.lower()
     local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
     if_corrected_path = (
-        local_refl / "Files" / station_lower
+        local_refl
+        / "Files"
+        / station_lower
         / f"{station_lower}_{year}_subdaily_edit.txt.withrhdotIF"
     )
     if if_corrected_path.exists():
@@ -564,13 +564,14 @@ def load_data(station: str, year: int, results_dir: Path):
             available_keys = [k for k in merge_keys if k in df.columns and k in corrected.columns]
             merged = df.merge(
                 corrected[available_keys + ["rh_if_corrected"]],
-                on=available_keys, how="left",
+                on=available_keys,
+                how="left",
             )
             n_matched = merged["rh_if_corrected"].notna().sum()
             if n_matched > 0:
-                df.loc[merged["rh_if_corrected"].notna(), "RH"] = (
-                    merged.loc[merged["rh_if_corrected"].notna(), "rh_if_corrected"].values
-                )
+                df.loc[merged["rh_if_corrected"].notna(), "RH"] = merged.loc[
+                    merged["rh_if_corrected"].notna(), "rh_if_corrected"
+                ].values
                 print(f"Applied RHdot+IF corrections to {n_matched}/{len(df)} retrievals")
 
     # Get station config
@@ -648,6 +649,7 @@ def load_data(station: str, year: int, results_dir: Path):
             # Coordinates not in config — query NWIS
             try:
                 import dataretrieval.nwis as nwis
+
                 site_info, _ = nwis.get_info(sites=ref_site_id)
                 gauge_lat = float(site_info["dec_lat_va"].iloc[0])
                 gauge_lon = float(site_info["dec_long_va"].iloc[0])
@@ -801,7 +803,8 @@ def render_cover_frame(metadata, frame_config, output_path):
 
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(
-        2, 2,
+        2,
+        2,
         hspace=0.15,
         wspace=0.1,
         top=0.93,
@@ -837,9 +840,7 @@ def render_cover_frame(metadata, frame_config, output_path):
     ax_regional.axis("off")
     buffer_wide = cached_basemaps.get("buffer_wide", 5000)
     map_scale_km = (buffer_wide * 2) / 1000
-    ax_regional.set_title(
-        f"Regional ({map_scale_km:.0f} km)", fontsize=11, fontweight="bold"
-    )
+    ax_regional.set_title(f"Regional ({map_scale_km:.0f} km)", fontsize=11, fontweight="bold")
 
     # Bottom-left: Reflection point basemap
     ax_fresnel = fig.add_subplot(gs[1, 0])
@@ -850,9 +851,7 @@ def render_cover_frame(metadata, frame_config, output_path):
     ax_fresnel.set_aspect("equal")
     ax_fresnel.axis("off")
     outer_dist = metadata.get("outer_reflection_dist", 0)
-    ax_fresnel.set_title(
-        f"Reflection Zone ({outer_dist:.0f}m)", fontsize=11, fontweight="bold"
-    )
+    ax_fresnel.set_title(f"Reflection Zone ({outer_dist:.0f}m)", fontsize=11, fontweight="bold")
 
     # Bottom-right: Station metadata text
     ax_text = fig.add_subplot(gs[1, 1])
@@ -881,7 +880,8 @@ def render_cover_frame(metadata, frame_config, output_path):
         info_lines.append("Reference: None")
 
     ax_text.text(
-        0.1, 0.85,
+        0.1,
+        0.85,
         "\n".join(info_lines),
         transform=ax_text.transAxes,
         fontsize=13,
@@ -892,7 +892,8 @@ def render_cover_frame(metadata, frame_config, output_path):
 
     fig.suptitle(
         f"{station_name} — GNSS-IR Polar Animation",
-        fontsize=16, fontweight="bold",
+        fontsize=16,
+        fontweight="bold",
     )
 
     plt.savefig(output_path, dpi=dpi, facecolor="white")
@@ -921,7 +922,6 @@ def _draw_reflection_wedge(ax, origin_x, origin_y, df_all):
     df["refl_dist"] = df["RH"] / np.tan(np.radians(df["elev_avg"]))
     outer_dist = df["refl_dist"].max()
     inner_dist = df["refl_dist"].min()
-    elev_max = df["elev_avg"].max()  # kept for reference only
 
     # Split azimuths into contiguous clusters at gaps > 30°
     gaps = np.diff(azimuths)
@@ -938,14 +938,21 @@ def _draw_reflection_wedge(ax, origin_x, origin_y, df_all):
         ax.plot(
             origin_x + outer_dist * np.sin(np.radians(az_arc)),
             origin_y + outer_dist * np.cos(np.radians(az_arc)),
-            color="cyan", linewidth=1.5, alpha=0.75, zorder=4,
+            color="cyan",
+            linewidth=1.5,
+            alpha=0.75,
+            zorder=4,
         )
         # Inner arc (if meaningfully different from origin)
         if inner_dist > 2:
             ax.plot(
                 origin_x + inner_dist * np.sin(np.radians(az_arc)),
                 origin_y + inner_dist * np.cos(np.radians(az_arc)),
-                color="cyan", linewidth=0.8, alpha=0.4, linestyle="--", zorder=4,
+                color="cyan",
+                linewidth=0.8,
+                alpha=0.4,
+                linestyle="--",
+                zorder=4,
             )
         # Radial boundary lines
         for az_deg in [az_s, az_e]:
@@ -953,7 +960,10 @@ def _draw_reflection_wedge(ax, origin_x, origin_y, df_all):
             ax.plot(
                 [origin_x, origin_x + outer_dist * np.sin(az_rad)],
                 [origin_y, origin_y + outer_dist * np.cos(az_rad)],
-                color="cyan", linewidth=1.0, alpha=0.7, zorder=4,
+                color="cyan",
+                linewidth=1.0,
+                alpha=0.7,
+                zorder=4,
             )
 
     return inner_dist, outer_dist
@@ -994,13 +1004,13 @@ def render_animation_frame(
 
     ref_source = metadata.get("ref_source", "Unknown")
     ref_site_id = metadata.get("ref_site_id", "Unknown")
-    has_reference = metadata.get("has_reference", False)
     station_name = metadata.get("station_name", "Unknown")
     outer_refl_dist = metadata.get("outer_reflection_dist", 230)
 
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(
-        3, 1,
+        3,
+        1,
         height_ratios=[0.03, 0.30, 0.67],
         hspace=0.08,
         top=0.95,
@@ -1027,13 +1037,27 @@ def render_animation_frame(
     ax_progress.set_yticks([])
 
     # DOY labels at edges
-    from matplotlib.dates import date2num
+
     start_doy = start_time.timetuple().tm_yday
     end_doy = end_time.timetuple().tm_yday
-    ax_progress.text(0.01, 0.5, f"DOY {start_doy}", transform=ax_progress.transAxes,
-                     fontsize=8, va="center", ha="left")
-    ax_progress.text(0.99, 0.5, f"DOY {end_doy}", transform=ax_progress.transAxes,
-                     fontsize=8, va="center", ha="right")
+    ax_progress.text(
+        0.01,
+        0.5,
+        f"DOY {start_doy}",
+        transform=ax_progress.transAxes,
+        fontsize=8,
+        va="center",
+        ha="left",
+    )
+    ax_progress.text(
+        0.99,
+        0.5,
+        f"DOY {end_doy}",
+        transform=ax_progress.transAxes,
+        fontsize=8,
+        va="center",
+        ha="right",
+    )
     ax_progress.set_xticks([])
     for spine in ax_progress.spines.values():
         spine.set_visible(False)
@@ -1069,30 +1093,49 @@ def render_animation_frame(
             ax_ts.plot(
                 ref_window["datetime"],
                 ref_window["wl_dm"] * 100,
-                "r-", linewidth=2, alpha=0.9,
-                label=ref_legend_label, zorder=2,
+                "r-",
+                linewidth=2,
+                alpha=0.9,
+                label=ref_legend_label,
+                zorder=2,
             )
 
     # All GNSS-IR data (background)
     ax_ts.scatter(
-        df_all["datetime"], df_all["WSE_dm"] * 100,
-        c="lightgray", s=8, alpha=0.3, label="GNSS-IR (all)", zorder=1,
+        df_all["datetime"],
+        df_all["WSE_dm"] * 100,
+        c="lightgray",
+        s=8,
+        alpha=0.3,
+        label="GNSS-IR (all)",
+        zorder=1,
     )
 
     # Current window data
     if len(df_current) > 0:
         ax_ts.scatter(
-            df_current["datetime"], df_current["WSE_dm"] * 100,
-            c="gold", s=30, edgecolors="darkorange", linewidths=1.5,
-            alpha=0.95, label="Current", zorder=4,
+            df_current["datetime"],
+            df_current["WSE_dm"] * 100,
+            c="gold",
+            s=30,
+            edgecolors="darkorange",
+            linewidths=1.5,
+            alpha=0.95,
+            label="Current",
+            zorder=4,
         )
 
     # Filtered-out points
     if len(df_filtered_out) > 0:
         ax_ts.scatter(
-            df_filtered_out["datetime"], df_filtered_out["WSE_dm"] * 100,
-            c="red", s=20, marker="x", alpha=0.5,
-            label="Filtered out", zorder=3,
+            df_filtered_out["datetime"],
+            df_filtered_out["WSE_dm"] * 100,
+            c="red",
+            s=20,
+            marker="x",
+            alpha=0.5,
+            label="Filtered out",
+            zorder=3,
         )
 
     # Highlight current window
@@ -1119,13 +1162,15 @@ def render_animation_frame(
     ax_ts.grid(True, alpha=0.3)
 
     import matplotlib.dates as mdates
+
     ax_ts.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
     ax_ts.xaxis.set_major_locator(mdates.AutoDateLocator())
     plt.setp(ax_ts.xaxis.get_majorticklabels(), rotation=30, ha="right", fontsize=8)
 
     ax_ts.set_title(
         f"{station_name} — Frame {frame_num}/{total_frames}",
-        fontsize=11, fontweight="bold",
+        fontsize=11,
+        fontweight="bold",
     )
 
     # === Reflection points ===
@@ -1147,8 +1192,13 @@ def render_animation_frame(
 
     # Station marker
     ax_refl.plot(
-        origin_x, origin_y, "r^",
-        markersize=12, markeredgecolor="white", markeredgewidth=2, zorder=10,
+        origin_x,
+        origin_y,
+        "r^",
+        markersize=12,
+        markeredgecolor="white",
+        markeredgewidth=2,
+        zorder=10,
     )
 
     # Reflection wedge overlay
@@ -1171,8 +1221,13 @@ def render_animation_frame(
             dy = reflection_dist * np.cos(az_rad)
             color = cmap(norm(row["WSE_dm"] * 100))
             ax_refl.plot(
-                origin_x + dx, origin_y + dy, "o",
-                markersize=4, color=color, alpha=0.5, markeredgecolor="none",
+                origin_x + dx,
+                origin_y + dy,
+                "o",
+                markersize=4,
+                color=color,
+                alpha=0.5,
+                markeredgecolor="none",
             )
 
     # Plot current data (prominent)
@@ -1186,9 +1241,15 @@ def render_animation_frame(
             dy = reflection_dist * np.cos(az_rad)
             color = cmap(norm(row["WSE_dm"] * 100))
             ax_refl.plot(
-                origin_x + dx, origin_y + dy, "o",
-                markersize=12, color=color, alpha=0.95,
-                markeredgecolor="darkorange", markeredgewidth=2, zorder=5,
+                origin_x + dx,
+                origin_y + dy,
+                "o",
+                markersize=12,
+                color=color,
+                alpha=0.95,
+                markeredgecolor="darkorange",
+                markeredgewidth=2,
+                zorder=5,
             )
 
     # Colorbar
@@ -1199,10 +1260,22 @@ def render_animation_frame(
 
     # Compass
     compass_offset = buffer_close * 0.8
-    ax_refl.annotate("N", (origin_x, origin_y + compass_offset),
-                     ha="center", fontsize=11, fontweight="bold", color="white")
-    ax_refl.annotate("E", (origin_x + compass_offset, origin_y),
-                     ha="center", fontsize=11, fontweight="bold", color="white")
+    ax_refl.annotate(
+        "N",
+        (origin_x, origin_y + compass_offset),
+        ha="center",
+        fontsize=11,
+        fontweight="bold",
+        color="white",
+    )
+    ax_refl.annotate(
+        "E",
+        (origin_x + compass_offset, origin_y),
+        ha="center",
+        fontsize=11,
+        fontweight="bold",
+        color="white",
+    )
 
     ax_refl.set_aspect("equal")
     ax_refl.axis("off")
@@ -1266,11 +1339,19 @@ def assemble_with_ffmpeg(
     if output_format == "gif":
         # Single-pass GIF with inline palette generation (ffmpeg 3.4 compatible)
         cmd_gif = [
-            ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", str(framelist_path),
+            ffmpeg,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(framelist_path),
             "-filter_complex",
-            "split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5",
-            "-loop", "0",
+            "split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
+            "[s1][p]paletteuse=dither=bayer:bayer_scale=5",
+            "-loop",
+            "0",
             str(output_path),
         ]
         result = subprocess.run(cmd_gif, capture_output=True, text=True)
@@ -1280,11 +1361,20 @@ def assemble_with_ffmpeg(
     elif output_format == "mp4":
         # Use mpeg4 encoder (available in this ffmpeg build)
         cmd_mp4 = [
-            ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", str(framelist_path),
-            "-vcodec", "mpeg4",
-            "-pix_fmt", "yuv420p",
-            "-q:v", "5",
+            ffmpeg,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(framelist_path),
+            "-vcodec",
+            "mpeg4",
+            "-pix_fmt",
+            "yuv420p",
+            "-q:v",
+            "5",
             str(output_path),
         ]
         result = subprocess.run(cmd_mp4, capture_output=True, text=True)
@@ -1857,9 +1947,6 @@ def _render_frame_task(frame_args):
 
     df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
 
-    df_current_all = df_all_unfiltered[
-        (df_all_unfiltered["datetime"] >= bin_start) & (df_all_unfiltered["datetime"] < bin_end)
-    ]
     df_filtered_out = df_all_unfiltered[
         (df_all_unfiltered["datetime"] < bin_end)
         & (df_all_unfiltered["PkNoise"] <= d["pknoise_median"])
@@ -1996,8 +2083,10 @@ def create_animation(
     if mode == "analysis":
         spans = [(w[1] - w[0]).total_seconds() / 3600 for w in frame_windows]
         if spans:
-            print(f"Analysis mode: {total_frames} tidal-phase frames "
-                  f"(avg {np.mean(spans):.1f}h, range {min(spans):.1f}-{max(spans):.1f}h)")
+            print(
+                f"Analysis mode: {total_frames} tidal-phase frames "
+                f"(avg {np.mean(spans):.1f}h, range {min(spans):.1f}-{max(spans):.1f}h)"
+            )
     else:
         print(f"Presentation mode: {total_frames} frames")
     print(f"Creating {total_frames} frames...")
@@ -2140,11 +2229,15 @@ def main():
     )
     parser.add_argument("--fps", type=int, default=4)
     parser.add_argument(
-        "--bin_hours", type=int, default=6,
+        "--bin_hours",
+        type=int,
+        default=6,
         help="Fallback time bin size in hours when no tidal signal detected (default: 6)",
     )
     parser.add_argument(
-        "--window_hours", type=int, default=6,
+        "--window_hours",
+        type=int,
+        default=6,
         help="Plotting window size in hours centered on each frame (default: 6)",
     )
     parser.add_argument("--no_quality_filter", action="store_true")

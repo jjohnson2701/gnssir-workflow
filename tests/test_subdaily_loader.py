@@ -10,13 +10,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-GLBX_FILES_DIR = (
-    project_root
-    / "gnssrefl_data_workspace"
-    / "refl_code"
-    / "Files"
-    / "glbx"
-)
+GLBX_FILES_DIR = project_root / "gnssrefl_data_workspace" / "refl_code" / "Files" / "glbx"
 
 
 class TestLoadSplineOutput:
@@ -71,11 +65,13 @@ class TestConfidenceAnnotation:
         from scripts.utils.subdaily_loader import annotate_confidence
 
         spline_times = pd.date_range("2024-01-01", periods=48, freq="30min", tz="UTC")
-        spline_df = pd.DataFrame({
-            "datetime": spline_times,
-            "rh_m": np.random.uniform(6, 9, 48),
-            "wse_ortho_m": np.random.uniform(-23, -20, 48),
-        })
+        spline_df = pd.DataFrame(
+            {
+                "datetime": spline_times,
+                "rh_m": np.random.uniform(6, 9, 48),
+                "wse_ortho_m": np.random.uniform(-23, -20, 48),
+            }
+        )
 
         # Observations at hours 0, 3, 6, 9, 12, 15, 18, 21
         obs_times = pd.date_range("2024-01-01", periods=8, freq="3h", tz="UTC")
@@ -90,11 +86,13 @@ class TestConfidenceAnnotation:
         from scripts.utils.subdaily_loader import annotate_confidence
 
         spline_times = pd.date_range("2024-01-01", periods=48, freq="30min", tz="UTC")
-        spline_df = pd.DataFrame({
-            "datetime": spline_times,
-            "rh_m": np.ones(48) * 7.0,
-            "wse_ortho_m": np.ones(48) * -20.0,
-        })
+        spline_df = pd.DataFrame(
+            {
+                "datetime": spline_times,
+                "rh_m": np.ones(48) * 7.0,
+                "wse_ortho_m": np.ones(48) * -20.0,
+            }
+        )
 
         # Observations every hour — all spline points should be within 0.5 hours
         obs_times = pd.date_range("2024-01-01", periods=24, freq="h", tz="UTC")
@@ -108,23 +106,26 @@ class TestConfidenceAnnotation:
         from scripts.utils.subdaily_loader import annotate_confidence
 
         spline_times = pd.date_range("2024-01-01", periods=48, freq="30min", tz="UTC")
-        spline_df = pd.DataFrame({
-            "datetime": spline_times,
-            "rh_m": np.ones(48) * 7.0,
-            "wse_ortho_m": np.ones(48) * -20.0,
-        })
+        spline_df = pd.DataFrame(
+            {
+                "datetime": spline_times,
+                "rh_m": np.ones(48) * 7.0,
+                "wse_ortho_m": np.ones(48) * -20.0,
+            }
+        )
 
         # Only 2 observations: one at start and one 20 hours later
-        obs_times = pd.DatetimeIndex([
-            pd.Timestamp("2024-01-01 00:00", tz="UTC"),
-            pd.Timestamp("2024-01-01 20:00", tz="UTC"),
-        ])
+        obs_times = pd.DatetimeIndex(
+            [
+                pd.Timestamp("2024-01-01 00:00", tz="UTC"),
+                pd.Timestamp("2024-01-01 20:00", tz="UTC"),
+            ]
+        )
 
         result = annotate_confidence(spline_df, obs_times, threshold_hours=3.0)
         # Points in the middle (hours 4-16) should be interpolated
         # (hours 0-3 are near the 00:00 obs, hours 17-20 near the 20:00 obs)
-        mid_points = result[(result["datetime"].dt.hour >= 4) &
-                           (result["datetime"].dt.hour <= 16)]
+        mid_points = result[(result["datetime"].dt.hour >= 4) & (result["datetime"].dt.hour <= 16)]
         assert mid_points["is_interpolated"].all()
 
 
@@ -142,10 +143,25 @@ class TestLoadCorrectedRetrievals:
 
         df = load_corrected_retrievals(if_path)
         required = [
-            "year", "doy", "RH", "sat", "UTCtime", "Azim", "Amp",
-            "eminO", "emaxO", "NumbOf", "freq", "rise", "EdotF",
-            "PkNoise", "DelT", "MJD", "rh_rhdot_corrected",
-            "rhdot_correction", "rh_if_corrected",
+            "year",
+            "doy",
+            "RH",
+            "sat",
+            "UTCtime",
+            "Azim",
+            "Amp",
+            "eminO",
+            "emaxO",
+            "NumbOf",
+            "freq",
+            "rise",
+            "EdotF",
+            "PkNoise",
+            "DelT",
+            "MJD",
+            "rh_rhdot_corrected",
+            "rhdot_correction",
+            "rh_if_corrected",
         ]
         for col in required:
             assert col in df.columns, f"Missing column: {col}"
@@ -177,7 +193,9 @@ class TestLoadCorrectedRetrievals:
             pytest.skip("GLBX withrhdotIF file not available")
 
         df = load_corrected_retrievals(if_path)
-        assert df["rhdot_correction"].abs().quantile(0.99) < 0.5, "RHdot corrections unexpectedly large"
+        assert (
+            df["rhdot_correction"].abs().quantile(0.99) < 0.5
+        ), "RHdot corrections unexpectedly large"
 
 
 class TestGapDetection:
@@ -188,14 +206,16 @@ class TestGapDetection:
         """Should identify gaps larger than threshold."""
         from scripts.utils.subdaily_loader import detect_observation_gaps
 
-        obs_times = pd.DatetimeIndex([
-            pd.Timestamp("2024-01-01 00:00", tz="UTC"),
-            pd.Timestamp("2024-01-01 01:00", tz="UTC"),
-            pd.Timestamp("2024-01-01 02:00", tz="UTC"),
-            # 8-hour gap
-            pd.Timestamp("2024-01-01 10:00", tz="UTC"),
-            pd.Timestamp("2024-01-01 11:00", tz="UTC"),
-        ])
+        obs_times = pd.DatetimeIndex(
+            [
+                pd.Timestamp("2024-01-01 00:00", tz="UTC"),
+                pd.Timestamp("2024-01-01 01:00", tz="UTC"),
+                pd.Timestamp("2024-01-01 02:00", tz="UTC"),
+                # 8-hour gap
+                pd.Timestamp("2024-01-01 10:00", tz="UTC"),
+                pd.Timestamp("2024-01-01 11:00", tz="UTC"),
+            ]
+        )
 
         gaps = detect_observation_gaps(obs_times, min_gap_hours=6.0)
         assert len(gaps) == 1

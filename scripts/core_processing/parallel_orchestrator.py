@@ -87,7 +87,16 @@ def process_station_parallel(
     days = list(range(doy_range[0], doy_range[1] + 1))
 
     def args_for(doy, options):
-        return (station_config, year, doy, tool_paths, project_root, refl_code_base, orbits_base, options)
+        return (
+            station_config,
+            year,
+            doy,
+            tool_paths,
+            project_root,
+            refl_code_base,
+            orbits_base,
+            options,
+        )
 
     logging.info(f"Pass 1: download and translation using {num_cores} cores")
     translate_options = {**skip_options, "translate_only": True}
@@ -107,7 +116,12 @@ def process_station_parallel(
 
     logging.info("Pass 2: gnssir, one day at a time")
     want_quicklook = not skip_options.get("skip_quicklook", False)
-    height_options = {**skip_options, "skip_download": True, "skip_snr": True, "skip_quicklook": True}
+    height_options = {
+        **skip_options,
+        "skip_download": True,
+        "skip_snr": True,
+        "skip_quicklook": True,
+    }
     task_results = []
     for doy, first in zip(days, first_pass):
         if first.get("status") != "translated":

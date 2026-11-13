@@ -73,7 +73,7 @@ def test_tuning_table_has_a_row_for_a_limit_off_the_grid():
 
 def test_arcs_outside_the_gauge_span_are_not_used():
     t, rh = _tide()
-    gauge_t = np.linspace(100, 101, 500)   # the gauge covers one of three days
+    gauge_t = np.linspace(100, 101, 500)  # the gauge covers one of three days
     gauge = -1.5 * np.sin(2 * np.pi * gauge_t / 0.5175)
     rows = sf.tuning_table(t, rh, np.full(len(t), 3.0), np.zeros(len(t)), gauge_t, gauge, [0.0])
     assert rows[0]["n"] == int(((t >= 100) & (t <= 101)).sum())
@@ -81,7 +81,17 @@ def test_arcs_outside_the_gauge_span_are_not_used():
 
 
 def test_wind_figure_with_no_usable_bin(tmp_path):
-    rows = [{"label": "0 to 2", "lo": 0, "n": 5, "share": 1.0, "scatter_m": None, "outliers": None, "pk": None}]
+    rows = [
+        {
+            "label": "0 to 2",
+            "lo": 0,
+            "n": 5,
+            "share": 1.0,
+            "scatter_m": None,
+            "outliers": None,
+            "pk": None,
+        }
+    ]
     assert sf.wind_figure(tmp_path / "w.png", rows) is False
     assert not (tmp_path / "w.png").exists()
 
@@ -89,7 +99,7 @@ def test_wind_figure_with_no_usable_bin(tmp_path):
 def test_wind_table_offset_per_signal_removes_a_signal_offset():
     t, rh = _tide(900)
     freq = np.where(np.arange(len(t)) % 2 == 0, 1, 5)
-    rh = rh + np.where(freq == 1, 0.10, -0.05)          # two signals, 15 cm apart
+    rh = rh + np.where(freq == 1, 0.10, -0.05)  # two signals, 15 cm apart
     gauge_t = np.linspace(99, 104, 4000)
     gauge = -1.5 * np.sin(2 * np.pi * gauge_t / 0.5175)
     wind = np.full(len(gauge_t), 1.0)

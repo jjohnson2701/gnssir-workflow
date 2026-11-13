@@ -7,4 +7,8 @@ exclude =
     results_annual,
     gnssrefl_data_workspace,
     logs,
-ignore = E203, W503
+# E226 is in the flake8 default ignore list; it is named here because "ignore" replaces that list
+ignore = E203, W503, E226
+per-file-ignores =
+    # long HTML and CSS text
+    scripts/station_page.py: E501

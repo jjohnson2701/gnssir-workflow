@@ -1,6 +1,6 @@
 # ABOUTME: Results aggregator for daily GNSS-IR reflector height files
 # ABOUTME: Combines daily outputs into annual datasets with enriched per-arc and daily statistics
-# ABOUTME: Produces arc_table.parquet (Layer 1) — canonical per-arc file for the 4-layer architecture
+# ABOUTME: Produces arc_table.parquet, the per-arc file.
 
 import logging
 import numpy as np
@@ -36,21 +36,26 @@ GNSSIR_V3_COLUMNS = [
 # Grouped by actual RF band (not constellation) so interfrequency
 # comparisons measure wavelength-dependent surface interaction.
 FREQ_CODE_TO_GROUP = {
-    1: "L1",       # GPS L1 C/A (1575.42 MHz, 0.190 m)
-    2: "L2C",      # GPS L2 P(Y) (1227.60 MHz)
-    20: "L2C",     # GPS L2C    (1227.60 MHz, 0.244 m)
-    5: "L5",       # GPS L5     (1176.45 MHz, 0.255 m)
-    101: "L1",     # GLONASS L1 (~1602 MHz)
-    102: "L2C",    # GLONASS L2 (~1246 MHz)
-    105: "L5",     # GLONASS L3 (1202.025 MHz)
-    201: "L1",     # Galileo E1 (1575.42 MHz)
-    205: "L5",     # Galileo E5a (1176.45 MHz)
-    206: "L5",     # Galileo E5b (1207.14 MHz)
-    207: "L5",     # Galileo E5  (AltBOC composite)
-    208: "E6",     # Galileo E6 (1278.75 MHz, unique)
-    301: "L1",     # BeiDou B1C (1575.42 MHz)
-    302: "L1",     # BeiDou B1  (1561.098 MHz)
-    306: "B3",     # BeiDou B3  (1268.52 MHz, unique)
+    1: "L1",  # GPS L1 C/A (1575.42 MHz, 0.190 m)
+    2: "L2C",  # GPS L2 P(Y) (1227.60 MHz)
+    20: "L2C",  # GPS L2C    (1227.60 MHz, 0.244 m)
+    5: "L5",  # GPS L5     (1176.45 MHz, 0.255 m)
+    101: "L1",  # GLONASS L1 (~1602 MHz)
+    102: "L2C",  # GLONASS L2 (~1246 MHz)
+    105: "L5",  # GLONASS L3 (1202.025 MHz)
+    201: "L1",  # Galileo E1 (1575.42 MHz)
+    # Galileo and BeiDou codes follow the RINEX band number (gnssrefl gps.py): 6 = E6/B3,
+    # 7 = E5b/B2b, 8 = E5 (AltBOC)
+    205: "L5",  # Galileo E5a (1176.45 MHz)
+    206: "E6",  # Galileo E6 (1278.75 MHz, unique)
+    207: "L5",  # Galileo E5b (1207.14 MHz)
+    208: "L5",  # Galileo E5  (AltBOC composite, 1191.795 MHz)
+    301: "L1",  # BeiDou B1C (1575.42 MHz)
+    302: "L1",  # BeiDou B1I (1561.098 MHz)
+    305: "L5",  # BeiDou B2a (1176.45 MHz)
+    306: "B3",  # BeiDou B3  (1268.52 MHz, unique)
+    307: "L5",  # BeiDou B2b (1207.14 MHz)
+    308: "L5",  # BeiDou B2  (1191.795 MHz)
 }
 
 # Azimuth bin size in degrees — 10-degree bins provide the spatial
@@ -130,9 +135,11 @@ def compute_enriched_daily(df):
         return pd.Series(row)
 
     # Per azimuth_bin x freq_group
-    grouped = df.groupby(["date", "azimuth_bin", "freq_group"]).apply(
-        _agg_group, include_groups=False
-    ).reset_index()
+    grouped = (
+        df.groupby(["date", "azimuth_bin", "freq_group"])
+        .apply(_agg_group, include_groups=False)
+        .reset_index()
+    )
 
     # Pooled across all azimuths and frequencies (backward-compatible daily row)
     pooled = df.groupby("date").apply(_agg_group, include_groups=False).reset_index()
@@ -140,15 +147,15 @@ def compute_enriched_daily(df):
     pooled["freq_group"] = "ALL"
 
     # Pooled per azimuth (all freqs)
-    pooled_az = df.groupby(["date", "azimuth_bin"]).apply(
-        _agg_group, include_groups=False
-    ).reset_index()
+    pooled_az = (
+        df.groupby(["date", "azimuth_bin"]).apply(_agg_group, include_groups=False).reset_index()
+    )
     pooled_az["freq_group"] = "ALL"
 
     # Pooled per freq (all azimuths)
-    pooled_freq = df.groupby(["date", "freq_group"]).apply(
-        _agg_group, include_groups=False
-    ).reset_index()
+    pooled_freq = (
+        df.groupby(["date", "freq_group"]).apply(_agg_group, include_groups=False).reset_index()
+    )
     pooled_freq["azimuth_bin"] = np.int8(-1)
 
     enriched = pd.concat([grouped, pooled, pooled_az, pooled_freq], ignore_index=True)
@@ -176,11 +183,15 @@ def compute_interfreq_daily(df):
         return None
 
     # Per date x azimuth_bin x freq_group means
-    grp = df_main.groupby(["date", "azimuth_bin", "freq_group"]).agg(
-        rh_mean=("RH", "mean"),
-        amp_mean=("Amp", "mean"),
-        arc_count=("RH", "count"),
-    ).reset_index()
+    grp = (
+        df_main.groupby(["date", "azimuth_bin", "freq_group"])
+        .agg(
+            rh_mean=("RH", "mean"),
+            amp_mean=("Amp", "mean"),
+            arc_count=("RH", "count"),
+        )
+        .reset_index()
+    )
 
     # Pivot so each band becomes a column
     rows = []
@@ -432,17 +443,16 @@ def combine_daily_rh_results(
 
         # --- Add derived columns for enriched analysis ---
         add_derived_columns(combined_df, antenna_height_m=antenna_height_m)
-        logging.info("Added derived columns: azimuth_bin, freq_group"
-                      + (", wse" if antenna_height_m is not None else ""))
+        logging.info(
+            "Added derived columns: azimuth_bin, freq_group"
+            + (", wse" if antenna_height_m is not None else "")
+        )
 
         # --- Save arc_table (Layer 1) — canonical per-arc file ---
         # SNR feature columns are added later by snr_feature_extractor
         try:
             station_upper = station_id_4char_lower.upper()
-            arc_table_path = (
-                annual_results_dir
-                / f"{station_upper}_{year}_arc_table.parquet"
-            )
+            arc_table_path = annual_results_dir / f"{station_upper}_{year}_arc_table.parquet"
             combined_df.to_parquet(arc_table_path, index=False, engine="pyarrow")
             logging.info(
                 f"arc_table (Layer 1) saved to {arc_table_path} "
@@ -597,9 +607,7 @@ def backfill_from_raw_csv(raw_csv_path, annual_results_dir, antenna_height_m=Non
     if interfreq is not None:
         interfreq_path = annual_results_dir / f"{station}_{year}_combined_interfreq.parquet"
         interfreq.to_parquet(interfreq_path, index=False, engine="pyarrow")
-        logging.info(
-            f"Interfreq: {len(interfreq)} rows -> {interfreq_path}"
-        )
+        logging.info(f"Interfreq: {len(interfreq)} rows -> {interfreq_path}")
 
     return arc_table_path, enriched_path
 
@@ -607,6 +615,7 @@ def backfill_from_raw_csv(raw_csv_path, annual_results_dir, antenna_height_m=Non
 # ---------------------------------------------------------------------------
 # Layer resolution helpers — find the right parquet with fallback
 # ---------------------------------------------------------------------------
+
 
 def resolve_layer1(station, year, results_dir=None):
     """Resolve the Layer 1 per-arc parquet path.
@@ -646,6 +655,7 @@ def resolve_snr_features(station, year, results_dir=None):
     if arc_table.exists():
         # Quick check: does arc_table have SNR columns?
         import pyarrow.parquet as pq
+
         schema = pq.read_schema(arc_table)
         if "CLR" in schema.names:
             return arc_table, True
@@ -684,5 +694,3 @@ def discover_station_years(results_base=None, require_file="arc_table.parquet"):
             except ValueError:
                 continue
     return sorted(set(found))
-
-

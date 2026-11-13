@@ -3,8 +3,6 @@
 
 import pytest
 import sys
-import shutil
-import numpy as np
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -14,6 +12,7 @@ sys.path.insert(0, str(project_root))
 def _create_synthetic_frames(tmp_path, n_frames=5, size=(100, 100)):
     """Create small synthetic PNG frames for testing assembly."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 

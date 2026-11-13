@@ -56,11 +56,11 @@ jobs:
 
       - name: Check formatting with black
         run: |
-          black --check --diff scripts/ dashboard/ tests/
+          black --check --diff scripts/ tests/
 
       - name: Lint with flake8
         run: |
-          flake8 scripts/ dashboard/ tests/ --count --show-source --statistics
+          flake8 scripts/ tests/ --count --show-source --statistics
 
   type-check:
     runs-on: ubuntu-latest

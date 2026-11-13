@@ -1,8 +1,6 @@
 # ABOUTME: Loads gnssrefl subdaily spline output with confidence annotations.
 # ABOUTME: Classifies each spline point as observed vs interpolated based on observation proximity.
 
-from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -34,17 +32,19 @@ def load_subdaily_results(spline_path, exclude_gaps=True):
             wse = float(parts[8])
             if exclude_gaps and (rh > 900 or wse > 900 or wse < -900):
                 continue
-            rows.append({
-                "mjd": float(parts[0]),
-                "rh_m": rh,
-                "year": int(parts[2]),
-                "month": int(parts[3]),
-                "day": int(parts[4]),
-                "hour": int(parts[5]),
-                "minute": int(parts[6]),
-                "second": int(parts[7]),
-                "wse_ortho_m": wse,
-            })
+            rows.append(
+                {
+                    "mjd": float(parts[0]),
+                    "rh_m": rh,
+                    "year": int(parts[2]),
+                    "month": int(parts[3]),
+                    "day": int(parts[4]),
+                    "hour": int(parts[5]),
+                    "minute": int(parts[6]),
+                    "second": int(parts[7]),
+                    "wse_ortho_m": wse,
+                }
+            )
     df = pd.DataFrame(rows)
     df["datetime"] = pd.to_datetime(
         df[["year", "month", "day", "hour", "minute", "second"]]
@@ -74,34 +74,36 @@ def load_corrected_retrievals(if_corrected_path):
             parts = line.split()
             if len(parts) < 25:
                 continue
-            rows.append({
-                "year": int(parts[0]),
-                "doy": int(parts[1]),
-                "RH": float(parts[2]),
-                "sat": int(parts[3]),
-                "UTCtime": float(parts[4]),
-                "Azim": float(parts[5]),
-                "Amp": float(parts[6]),
-                "eminO": float(parts[7]),
-                "emaxO": float(parts[8]),
-                "NumbOf": int(parts[9]),
-                "freq": int(parts[10]),
-                "rise": int(parts[11]),
-                "EdotF": float(parts[12]),
-                "PkNoise": float(parts[13]),
-                "DelT": float(parts[14]),
-                "MJD": float(parts[15]),
-                "refr_model": int(parts[16]),
-                "rh_rhdot_corrected": float(parts[22]),
-                "rhdot_correction": float(parts[23]),
-                "rh_if_corrected": float(parts[24]),
-            })
+            rows.append(
+                {
+                    "year": int(parts[0]),
+                    "doy": int(parts[1]),
+                    "RH": float(parts[2]),
+                    "sat": int(parts[3]),
+                    "UTCtime": float(parts[4]),
+                    "Azim": float(parts[5]),
+                    "Amp": float(parts[6]),
+                    "eminO": float(parts[7]),
+                    "emaxO": float(parts[8]),
+                    "NumbOf": int(parts[9]),
+                    "freq": int(parts[10]),
+                    "rise": int(parts[11]),
+                    "EdotF": float(parts[12]),
+                    "PkNoise": float(parts[13]),
+                    "DelT": float(parts[14]),
+                    "MJD": float(parts[15]),
+                    "refr_model": int(parts[16]),
+                    "rh_rhdot_corrected": float(parts[22]),
+                    "rhdot_correction": float(parts[23]),
+                    "rh_if_corrected": float(parts[24]),
+                }
+            )
     df = pd.DataFrame(rows)
     # Add date column for compatibility with combined_raw.csv consumers
     if len(df) > 0:
-        df["date"] = pd.to_datetime(
-            df["year"] * 1000 + df["doy"], format="%Y%j"
-        ).dt.strftime("%Y-%m-%d")
+        df["date"] = pd.to_datetime(df["year"] * 1000 + df["doy"], format="%Y%j").dt.strftime(
+            "%Y-%m-%d"
+        )
     return df
 
 
@@ -128,10 +130,16 @@ def load_observation_times(if_corrected_path):
             day = int(parts[18])
             hour = int(parts[19])
             minute = int(parts[20])
-            times.append(pd.Timestamp(
-                year=year, month=month, day=day,
-                hour=hour, minute=minute, tz="UTC",
-            ))
+            times.append(
+                pd.Timestamp(
+                    year=year,
+                    month=month,
+                    day=day,
+                    hour=hour,
+                    minute=minute,
+                    tz="UTC",
+                )
+            )
     return pd.DatetimeIndex(sorted(times))
 
 
@@ -181,9 +189,11 @@ def detect_observation_gaps(obs_times, min_gap_hours=6.0):
     gaps = []
     for i, diff_hours in enumerate(diffs):
         if diff_hours >= min_gap_hours:
-            gaps.append({
-                "start": sorted_times[i],
-                "end": sorted_times[i + 1],
-                "duration_hours": diff_hours,
-            })
+            gaps.append(
+                {
+                    "start": sorted_times[i],
+                    "end": sorted_times[i + 1],
+                    "duration_hours": diff_hours,
+                }
+            )
     return gaps

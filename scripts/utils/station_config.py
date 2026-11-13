@@ -59,9 +59,13 @@ def parse_reference(text: Optional[str]) -> Tuple[str, Optional[str]]:
     source, _, ref_id = str(text).strip().partition(":")
     source = source.lower()
     if source not in ("usgs", "coops", "erddap"):
-        raise ValueError(f"Unknown reference source '{source}' in '{text}'. Use usgs, coops, erddap or none.")
+        raise ValueError(
+            f"Unknown reference source '{source}' in '{text}'. Use usgs, coops, erddap or none."
+        )
     if not ref_id:
-        raise ValueError(f"Reference '{text}' has no id. Write for example usgs:02043433 or coops:auto.")
+        raise ValueError(
+            f"Reference '{text}' has no id. Write for example usgs:02043433 or coops:auto."
+        )
     return source, ref_id
 
 
@@ -74,7 +78,9 @@ def load_catalog(station: str, references_dir: Path = REFERENCES_DIR) -> Dict[st
     return {}
 
 
-def _expand(station: str, entry: Dict[str, Any], root: Path, references_dir: Path) -> Dict[str, Any]:
+def _expand(
+    station: str, entry: Dict[str, Any], root: Path, references_dir: Path
+) -> Dict[str, Any]:
     """Build the full station dictionary from the short entry, the gnssrefl file and the catalog."""
     gnssrefl_json = entry.get("gnssrefl_json") or f"config/{station.lower()}.json"
     full: Dict[str, Any] = {
@@ -113,8 +119,10 @@ def _expand(station: str, entry: Dict[str, Any], root: Path, references_dir: Pat
         erddap = external.get("erddap")
         if not erddap or erddap.get("dataset_id") != ref_id:
             raise ValueError(
-                f"{station}: reference erddap:{ref_id} is not in config/references/{station.upper()}.json. "
-                f"Run: python scripts/find_reference_stations.py --station {station.upper()} --update-config"
+                f"{station}: reference erddap:{ref_id} is not in "
+                f"config/references/{station.upper()}.json. "
+                f"Run: python scripts/find_reference_stations.py --station {station.upper()} "
+                "--update-config"
             )
         erddap["enabled"] = True
         erddap["primary_reference"] = True
@@ -138,7 +146,10 @@ def _load_stations_cached(path_text: str) -> Dict[str, Any]:
         raw = yaml.safe_load(f) or {}
     root = path.resolve().parent.parent
     references_dir = path.resolve().parent / "references"
-    return {str(name).upper(): _expand(str(name), entry or {}, root, references_dir) for name, entry in raw.items()}
+    return {
+        str(name).upper(): _expand(str(name), entry or {}, root, references_dir)
+        for name, entry in raw.items()
+    }
 
 
 def load_stations(config_path=None) -> Dict[str, Any]:
@@ -156,7 +167,9 @@ def clear_cache() -> None:
     _load_stations_cached.cache_clear()
 
 
-def write_catalog(station: str, catalog: Dict[str, Any], references_dir: Path = REFERENCES_DIR) -> Path:
+def write_catalog(
+    station: str, catalog: Dict[str, Any], references_dir: Path = REFERENCES_DIR
+) -> Path:
     """Write the reference catalog of one station (used by find_reference_stations)."""
     Path(references_dir).mkdir(parents=True, exist_ok=True)
     path = Path(references_dir) / f"{station.upper()}.json"

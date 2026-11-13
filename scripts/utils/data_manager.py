@@ -58,9 +58,7 @@ def download_rinex_earthscope(station: str, year: int, doy: int, target_path: Pa
 
     station_lower = station.lower()
     yy = str(year)[-2:]
-    path = EARTHSCOPE_PATH_PATTERN.format(
-        year=year, doy=doy, station_lower=station_lower, yy=yy
-    )
+    path = EARTHSCOPE_PATH_PATTERN.format(year=year, doy=doy, station_lower=station_lower, yy=yy)
     url = f"{EARTHSCOPE_BASE_URL}/{path}"
 
     headers = {"Authorization": f"Bearer {token}"}

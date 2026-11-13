@@ -20,7 +20,8 @@ class TestCLIArgs:
         """--mode should default to 'presentation'. We test via --help output."""
         result = subprocess.run(
             [sys.executable, SCRIPT, "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert "--mode" in result.stdout
         assert "presentation" in result.stdout
@@ -30,7 +31,8 @@ class TestCLIArgs:
         """--format should default to 'gif'. We test via --help output."""
         result = subprocess.run(
             [sys.executable, SCRIPT, "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert "--format" in result.stdout
         assert "gif" in result.stdout
@@ -40,7 +42,8 @@ class TestCLIArgs:
         """Invalid --mode value should cause argparse to exit with error."""
         result = subprocess.run(
             [sys.executable, SCRIPT, "--mode", "bogus"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode != 0
 
@@ -49,6 +52,7 @@ class TestCLIArgs:
         """Invalid --format value should cause argparse to exit with error."""
         result = subprocess.run(
             [sys.executable, SCRIPT, "--format", "avi"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode != 0

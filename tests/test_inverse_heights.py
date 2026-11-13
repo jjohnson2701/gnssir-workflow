@@ -11,8 +11,8 @@ def test_widest_azimuth_range():
 
 def test_segments_split_at_small_and_missing_days():
     sizes = {d: 100 for d in range(60, 70)}
-    sizes[63] = 40      # incomplete day
-    del sizes[67]       # missing day
+    sizes[63] = 40  # incomplete day
+    del sizes[67]  # missing day
     assert whole_day_segments(sizes, 60, 69) == [(60, 62), (64, 66), (68, 69)]
     assert whole_day_segments({}, 60, 69) == []
 

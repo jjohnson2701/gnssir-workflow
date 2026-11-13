@@ -34,14 +34,25 @@ import numpy as np  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm  # noqa: E402
 
 FREQ_LABEL = {
-    1: "GPS L1", 2: "GPS L2", 20: "GPS L2C", 5: "GPS L5",
-    101: "GLONASS L1", 102: "GLONASS L2",
-    201: "Galileo E1", 205: "Galileo E5a", 206: "Galileo E6", 207: "Galileo E5b", 208: "Galileo E5",
-    302: "BeiDou B1", 306: "BeiDou B3", 307: "BeiDou B2",
+    1: "GPS L1",
+    2: "GPS L2",
+    20: "GPS L2C",
+    5: "GPS L5",
+    101: "GLONASS L1",
+    102: "GLONASS L2",
+    201: "Galileo E1",
+    205: "Galileo E5a",
+    206: "Galileo E6",
+    207: "Galileo E5b",
+    208: "Galileo E5",
+    302: "BeiDou B1",
+    306: "BeiDou B3",
+    307: "BeiDou B2",
 }
 # Diverging about the required amplitude: tan below the limit, neutral at it, blue above.
 STRENGTH = LinearSegmentedColormap.from_list(
-    "strength", ["#b89b72", "#e4d8c4", "#f5f5f5", "#9ecae1", "#3182bd", "#08306b"])
+    "strength", ["#b89b72", "#e4d8c4", "#f5f5f5", "#9ecae1", "#3182bd", "#08306b"]
+)
 PASS, FAIL, MASKED = "#e6550d", "#444444", "#9a9a9a"
 
 
@@ -71,10 +82,24 @@ def load_day(station, year, doy, freqs=None):
     buffer_hours = 2 if cfg.get("midnite", True) else 0
     # All azimuths are extracted so that the plot also shows what the mask leaves out.
     arcs = quiet(
-        extract_arcs_from_station, station, year, doy, freq=freqs, buffer_hours=buffer_hours,
-        dec=int(cfg.get("dec") or 1), e1=cfg["e1"], e2=cfg["e2"], ellist=cfg.get("ellist") or [],
-        azlist=[0, 360], polyV=cfg["polyV"], pele=cfg["pele"], dbhz=cfg.get("dbhz", False),
-        gzip=False, station_config=cfg, sat_list=cfg.get("onesat"), attach_results=["gnssir"],
+        extract_arcs_from_station,
+        station,
+        year,
+        doy,
+        freq=freqs,
+        buffer_hours=buffer_hours,
+        dec=int(cfg.get("dec") or 1),
+        e1=cfg["e1"],
+        e2=cfg["e2"],
+        ellist=cfg.get("ellist") or [],
+        azlist=[0, 360],
+        polyV=cfg["polyV"],
+        pele=cfg["pele"],
+        dbhz=cfg.get("dbhz", False),
+        gzip=False,
+        station_config=cfg,
+        sat_list=cfg.get("onesat"),
+        attach_results=["gnssir"],
         refraction_verbose=False,
     )
     rows = []
@@ -89,8 +114,16 @@ def load_day(station, year, doy, freqs=None):
             state = "fail"
         px = pz = None
         try:
-            out = quiet(g.strip_compute, data["ele"], data["snr"], meta["cf"], cfg["maxH"],
-                        cfg["desiredP"], cfg["minH"], lsp_method)
+            out = quiet(
+                g.strip_compute,
+                data["ele"],
+                data["snr"],
+                meta["cf"],
+                cfg["maxH"],
+                cfg["desiredP"],
+                cfg["minH"],
+                lsp_method,
+            )
             px, pz = np.atleast_1d(out[5]), np.atleast_1d(out[6])
             if len(pz) < 2 or len(pz) != len(px):
                 px = pz = None
@@ -100,14 +133,27 @@ def load_day(station, year, doy, freqs=None):
             continue
         if state == "pass":
             rh = float(res["RH"])
-        else:  # no height from gnssir: use the periodogram peak, or the inner edge if no periodogram
+        else:
+            # no height from gnssir: use the periodogram peak, or the inner edge if no
+            # periodogram
             rh = float(px[np.argmax(pz)]) if pz is not None else float(cfg["minH"])
         step = max(1, len(data["ele"]) // 40)
-        rows.append({"freq": int(meta["freq"]), "sat": int(meta["sat"]), "az": float(meta["az_min_ele"]),
-                     "px": px, "pz": pz, "rh": rh, "state": state,
-                     "hour": float(meta.get("arc_timestamp", np.nan)), "edotf": float(meta.get("edot_factor", np.nan)),
-                     "ele": np.asarray(data["ele"])[::step], "azi": np.asarray(data["azi"])[::step],
-                     "wavelength": 2.0 * float(meta["cf"])})
+        rows.append(
+            {
+                "freq": int(meta["freq"]),
+                "sat": int(meta["sat"]),
+                "az": float(meta["az_min_ele"]),
+                "px": px,
+                "pz": pz,
+                "rh": rh,
+                "state": state,
+                "hour": float(meta.get("arc_timestamp", np.nan)),
+                "edotf": float(meta.get("edot_factor", np.nan)),
+                "ele": np.asarray(data["ele"])[::step],
+                "azi": np.asarray(data["azi"])[::step],
+                "wavelength": 2.0 * float(meta["cf"]),
+            }
+        )
     return cfg, mask, rows
 
 
@@ -127,13 +173,17 @@ def expected_heights(station, year, doy, rows, knot_hours=3.0):
         return None
     t = d[:, 1] + d[:, 4] / 24.0
     fit = scatter_about_spline(t, d[:, 2], d[:, 12], knot_hours, True)
-    keep = fit["used"]   # without the arcs that the robust fit rejected
+    keep = fit["used"]  # without the arcs that the robust fit rejected
     sp = _spline(t[keep], fit["rh_corrected"][keep], knot_hours) if keep.sum() >= 20 else None
     if sp is None:
         return None
     for r in rows:
         tt = doy + r["hour"] / 24.0
-        r["expect"] = float(sp(tt) + r["edotf"] * sp.derivative()(tt) / 24.0) if np.isfinite(r["hour"]) else np.nan
+        r["expect"] = (
+            float(sp(tt) + r["edotf"] * sp.derivative()(tt) / 24.0)
+            if np.isfinite(r["hour"])
+            else np.nan
+        )
     day = sp(np.linspace(max(doy, t.min()), min(doy + 1, t.max()), 200))
     return float(day.max() - day.min())
 
@@ -150,17 +200,23 @@ def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0, relative=False,
         h = np.arange(-half, half + 1e-9, 0.02)
         lo_r, hi_r = -half, half
         mine = [r for r in mine if np.isfinite(r.get("expect", np.nan))]
-        pos = lambda r: r["expect"] - r["rh"]                      # noqa: E731
-        spec_of = lambda r: np.interp(h, (r["expect"] - r["px"])[::-1], r["pz"][::-1], left=np.nan, right=np.nan)  # noqa: E731
+        pos = lambda r: r["expect"] - r["rh"]  # noqa: E731
+        spec_of = lambda r: np.interp(  # noqa: E731
+            h, (r["expect"] - r["px"])[::-1], r["pz"][::-1], left=np.nan, right=np.nan
+        )  # noqa: E731
     else:
         h = np.arange(cfg["minH"], cfg["maxH"] + 1e-9, 0.02)
         lo_r, hi_r = cfg["minH"], cfg["maxH"]
-        pos = lambda r: r["rh"]                                     # noqa: E731
-        spec_of = lambda r: np.interp(h, r["px"], r["pz"])          # noqa: E731
+        pos = lambda r: r["rh"]  # noqa: E731
+        spec_of = lambda r: np.interp(h, r["px"], r["pz"])  # noqa: E731
     edges = np.arange(0, 360 + bin_deg, bin_deg)
     grid = np.full((len(h), len(edges) - 1), np.nan)
     for b in range(len(edges) - 1):
-        spec = [spec_of(r) for r in mine if r["pz"] is not None and edges[b] <= r["az"] % 360 < edges[b + 1]]
+        spec = [
+            spec_of(r)
+            for r in mine
+            if r["pz"] is not None and edges[b] <= r["az"] % 360 < edges[b + 1]
+        ]
         if spec:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)
@@ -171,19 +227,40 @@ def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0, relative=False,
     ax.set_rlim(lo_r, hi_r)
     ax.set_facecolor("white")
     vmax = max(2.0 * req_amp, np.nanpercentile(grid, 99.5) if np.isfinite(grid).any() else 1.0)
-    mesh = ax.pcolormesh(np.radians(edges), np.append(h, h[-1] + 0.02), np.ma.masked_invalid(grid),
-                         cmap=STRENGTH, norm=TwoSlopeNorm(vmin=0, vcenter=req_amp, vmax=vmax),
-                         shading="flat", rasterized=True)
+    mesh = ax.pcolormesh(
+        np.radians(edges),
+        np.append(h, h[-1] + 0.02),
+        np.ma.masked_invalid(grid),
+        cmap=STRENGTH,
+        norm=TwoSlopeNorm(vmin=0, vcenter=req_amp, vmax=vmax),
+        shading="flat",
+        rasterized=True,
+    )
     # Azimuths that the station file leaves out: light hatch
     for i in range(len(mask) // 2 + 1):
         lo = mask[2 * i - 1] if i > 0 else 0.0
         hi = mask[2 * i] if 2 * i < len(mask) else 360.0
         if hi - lo > 0.5:
             th = np.radians(np.linspace(lo, hi, 60))
-            ax.fill_between(th, lo_r, hi_r, facecolor="none", edgecolor="#c8c8c8",
-                            hatch="////", linewidth=0, zorder=2)
+            ax.fill_between(
+                th,
+                lo_r,
+                hi_r,
+                facecolor="none",
+                edgecolor="#c8c8c8",
+                hatch="////",
+                linewidth=0,
+                zorder=2,
+            )
     if relative:
-        ax.plot(np.linspace(0, 2 * np.pi, 361), np.zeros(361), color="#111111", lw=1.0, ls=(0, (4, 2)), zorder=4)
+        ax.plot(
+            np.linspace(0, 2 * np.pi, 361),
+            np.zeros(361),
+            color="#111111",
+            lw=1.0,
+            ls=(0, (4, 2)),
+            zorder=4,
+        )
     for state, kw in (
         ("masked", dict(marker="x", ms=3.5, mec=MASKED, mew=0.8, ls="none")),
         ("fail", dict(marker="o", ms=5, mfc="none", mec=FAIL, mew=1.0, ls="none")),
@@ -195,17 +272,33 @@ def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0, relative=False,
     n = {s: sum(r["state"] == s for r in mine) for s in ("pass", "fail", "masked")}
     if relative:
         near = sum(r["state"] == "pass" and abs(pos(r)) <= 0.5 for r in mine)
-        ax.set_title(f"{FREQ_LABEL.get(freq, freq)}\n{near} of {n['pass']} passed arcs within 0.5 m of the water level",
-                     fontsize=10, pad=12)
+        ax.set_title(
+            f"{FREQ_LABEL.get(freq, freq)}\n{near} of {n['pass']} passed arcs "
+            "within 0.5 m of the water level",
+            fontsize=10,
+            pad=12,
+        )
         ax.set_yticks([t for t in (-half, -half / 2, 0, half / 2, half)])
         ax.set_yticklabels([f"{t:+g}" if t else "0" for t in (-half, -half / 2, 0, half / 2, half)])
     else:
-        ax.set_title(f"{FREQ_LABEL.get(freq, freq)}\n{n['pass']} pass, {n['fail']} fail, "
-                     f"{n['masked']} outside mask", fontsize=10, pad=12)
+        ax.set_title(
+            f"{FREQ_LABEL.get(freq, freq)}\n{n['pass']} pass, {n['fail']} fail, "
+            f"{n['masked']} outside mask",
+            fontsize=10,
+            pad=12,
+        )
     ax.set_xticks(np.radians([0, 90, 180, 270]))
     ax.set_xticklabels(["N", "", "", ""], fontsize=9)
-    ax.set_rlabel_position(next((0.5 * (mask[2 * i - 1] + mask[2 * i]) for i in range(1, len(mask) // 2)
-                                 if mask[2 * i] - mask[2 * i - 1] > 20), 135))
+    ax.set_rlabel_position(
+        next(
+            (
+                0.5 * (mask[2 * i - 1] + mask[2 * i])
+                for i in range(1, len(mask) // 2)
+                if mask[2 * i] - mask[2 * i - 1] > 20
+            ),
+            135,
+        )
+    )
     ax.tick_params(axis="y", labelsize=7, colors="#555555")
     ax.grid(color="#bbbbbb", lw=0.4, alpha=0.6)
     return mesh, n
@@ -221,8 +314,12 @@ def fresnel_zone(wavelength, ele_deg, h):
     return b / s, b, (h + d / s) / np.tan(np.radians(ele_deg))
 
 
-US_BOXES = ((24.0, 50.0, -125.5, -66.0), (51.0, 72.0, -180.0, -129.0), (18.5, 22.5, -161.0, -154.5),
-            (17.5, 18.7, -67.5, -64.5))  # lat1, lat2, lon1, lon2: lower 48, Alaska, Hawaii, Puerto Rico
+US_BOXES = (
+    (24.0, 50.0, -125.5, -66.0),
+    (51.0, 72.0, -180.0, -129.0),
+    (18.5, 22.5, -161.0, -154.5),
+    (17.5, 18.7, -67.5, -64.5),
+)  # lat1, lat2, lon1, lon2: lower 48, Alaska, Hawaii, Puerto Rico
 
 
 def imagery_source(lat, lon, imagery="auto"):
@@ -235,7 +332,9 @@ def imagery_source(lat, lon, imagery="auto"):
     import contextily as cx
 
     if imagery == "auto":
-        imagery = "usgs" if any(a <= lat <= b and c <= lon <= d for a, b, c, d in US_BOXES) else "esri"
+        imagery = (
+            "usgs" if any(a <= lat <= b and c <= lon <= d for a, b, c, d in US_BOXES) else "esri"
+        )
     if imagery == "usgs":
         return cx.providers.USGS.USImagery, "Imagery: USGS, The National Map", 16
     if imagery == "esri":
@@ -243,7 +342,9 @@ def imagery_source(lat, lon, imagery="auto"):
     return None, "no imagery", None
 
 
-NAIP_URL = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage"
+NAIP_URL = (
+    "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage"
+)
 
 
 def naip_image(x1, y1, x2, y2, pixels=800):
@@ -255,12 +356,22 @@ def naip_image(x1, y1, x2, y2, pixels=800):
     import requests
     from PIL import Image
 
-    r = requests.get(NAIP_URL, timeout=60, params={"bbox": f"{x1},{y1},{x2},{y2}", "bboxSR": 3857, "imageSR": 3857,
-                                                   "size": f"{pixels},{pixels}", "format": "png", "f": "image"})
+    r = requests.get(
+        NAIP_URL,
+        timeout=60,
+        params={
+            "bbox": f"{x1},{y1},{x2},{y2}",
+            "bboxSR": 3857,
+            "imageSR": 3857,
+            "size": f"{pixels},{pixels}",
+            "format": "png",
+            "f": "image",
+        },
+    )
     if not r.ok or "image" not in r.headers.get("content-type", ""):
         return None
     img = np.asarray(Image.open(io.BytesIO(r.content)).convert("RGB"))
-    return img if img.std() > 2 else None   # one flat colour = no cover
+    return img if img.std() > 2 else None  # one flat colour = no cover
 
 
 def draw_site(ax, cfg, mask, rows, half_width_m=None, imagery="auto"):
@@ -285,22 +396,37 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None, imagery="auto"):
     ax.set_facecolor("#55606b")
     if provider is not None:
         try:
-            naip = naip_image(x0 - half * k, y0 - half * k, x0 + half * k, y0 + half * k) if "USGS" in source else None
+            naip = (
+                naip_image(x0 - half * k, y0 - half * k, x0 + half * k, y0 + half * k)
+                if "USGS" in source
+                else None
+            )
         except Exception:
             naip = None
         if naip is not None:
-            ax.imshow(naip, extent=(x0 - half * k, x0 + half * k, y0 - half * k, y0 + half * k), zorder=0)
+            ax.imshow(
+                naip, extent=(x0 - half * k, x0 + half * k, y0 - half * k, y0 + half * k), zorder=0
+            )
             source, provider = "Imagery: USDA NAIP, from USGS The National Map", None
     if provider is not None:
         try:
             # tiles for about 800 pixels across the image, not above the provider's best zoom
-            zoom = int(np.clip(np.floor(np.log2(40075016.7 * 800 / (256 * 2 * half * k))), 1, max_zoom))
+            zoom = int(
+                np.clip(np.floor(np.log2(40075016.7 * 800 / (256 * 2 * half * k))), 1, max_zoom)
+            )
             cx.add_basemap(ax, source=provider, attribution=False, zoom=zoom)
         except Exception as exc:  # no network: keep the geometry, say so
             source = f"no imagery ({type(exc).__name__})"
     th = np.radians(np.linspace(0, 360, 361))
     for d, ls in ((d_near, "-"), (d_far, "-")):
-        ax.plot(x0 + d * k * np.sin(th), y0 + d * k * np.cos(th), color="white", lw=1.0, ls=ls, alpha=0.9)
+        ax.plot(
+            x0 + d * k * np.sin(th),
+            y0 + d * k * np.cos(th),
+            color="white",
+            lw=1.0,
+            ls=ls,
+            alpha=0.9,
+        )
     # Light overlay: first Fresnel zones of every arc that passed, at six elevations along the arc
     t = np.linspace(0, 2 * np.pi, 60)
     for r in rows:
@@ -312,31 +438,61 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None, imagery="auto"):
             along, across = rc + sa * np.cos(t), sb * np.sin(t)
             east = along * np.sin(az) + across * np.cos(az)
             north = along * np.cos(az) - across * np.sin(az)
-            ax.fill(x0 + east * k, y0 + north * k, facecolor="#ffd27f", edgecolor="none", alpha=0.07)
+            ax.fill(
+                x0 + east * k, y0 + north * k, facecolor="#ffd27f", edgecolor="none", alpha=0.07
+            )
     wraps = (0 in mask or 0.0 in mask) and (360 in mask or 360.0 in mask)
     for i in range(0, len(mask) - 1, 2):
         for a in (mask[i], mask[i + 1]):
             if not (wraps and a in (0, 360)):
-                ax.plot([x0 + d_near * k * np.sin(np.radians(a)), x0 + d_far * k * np.sin(np.radians(a))],
-                        [y0 + d_near * k * np.cos(np.radians(a)), y0 + d_far * k * np.cos(np.radians(a))],
-                        color="white", lw=1.0)
+                ax.plot(
+                    [
+                        x0 + d_near * k * np.sin(np.radians(a)),
+                        x0 + d_far * k * np.sin(np.radians(a)),
+                    ],
+                    [
+                        y0 + d_near * k * np.cos(np.radians(a)),
+                        y0 + d_far * k * np.cos(np.radians(a)),
+                    ],
+                    color="white",
+                    lw=1.0,
+                )
     ax.plot(x0, y0, marker="v", ms=9, mfc=PASS, mec="white", mew=1.0)
     bar = 10 ** np.floor(np.log10(half))
     bar = bar * (5 if half / bar > 6 else 2 if half / bar > 2.5 else 1)
     bx, by = x0 - 0.9 * half * k, y0 - 0.9 * half * k
     ax.plot([bx, bx + bar * k], [by, by], color="white", lw=3, solid_capstyle="butt")
-    ax.text(bx + 0.5 * bar * k, by + 0.03 * half * k, f"{bar:g} m", color="white", ha="center",
-            va="bottom", fontsize=8)
+    ax.text(
+        bx + 0.5 * bar * k,
+        by + 0.03 * half * k,
+        f"{bar:g} m",
+        color="white",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+    )
     ax.text(x0, y0 + 0.93 * half * k, "N", color="white", ha="center", va="center", fontsize=9)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_aspect("equal")
     n_pass = sum(r["state"] == "pass" for r in rows)
-    ax.set_title(f"Site (height {rh:.1f} m, {cfg['e2']:g} to {cfg['e1']:g} deg)\n"
-                 f"rings: reach of first Fresnel zone, {d_near:.0f} to {d_far:.0f} m\n"
-                 f"shading: first Fresnel zones of the\n{n_pass} arcs that passed (most of the sensitivity)",
-                 fontsize=8.5, pad=8)
-    ax.text(0.99, 0.01, source, transform=ax.transAxes, ha="right", va="bottom", fontsize=6, color="white")
+    ax.set_title(
+        f"Site (height {rh:.1f} m, {cfg['e2']:g} to {cfg['e1']:g} deg)\n"
+        f"rings: reach of first Fresnel zone, {d_near:.0f} to {d_far:.0f} m\n"
+        f"shading: first Fresnel zones of the\n{n_pass} arcs that passed (most of the sensitivity)",
+        fontsize=8.5,
+        pad=8,
+    )
+    ax.text(
+        0.99,
+        0.01,
+        source,
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=6,
+        color="white",
+    )
 
 
 def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5, imagery="auto"):
@@ -344,7 +500,9 @@ def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5
     cfg, mask, rows = load_day(station, year, doy, freqs)
     t_data = time.time() - t0
     if rows and all(r["state"] == "masked" for r in rows):
-        raise ValueError(f"No gnssir record for {station} {year} day {doy:03d}. Run gnssir for this day first.")
+        raise ValueError(
+            f"No gnssir record for {station} {year} day {doy:03d}. Run gnssir for this day first."
+        )
     freqs = freqs or [f for f in cfg["freqs"] if any(r["freq"] == f for r in rows)]
     try:
         day_range = expected_heights(station, year, doy, rows)
@@ -352,20 +510,32 @@ def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5
         day_range = None
     # Which view comes first: where the surface moves by more than tidal_m in the day, the view
     # relative to the water level; elsewhere the reflector height.
-    views = ["height"] if day_range is None else (["water", "height"] if day_range > tidal_m else ["height", "water"])
+    views = (
+        ["height"]
+        if day_range is None
+        else (["water", "height"] if day_range > tidal_m else ["height", "water"])
+    )
     head = {
-        "height": ("HEIGHT ABOVE THE SURFACE",
-                   f"radius = reflector height: how far the antenna is above the reflecting surface,\n"
-                   f"{cfg['minH']:g} m at the inner edge to {cfg['maxH']:g} m at the outer edge"),
-        "water": ("DISTANCE FROM THE WATER LEVEL",
-                  "radius = height of the reflecting surface above (+) or below (-) the water level at the time of the pass;\n"
-                  "dashed ring = on the water. The water level comes from this station's passed arcs, not from a gauge."),
+        "height": (
+            "HEIGHT ABOVE THE SURFACE",
+            f"radius = reflector height: how far the antenna is above the reflecting surface,\n"
+            f"{cfg['minH']:g} m at the inner edge to {cfg['maxH']:g} m at the outer edge",
+        ),
+        "water": (
+            "DISTANCE FROM THE WATER LEVEL",
+            "radius = height of the reflecting surface above (+) or below (-) the water level at "
+            "the time of the pass;\n"
+            "dashed ring = on the water. The water level comes from this station's passed arcs, "
+            "not from a gauge.",
+        ),
     }
     ncol = len(freqs) + (1 if with_site else 0)
     nrow = len(views)
     fig = plt.figure(figsize=(4.6 * ncol, 6.6 * nrow + 0.8))
     top, bottom = 1 - 2.0 / (6.6 * nrow + 0.8), 0.9 / (6.6 * nrow + 0.8)
-    gs = fig.add_gridspec(nrow, ncol, left=0.03, right=0.98, top=top, bottom=bottom, hspace=0.62, wspace=0.18)
+    gs = fig.add_gridspec(
+        nrow, ncol, left=0.03, right=0.98, top=top, bottom=bottom, hspace=0.62, wspace=0.18
+    )
     if with_site:
         draw_site(fig.add_subplot(gs[0, 0]), cfg, mask, rows, imagery=imagery)
     counts = {}
@@ -381,19 +551,45 @@ def make_figure(station, year, doy, out, freqs=None, with_site=True, tidal_m=0.5
             vmax = mesh.norm.vmax
             cb.set_ticks([0, req, vmax])
             cb.set_ticklabels(["0", f"{req:g}\nrequired", f"{vmax:.0f}"])
-            cb.set_label("reflection strength (periodogram amplitude, volts/volts)\ntan = below the required amplitude, blue = above", fontsize=7.5)
+            cb.set_label(
+                "reflection strength (periodogram amplitude, volts/volts)\ntan = below the "
+                "required amplitude, blue = above",
+                fontsize=7.5,
+            )
             cb.ax.tick_params(labelsize=7)
             cb.ax.axvline(req, color="#222222", lw=1.2)
         # row heading, above the circles of this row
         box = gs[i, first].get_position(fig)
         inch = 1.0 / (6.6 * nrow + 0.8)
-        fig.text(box.x0, box.y1 + 1.22 * inch, head[view][0], fontsize=13, fontweight="bold", ha="left", va="bottom")
-        fig.text(box.x0, box.y1 + 0.72 * inch, head[view][1], fontsize=8.5, ha="left", va="bottom", color="#333333")
-    note = "" if day_range is None else f"   The water level moved by {day_range:.1f} m on this day."
+        fig.text(
+            box.x0,
+            box.y1 + 1.22 * inch,
+            head[view][0],
+            fontsize=13,
+            fontweight="bold",
+            ha="left",
+            va="bottom",
+        )
+        fig.text(
+            box.x0,
+            box.y1 + 0.72 * inch,
+            head[view][1],
+            fontsize=8.5,
+            ha="left",
+            va="bottom",
+            color="#333333",
+        )
+    note = (
+        "" if day_range is None else f"   The water level moved by {day_range:.1f} m on this day."
+    )
     fig.suptitle(
-        f"{station.upper()}  {year} day {doy:03d}    angle = azimuth; elevation {cfg['e1']:g} to {cfg['e2']:g} deg.{note}\n"
-        "filled = arc passed gnssir checks;  open = failed;  x = outside the azimuth mask (hatched)",
-        fontsize=10, y=0.995)
+        f"{station.upper()}  {year} day {doy:03d}    angle = azimuth; elevation {cfg['e1']:g} to "
+        f"{cfg['e2']:g} deg.{note}\n"
+        "filled = arc passed gnssir checks;  open = failed;  x = outside the azimuth mask "
+        "(hatched)",
+        fontsize=10,
+        y=0.995,
+    )
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=130)
     plt.close(fig)
@@ -406,11 +602,20 @@ def main():
     ap.add_argument("--station", required=True)
     ap.add_argument("--year", type=int, required=True)
     ap.add_argument("--doy", type=int, required=True)
-    ap.add_argument("--freqs", help="comma list of gnssrefl frequency codes; default: all in the station file")
+    ap.add_argument(
+        "--freqs", help="comma list of gnssrefl frequency codes; default: all in the station file"
+    )
     ap.add_argument("--out")
     ap.add_argument("--no_site", action="store_true", help="leave out the site image")
-    ap.add_argument("--imagery", default="auto", choices=["auto", "usgs", "esri", "none"],
-                    help="site image: USGS (United States, public domain), Esri (worldwide), auto (default) or none")
+    ap.add_argument(
+        "--imagery",
+        default="auto",
+        choices=["auto", "usgs", "esri", "none"],
+        help=(
+            "site image: USGS (United States, public domain), Esri (worldwide), "
+            "auto (default) or none"
+        ),
+    )
     a = ap.parse_args()
     freqs = [int(x) for x in a.freqs.split(",")] if a.freqs else None
     out = a.out or f"{a.station.lower()}_{a.year}_{a.doy:03d}_periodogram_circle.png"

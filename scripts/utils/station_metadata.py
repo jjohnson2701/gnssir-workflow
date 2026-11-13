@@ -9,7 +9,6 @@ helper functions for accessing antenna heights, reference sources,
 and other station-specific metadata.
 """
 
-import json
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 from functools import lru_cache

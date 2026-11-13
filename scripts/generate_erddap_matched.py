@@ -18,7 +18,6 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import os
 import pandas as pd
@@ -208,11 +207,13 @@ def match_spline_to_reference(
     matched = matched.dropna(subset=["wl"]).reset_index(drop=True)
 
     # Rename columns for consistency with existing output format
-    matched = matched.rename(columns={
-        "datetime": "spline_datetime",
-        "wse_ortho_m": "spline_wse",
-        "wl": f"{ref_name}_wl",
-    })
+    matched = matched.rename(
+        columns={
+            "datetime": "spline_datetime",
+            "wse_ortho_m": "spline_wse",
+            "wl": f"{ref_name}_wl",
+        }
+    )
 
     if len(matched) == 0:
         logger.warning("No spline points matched to reference within tolerance")
@@ -403,8 +404,8 @@ def main():
 
     # Check local workspace first, then REFL_CODE env var
     local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
-    refl_code_base = local_refl if local_refl.exists() else Path(
-        os.environ.get("REFL_CODE", str(local_refl))
+    refl_code_base = (
+        local_refl if local_refl.exists() else Path(os.environ.get("REFL_CODE", str(local_refl)))
     )
 
     spline_path = find_spline_output(station_lower, refl_code_base)
@@ -417,7 +418,10 @@ def main():
         logger.info(f"Loaded {len(spline_df)} spline points for matching")
 
         spline_matched = match_spline_to_reference(
-            spline_df, ref_df, ref_name, args.max_time_diff,
+            spline_df,
+            ref_df,
+            ref_name,
+            args.max_time_diff,
         )
 
         if len(spline_matched) > 0:
@@ -426,12 +430,8 @@ def main():
             logger.info(f"Saved spline-matched to: {spline_output}")
 
             # Compute spline statistics
-            spline_corr = spline_matched["spline_dm"].corr(
-                spline_matched[f"{ref_name}_dm"]
-            )
-            spline_rmse = np.sqrt(
-                (spline_matched["spline_residual"] ** 2).mean()
-            )
+            spline_corr = spline_matched["spline_dm"].corr(spline_matched[f"{ref_name}_dm"])
+            spline_rmse = np.sqrt((spline_matched["spline_residual"] ** 2).mean())
             spline_stats = {
                 "correlation": spline_corr,
                 "rmse": spline_rmse,

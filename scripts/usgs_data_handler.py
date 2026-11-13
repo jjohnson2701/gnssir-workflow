@@ -1,7 +1,6 @@
 # ABOUTME: USGS gauge discovery, configuration lookup, and water level data retrieval
 # ABOUTME: Consolidates gauge finding, progressive search, and data fetching into one module
 
-import json
 import logging
 import pandas as pd
 from pathlib import Path

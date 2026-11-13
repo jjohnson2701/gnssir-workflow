@@ -6,7 +6,8 @@
 #
 # Install options:
 #   pip install -e .              # Core only
-#   pip install -e .[dashboard]   # Core + Dash dashboard
+#   pip install -e .[figures]     # Core + site image for the circular plot
+#   pip install -e .[earthscope]  # Core + EarthScope RINEX 3 download
 #   pip install -e .[animation]   # Core + animation generation
 #   pip install -e .[dev]         # Core + development tools
 #   pip install -e .[all]         # Everything

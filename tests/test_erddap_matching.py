@@ -21,18 +21,22 @@ class TestMatchSplineToReference:
 
         # Spline at 30-min intervals
         spline_times = pd.date_range("2024-01-01", periods=48, freq="30min", tz="UTC")
-        spline_df = pd.DataFrame({
-            "datetime": spline_times,
-            "wse_ortho_m": np.sin(np.linspace(0, 4 * np.pi, 48)) + 1.0,
-            "datum": "orthometric_EGM96",
-        })
+        spline_df = pd.DataFrame(
+            {
+                "datetime": spline_times,
+                "wse_ortho_m": np.sin(np.linspace(0, 4 * np.pi, 48)) + 1.0,
+                "datum": "orthometric_EGM96",
+            }
+        )
 
         # Reference at 6-min intervals
         ref_times = pd.date_range("2024-01-01", periods=240, freq="6min", tz="UTC")
-        ref_df = pd.DataFrame({
-            "datetime": ref_times,
-            "wl": np.sin(np.linspace(0, 4 * np.pi, 240)) + 1.0,
-        })
+        ref_df = pd.DataFrame(
+            {
+                "datetime": ref_times,
+                "wl": np.sin(np.linspace(0, 4 * np.pi, 240)) + 1.0,
+            }
+        )
 
         matched = match_spline_to_reference(spline_df, ref_df, ref_name="test")
         assert "spline_wse" in matched.columns
@@ -47,17 +51,21 @@ class TestMatchSplineToReference:
 
         spline_times = pd.date_range("2024-01-01", periods=48, freq="30min", tz="UTC")
         signal = np.sin(np.linspace(0, 4 * np.pi, 48))
-        spline_df = pd.DataFrame({
-            "datetime": spline_times,
-            "wse_ortho_m": signal + 10.0,  # offset from reference
-            "datum": "orthometric_EGM96",
-        })
+        spline_df = pd.DataFrame(
+            {
+                "datetime": spline_times,
+                "wse_ortho_m": signal + 10.0,  # offset from reference
+                "datum": "orthometric_EGM96",
+            }
+        )
 
         ref_times = pd.date_range("2024-01-01", periods=240, freq="6min", tz="UTC")
-        ref_df = pd.DataFrame({
-            "datetime": ref_times,
-            "wl": np.sin(np.linspace(0, 4 * np.pi, 240)) + 1.0,
-        })
+        ref_df = pd.DataFrame(
+            {
+                "datetime": ref_times,
+                "wl": np.sin(np.linspace(0, 4 * np.pi, 240)) + 1.0,
+            }
+        )
 
         matched = match_spline_to_reference(spline_df, ref_df, ref_name="test")
         assert "spline_dm" in matched.columns
@@ -74,21 +82,28 @@ class TestMatchSplineToReference:
 
         # Spline covering 24 hours
         spline_times = pd.date_range("2024-01-01", periods=48, freq="30min", tz="UTC")
-        spline_df = pd.DataFrame({
-            "datetime": spline_times,
-            "wse_ortho_m": np.ones(48),
-            "datum": "orthometric_EGM96",
-        })
+        spline_df = pd.DataFrame(
+            {
+                "datetime": spline_times,
+                "wse_ortho_m": np.ones(48),
+                "datum": "orthometric_EGM96",
+            }
+        )
 
         # Reference only for first 6 hours
         ref_times = pd.date_range("2024-01-01", periods=60, freq="6min", tz="UTC")
-        ref_df = pd.DataFrame({
-            "datetime": ref_times,
-            "wl": np.ones(60),
-        })
+        ref_df = pd.DataFrame(
+            {
+                "datetime": ref_times,
+                "wl": np.ones(60),
+            }
+        )
 
         matched = match_spline_to_reference(
-            spline_df, ref_df, ref_name="test", max_time_diff_min=30,
+            spline_df,
+            ref_df,
+            ref_name="test",
+            max_time_diff_min=30,
         )
         # Only spline points within first ~6.5 hours should match
         assert len(matched) < 48
