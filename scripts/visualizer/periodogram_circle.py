@@ -31,7 +31,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm  # noqa: E402
 
 FREQ_LABEL = {
     1: "GPS L1", 2: "GPS L2", 20: "GPS L2C", 5: "GPS L5",
@@ -39,7 +39,9 @@ FREQ_LABEL = {
     201: "Galileo E1", 205: "Galileo E5a", 206: "Galileo E6", 207: "Galileo E5b", 208: "Galileo E5",
     302: "BeiDou B1", 306: "BeiDou B3", 307: "BeiDou B2",
 }
-STRENGTH = LinearSegmentedColormap.from_list("strength", ["#f4f6f8", "#9ecae1", "#3182bd", "#08306b"])
+# Diverging about the required amplitude: tan below the limit, neutral at it, blue above.
+STRENGTH = LinearSegmentedColormap.from_list(
+    "strength", ["#b89b72", "#e4d8c4", "#f5f5f5", "#9ecae1", "#3182bd", "#08306b"])
 PASS, FAIL, MASKED = "#e6550d", "#444444", "#9a9a9a"
 
 
@@ -100,8 +102,10 @@ def load_day(station, year, doy, freqs=None):
             rh = float(res["RH"])
         else:  # no height from gnssir: use the periodogram peak, or the inner edge if no periodogram
             rh = float(px[np.argmax(pz)]) if pz is not None else float(cfg["minH"])
+        step = max(1, len(data["ele"]) // 40)
         rows.append({"freq": int(meta["freq"]), "sat": int(meta["sat"]), "az": float(meta["az_min_ele"]),
-                     "px": px, "pz": pz, "rh": rh, "state": state})
+                     "px": px, "pz": pz, "rh": rh, "state": state,
+                     "ele": np.asarray(data["ele"])[::step], "azi": np.asarray(data["azi"])[::step]})
     return cfg, mask, rows
 
 
@@ -123,7 +127,8 @@ def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0):
     ax.set_facecolor("white")
     vmax = max(2.0 * req_amp, np.nanpercentile(grid, 99.5) if np.isfinite(grid).any() else 1.0)
     mesh = ax.pcolormesh(np.radians(edges), np.append(h, h[-1] + 0.02), np.ma.masked_invalid(grid),
-                         cmap=STRENGTH, vmin=0, vmax=vmax, shading="flat", rasterized=True)
+                         cmap=STRENGTH, norm=TwoSlopeNorm(vmin=0, vcenter=req_amp, vmax=vmax),
+                         shading="flat", rasterized=True)
     # Azimuths that the station file leaves out: light hatch
     for i in range(len(mask) // 2 + 1):
         lo = mask[2 * i - 1] if i > 0 else 0.0
@@ -175,9 +180,17 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     th = np.radians(np.linspace(0, 360, 361))
     for d, ls in ((d_near, "-"), (d_far, "-")):
         ax.plot(x0 + d * k * np.sin(th), y0 + d * k * np.cos(th), color="white", lw=1.0, ls=ls, alpha=0.9)
+    # Light overlay: ground track of the reflection point of every arc that passed
+    for r in rows:
+        if r["state"] == "pass":
+            d = r["rh"] / np.tan(np.radians(r["ele"]))
+            az = np.radians(r["azi"])
+            ax.plot(x0 + d * k * np.sin(az), y0 + d * k * np.cos(az), color="#ffd27f", lw=0.9, alpha=0.35,
+                    solid_capstyle="round")
+    wraps = (0 in mask or 0.0 in mask) and (360 in mask or 360.0 in mask)
     for i in range(0, len(mask) - 1, 2):
         for a in (mask[i], mask[i + 1]):
-            if not (mask[i] == 0 and mask[-1] == 360 and a in (0, 360)):
+            if not (wraps and a in (0, 360)):
                 ax.plot([x0 + d_near * k * np.sin(np.radians(a)), x0 + d_far * k * np.sin(np.radians(a))],
                         [y0 + d_near * k * np.cos(np.radians(a)), y0 + d_far * k * np.cos(np.radians(a))],
                         color="white", lw=1.0)
@@ -192,8 +205,11 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_aspect("equal")
-    ax.set_title(f"Site\nrings: reflections from {d_near:.0f} to {d_far:.0f} m\n"
-                 f"(height {rh:.1f} m, elevation {cfg['e2']:g} to {cfg['e1']:g} deg)", fontsize=9, pad=8)
+    n_pass = sum(r["state"] == "pass" for r in rows)
+    ax.set_title(f"Site\nrings: reflections from {d_near:.0f} to {d_far:.0f} m "
+                 f"(height {rh:.1f} m, {cfg['e2']:g} to {cfg['e1']:g} deg)\n"
+                 f"light lines: reflection tracks of the {n_pass} arcs that passed (signals shown)",
+                 fontsize=8.5, pad=8)
     ax.text(0.99, 0.01, source, transform=ax.transAxes, ha="right", va="bottom", fontsize=6, color="white")
 
 
@@ -213,11 +229,11 @@ def make_figure(station, year, doy, out, freqs=None, with_site=True):
         ax = fig.add_subplot(1, ncol, col, projection="polar")
         req = cfg["reqAmp"][cfg["freqs"].index(f)] if f in cfg["freqs"] else cfg["reqAmp"][0]
         mesh, counts[f] = draw_circle(ax, rows, cfg, mask, f, req)
-        cb = fig.colorbar(mesh, ax=ax, orientation="horizontal", fraction=0.045, pad=0.08)
-        cb.set_label("reflection strength (periodogram amplitude, volts/volts)", fontsize=7.5)
+        cb = fig.colorbar(mesh, ax=ax, orientation="horizontal", fraction=0.045, pad=0.13)
+        cb.set_label("reflection strength (periodogram amplitude, volts/volts)\ntan = below the required amplitude, blue = above", fontsize=7.5)
         cb.ax.tick_params(labelsize=7)
-        cb.ax.axvline(req, color=PASS, lw=1.5)
-        cb.ax.text(req, 1.25, "required", color=PASS, fontsize=7, ha="center", va="bottom",
+        cb.ax.axvline(req, color="#222222", lw=1.2)
+        cb.ax.text(req, 1.25, f"required {req:g}", color="#222222", fontsize=7, ha="center", va="bottom",
                    transform=cb.ax.get_xaxis_transform())
         col += 1
     fig.suptitle(
