@@ -105,7 +105,8 @@ def load_day(station, year, doy, freqs=None):
         step = max(1, len(data["ele"]) // 40)
         rows.append({"freq": int(meta["freq"]), "sat": int(meta["sat"]), "az": float(meta["az_min_ele"]),
                      "px": px, "pz": pz, "rh": rh, "state": state,
-                     "ele": np.asarray(data["ele"])[::step], "azi": np.asarray(data["azi"])[::step]})
+                     "ele": np.asarray(data["ele"])[::step], "azi": np.asarray(data["azi"])[::step],
+                     "wavelength": 2.0 * float(meta["cf"])})
     return cfg, mask, rows
 
 
@@ -157,6 +158,16 @@ def draw_circle(ax, rows, cfg, mask, freq, req_amp, bin_deg=5.0):
     return mesh, n
 
 
+def fresnel_zone(wavelength, ele_deg, h):
+    """First Fresnel zone on a flat horizontal surface (Larson and Nievinski 2013, appendix;
+    same formulas as gnssrefl refl_zones.FresnelZone). Returns semi-major a, semi-minor b,
+    and centre distance R, in metres. a lies along the satellite azimuth."""
+    d = 0.5 * wavelength
+    s = np.sin(np.radians(ele_deg))
+    b = np.sqrt(2 * d * h / s + (d / s) ** 2)
+    return b / s, b, (h + d / s) / np.tan(np.radians(ele_deg))
+
+
 def draw_site(ax, cfg, mask, rows, half_width_m=None):
     """Image of the site with the reflection distances and the azimuth mask."""
     import contextily as cx
@@ -164,9 +175,13 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
 
     passed = [r["rh"] for r in rows if r["state"] == "pass"]
     rh = float(np.median(passed)) if passed else 0.5 * (cfg["minH"] + cfg["maxH"])
-    d_far = rh / np.tan(np.radians(cfg["e1"]))
-    d_near = rh / np.tan(np.radians(cfg["e2"]))
-    half = half_width_m or 1.25 * d_far
+    # Rings: inner and outer reach of the first Fresnel zone over the elevation range,
+    # for the longest wavelength shown.
+    lam = max([r["wavelength"] for r in rows] or [0.2548])
+    a1, _, r1 = fresnel_zone(lam, cfg["e1"], rh)
+    a2, _, r2 = fresnel_zone(lam, cfg["e2"], rh)
+    d_far, d_near = r1 + a1, max(r2 - a2, 0.0)
+    half = half_width_m or 1.12 * d_far
     x0, y0 = Transformer.from_crs(4326, 3857, always_xy=True).transform(cfg["lon"], cfg["lat"])
     k = 1.0 / np.cos(np.radians(cfg["lat"]))  # web-mercator metres per ground metre
     ax.set_xlim(x0 - half * k, x0 + half * k)
@@ -180,13 +195,18 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     th = np.radians(np.linspace(0, 360, 361))
     for d, ls in ((d_near, "-"), (d_far, "-")):
         ax.plot(x0 + d * k * np.sin(th), y0 + d * k * np.cos(th), color="white", lw=1.0, ls=ls, alpha=0.9)
-    # Light overlay: ground track of the reflection point of every arc that passed
+    # Light overlay: first Fresnel zones of every arc that passed, at six elevations along the arc
+    t = np.linspace(0, 2 * np.pi, 60)
     for r in rows:
-        if r["state"] == "pass":
-            d = r["rh"] / np.tan(np.radians(r["ele"]))
-            az = np.radians(r["azi"])
-            ax.plot(x0 + d * k * np.sin(az), y0 + d * k * np.cos(az), color="#ffd27f", lw=0.9, alpha=0.35,
-                    solid_capstyle="round")
+        if r["state"] != "pass":
+            continue
+        for j in np.linspace(0, len(r["ele"]) - 1, 6).astype(int):
+            sa, sb, rc = fresnel_zone(r["wavelength"], r["ele"][j], r["rh"])
+            az = np.radians(r["azi"][j])
+            along, across = rc + sa * np.cos(t), sb * np.sin(t)
+            east = along * np.sin(az) + across * np.cos(az)
+            north = along * np.cos(az) - across * np.sin(az)
+            ax.fill(x0 + east * k, y0 + north * k, facecolor="#ffd27f", edgecolor="none", alpha=0.07)
     wraps = (0 in mask or 0.0 in mask) and (360 in mask or 360.0 in mask)
     for i in range(0, len(mask) - 1, 2):
         for a in (mask[i], mask[i + 1]):
@@ -206,9 +226,9 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     ax.set_yticks([])
     ax.set_aspect("equal")
     n_pass = sum(r["state"] == "pass" for r in rows)
-    ax.set_title(f"Site\nrings: reflections from {d_near:.0f} to {d_far:.0f} m "
-                 f"(height {rh:.1f} m, {cfg['e2']:g} to {cfg['e1']:g} deg)\n"
-                 f"light lines: reflection tracks of the {n_pass} arcs that passed (signals shown)",
+    ax.set_title(f"Site (height {rh:.1f} m, {cfg['e2']:g} to {cfg['e1']:g} deg)\n"
+                 f"rings: reach of first Fresnel zone, {d_near:.0f} to {d_far:.0f} m\n"
+                 f"shading: Fresnel zones of the {n_pass} arcs that passed",
                  fontsize=8.5, pad=8)
     ax.text(0.99, 0.01, source, transform=ax.transAxes, ha="right", va="bottom", fontsize=6, color="white")
 
