@@ -228,7 +228,7 @@ def draw_site(ax, cfg, mask, rows, half_width_m=None):
     n_pass = sum(r["state"] == "pass" for r in rows)
     ax.set_title(f"Site (height {rh:.1f} m, {cfg['e2']:g} to {cfg['e1']:g} deg)\n"
                  f"rings: reach of first Fresnel zone, {d_near:.0f} to {d_far:.0f} m\n"
-                 f"shading: Fresnel zones of the {n_pass} arcs that passed",
+                 f"shading: first Fresnel zones of the {n_pass} arcs that passed (most of the sensitivity)",
                  fontsize=8.5, pad=8)
     ax.text(0.99, 0.01, source, transform=ax.transAxes, ha="right", va="bottom", fontsize=6, color="white")
 

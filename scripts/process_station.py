@@ -183,7 +183,10 @@ def validate_configuration(station: str, station_config: dict, project_root: Pat
         else:
             found = shutil.which(tool_path)
             if not found:
-                issues.append(f"Tool '{tool_path}' not found in PATH")
+                issues.append(
+                    f"Tool '{tool_path}' not found in PATH. Activate the environment that has gnssrefl "
+                    "(for example: conda activate <your gnssrefl environment>) and run again."
+                )
 
     # Check REFL_CODE workspace is writable
     refl_code = os.environ.get(

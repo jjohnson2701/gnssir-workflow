@@ -380,7 +380,7 @@ def render_cached_basemaps(
     ax_coast.set_ylim(ec_y_min, ec_y_max)
 
     try:
-        ctx.add_basemap(ax_coast, source=ctx.providers.CartoDB.Positron, zoom=7)
+        ctx.add_basemap(ax_coast, source=ctx.providers.Esri.WorldGrayCanvas, zoom=7)
     except Exception:
         ax_coast.set_facecolor("#c6e2ff")
 
@@ -1477,7 +1477,7 @@ def create_frame(
         ax_coast.imshow(coast_img, extent=ext, aspect="auto", zorder=0)
     else:
         try:
-            ctx.add_basemap(ax_coast, source=ctx.providers.CartoDB.Positron, zoom=7)
+            ctx.add_basemap(ax_coast, source=ctx.providers.Esri.WorldGrayCanvas, zoom=7)
         except Exception:
             ax_coast.set_facecolor("#c6e2ff")
 

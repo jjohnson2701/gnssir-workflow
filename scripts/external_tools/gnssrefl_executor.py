@@ -6,6 +6,7 @@ import logging
 import subprocess
 import shutil
 import threading
+import time
 from pathlib import Path
 
 
@@ -22,6 +23,7 @@ def execute_rinex2snr(
     archive=None,
     orbit=None,
     input_file=None,
+    retry=True,
 ):
     """
     Execute rinex2snr to extract SNR data from a RINEX file (version 2.11 or 3).
@@ -146,6 +148,16 @@ def execute_rinex2snr(
                 f"Expected SNR file not found at {expected_snr_file} or {expected_snr_file_gz}"
             )
             day_logger.error("rinex2snr returned success (code 0) but no SNR file was created")
+            if retry:
+                # Seen when two runs fetch the same orbit file at the same time: wait, then try once more
+                day_logger.warning("Retrying rinex2snr once after 20 s")
+                time.sleep(20)
+                return execute_rinex2snr(
+                    rinex2snr_exe_path, station_4char_lower, year, doy_padded, refl_code_base,
+                    orbits_base, logs_dir, snr_code=snr_code,
+                    rinex2_filename_override=rinex2_filename_override, archive=archive, orbit=orbit,
+                    input_file=input_file, retry=False,
+                )
             return False
 
     except Exception as e:
