@@ -104,8 +104,8 @@ Three stations: GLBX (Gustavus, Alaska; elevation 2 to 5 degrees; 6 m tide; gaug
 - **Inverse method.** A wider elevation range helps: at GLBX 0.071 m with 2 to 5 degrees and 0.041 m with 2 to 10 degrees. Use all signals together.
 - **L2 signal.** A RINEX 2 file made from a RINEX 3 file can hold the legacy L2 signal, with an SNR 7 to 19 dB below the civil signal. `scripts/station_check.py` shows which signal a file holds.
 - **BeiDou.** The numbers in the table are without BeiDou. With BeiDou, SC02 has 514 arcs a day in place of 350, the same slope (0.999), and a scatter of 0.108 m. BeiDou alone gives a slope of 1.001 and a scatter of 0.113 m.
-- **Offsets between signals.** At SC02 the mean height of a signal depends on its carrier band, not on the satellite system: fourteen signals fall in four groups, 15 cm apart from the L1 band to the L5 band. `subdaily` removes such offsets. The cause is not known.
-- **Wind.** At SC02 the heights of single arcs are not worse in strong wind (0.111 m scatter below 2 m/s, 0.095 m above 8 m/s). The inverse method is a little worse on windy days (1.6 to 2.2 cm).
+- **Offsets between signals.** At SC02 the mean height of a signal depends on its carrier band, not on the satellite system: fourteen signals fall in four groups, 15 cm apart from the L1 band to the L5 band. At GLBX the order is reversed (about 9 cm the other way) and at FORA the offset is small; those two stations have another antenna type. Williams and Nievinski (2017) report an offset of the SC02 size and order at 11 sites and name the antenna as the likely cause. `subdaily` removes such offsets. Compare signals only after an offset per signal is removed.
+- **Wind.** At SC02 the scatter of single arcs does not depend on wind, when each signal has its own offset (0.084 m below 2 m/s, 0.082 m at 6 to 8 m/s). What changes is the mean height of the L1-band signals: it moves by 5 cm from calm to windy conditions, and the other bands do not move. With one offset for all signals this looks like less scatter in wind; we made that error first. The inverse method is a little worse on windy days (1.6 to 2.2 cm).
 
 ## 6. Limits and open points
 

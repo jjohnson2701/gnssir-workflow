@@ -91,6 +91,6 @@ python -m scripts.station_page --spec my_page.yaml --out sc02_results.html
 | Inverse method, 5-minute values | 1.8 cm |
 | Daily mean, all signals | 0.8 cm |
 | Daily mean, GPS L1 only | 2.5 cm |
-| Wind up to 8 m/s | no loss of arcs or precision |
+| Wind up to 8 m/s | no loss of arcs or precision; the L1-band heights move by about 5 cm |
 
 Friday Harbor is an easy station. At a station with short arcs at very low elevation (Gustavus, Alaska: 2 to 5 degrees) one height scatters by 0.20 m, the peak-to-noise limit decides the result, and the inverse method needs a wider elevation range than the periodogram. See [Parameters](params_reference.md).
