@@ -84,3 +84,17 @@ def test_wind_figure_with_no_usable_bin(tmp_path):
     rows = [{"label": "0 to 2", "lo": 0, "n": 5, "share": 1.0, "scatter_m": None, "outliers": None, "pk": None}]
     assert sf.wind_figure(tmp_path / "w.png", rows) is False
     assert not (tmp_path / "w.png").exists()
+
+
+def test_wind_table_offset_per_signal_removes_a_signal_offset():
+    t, rh = _tide(900)
+    freq = np.where(np.arange(len(t)) % 2 == 0, 1, 5)
+    rh = rh + np.where(freq == 1, 0.10, -0.05)          # two signals, 15 cm apart
+    gauge_t = np.linspace(99, 104, 4000)
+    gauge = -1.5 * np.sin(2 * np.pi * gauge_t / 0.5175)
+    wind = np.full(len(gauge_t), 1.0)
+    args = (t, rh, np.full(len(t), 3.0), np.zeros(len(t)), gauge_t, gauge, gauge_t, wind)
+    one = sf.wind_table(*args)[0]["scatter_m"]
+    per_signal = sf.wind_table(*args, freq=freq)[0]["scatter_m"]
+    assert per_signal == pytest.approx(0.05, abs=0.01)
+    assert one > 1.4 * per_signal

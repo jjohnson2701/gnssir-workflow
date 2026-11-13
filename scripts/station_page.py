@@ -163,7 +163,7 @@ def station_block(sta, spec, top, refl_code, fig_dir):
         out["tuning"] = [r for r in rows if r["limit"] == 0.0 or abs(r["limit"] - cfg["PkNoise"]) < 1e-9]
     if gauge and spec.get("wind_csv"):
         wind = read_gauge(spec["wind_csv"], spec.get("wind_time", "time"), spec.get("wind_speed", "speed"), year)
-        out["wind"] = wind_table(t, d[:, 2], d[:, 13], d[:, 12], gauge[0], gauge[1], wind[0], wind[1])
+        out["wind"] = wind_table(t, d[:, 2], d[:, 13], d[:, 12], gauge[0], gauge[1], wind[0], wind[1], freq=d[:, 10])
         out["wind_png"] = str(Path(fig_dir, f"{sta}_wind.png"))
         if not wind_figure(out["wind_png"], out["wind"]):
             del out["wind"], out["wind_png"]   # no wind bin has enough arcs: leave the block out
@@ -223,7 +223,7 @@ def render(blocks, top):
                 f'<tr><td>{r["label"]} m/s</td><td class="n">{r["n"]}</td><td colspan="3">too few arcs</td></tr>' for r in b["wind"])
             wnd = (f'<h3>Wind</h3><div class="pair"><figure>{_img(b["wind_png"], "Scatter of single heights against the gauge, and share of arcs, by wind speed")}'
                    f'<figcaption>Days {top["doy"]:03d} to {top["doy_end"]:03d}. Wind: {e(sp.get("wind_name", "wind sensor"))}, at the time of each arc. '
-                   'Scatter of single heights against the gauge, from one fit over all arcs.</figcaption></figure>'
+                   'Scatter of single heights against the gauge, from one fit over all arcs with one offset per signal.</figcaption></figure>'
                    '<div class="tw"><table><thead><tr><th>Wind</th><th>Arcs</th><th>Scatter</th><th>Above 0.30 m</th><th>Peak-to-noise</th></tr></thead>'
                    f'<tbody>{trs}</tbody></table></div></div>')
         checks = ""

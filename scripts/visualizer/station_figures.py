@@ -161,10 +161,13 @@ def tuning_figure(out, rows, limit_in_use, min_kept=0.03):
 WIND_BINS = ((0, 2), (2, 4), (4, 6), (6, 8), (8, 99))
 
 
-def wind_table(t, rh, pk, edotf, gauge_t, gauge_wl, wind_t, wind_speed, bins=WIND_BINS, min_arcs=100):
+def wind_table(t, rh, pk, edotf, gauge_t, gauge_wl, wind_t, wind_speed, bins=WIND_BINS, min_arcs=100, freq=None):
     """Height quality against wind speed at the time of each arc.
 
-    One fit of (-RH) on the gauge with the height-rate term gives the residuals. Returns a
+    One fit of (-RH) on the gauge with the height-rate term gives the residuals. With `freq`
+    (the signal code of each arc) the fit has one offset per signal. Use it: signals differ in
+    mean height, and at SC02 the offset of the L1 band changes with wind, which looks like a
+    change of scatter when all signals share one offset. Returns a
     list of dicts per wind bin: label, n, share, scatter_m (robust), outliers (share of
     residuals above 0.30 m) and pk (median peak-to-noise); bins with fewer than `min_arcs`
     arcs have scatter_m = None.
@@ -176,7 +179,12 @@ def wind_table(t, rh, pk, edotf, gauge_t, gauge_wl, wind_t, wind_speed, bins=WIN
         return []
     wl = np.interp(t, gauge_t, gauge_wl)
     rate = (np.interp(t + 300 / 86400, gauge_t, gauge_wl) - np.interp(t - 300 / 86400, gauge_t, gauge_wl)) / 600 * 3600
-    A = np.c_[wl, edotf * rate, np.ones(len(t))]
+    if freq is None:
+        offsets = np.ones((len(t), 1))
+    else:
+        codes = np.asarray(freq)[ok]
+        offsets = (codes[:, None] == np.unique(codes)[None, :]).astype(float)   # one column per signal
+    A = np.c_[wl, edotf * rate, offsets]
     res = -rh - A @ np.linalg.lstsq(A, -rh, rcond=None)[0]
     res = res - np.median(res)
     wind = np.interp(t, wind_t, wind_speed)
