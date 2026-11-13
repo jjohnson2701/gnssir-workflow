@@ -83,7 +83,7 @@ When no gauge is near the station, `scripts/station_check.py` gives the scatter 
 
 ## 4. Visual checks
 
-- **Circular plot** (`scripts/visualizer/periodogram_circle.py`): the periodograms of one day by azimuth, in two views. *Height above the surface* shows the reflector height. *Distance from the water level* shows each reflection against the water level at the time of the pass, so reflections from the water lie on one ring at any tide and fixed reflectors do not. Use it to set the azimuth mask.
+- **Circular plot** (`scripts/visualizer/periodogram_circle.py`): the periodograms of one day by azimuth, in two views. *Height above the surface* shows the reflector height. *Distance from the water level* shows each reflection against the water level at the time of the pass, so reflections from the water lie on one ring at any tide and fixed reflectors do not. Use it to set the azimuth mask. The principle is published (Santamaría-Gómez et al. 2015: a stack of spectra sharpens for the sea after the tide is removed, and for fixed reflectors before); the display by azimuth is ours. Three limits: it needs a tide range much larger than the height resolution of one arc; floating objects such as boats and docks follow the water and look like water; and the water level comes from the station's own arcs, so it is not independent of them.
 - **Station page** (`scripts/station_page.py`): for each station the circular plot, the water level series against the gauge, the effect of the peak-to-noise limit, and the height quality against wind speed when wind data exist.
 
 ## 5. What the tests in 2024 showed
@@ -103,6 +103,8 @@ Three stations: GLBX (Gustavus, Alaska; elevation 2 to 5 degrees; 6 m tide; gaug
 - **Peak-to-noise limit.** At GLBX a limit of 2.0 lowers the scatter from 0.29 m to 0.20 m and brings the slope from 0.954 to 1.000. At SC02 the limit changes little.
 - **Inverse method.** A wider elevation range helps: at GLBX 0.071 m with 2 to 5 degrees and 0.041 m with 2 to 10 degrees. Use all signals together.
 - **L2 signal.** A RINEX 2 file made from a RINEX 3 file can hold the legacy L2 signal, with an SNR 7 to 19 dB below the civil signal. `scripts/station_check.py` shows which signal a file holds.
+- **BeiDou.** The numbers in the table are without BeiDou. With BeiDou, SC02 has 514 arcs a day in place of 350, the same slope (0.999), and a scatter of 0.108 m. BeiDou alone gives a slope of 1.001 and a scatter of 0.113 m.
+- **Offsets between signals.** At SC02 the mean height of a signal depends on its carrier band, not on the satellite system: fourteen signals fall in four groups, 15 cm apart from the L1 band to the L5 band. `subdaily` removes such offsets. The cause is not known.
 - **Wind.** At SC02 the heights of single arcs are not worse in strong wind (0.111 m scatter below 2 m/s, 0.095 m above 8 m/s). The inverse method is a little worse on windy days (1.6 to 2.2 cm).
 
 ## 6. Limits and open points
@@ -128,6 +130,7 @@ Three stations: GLBX (Gustavus, Alaska; elevation 2 to 5 degrees; 6 m tide; gaug
 - Bennett, G. G. (1982). The calculation of astronomical refraction in marine navigation. *Journal of Navigation*, 35, 255–259.
 - Larson, K. M. (2024). gnssrefl: an open source software package in python for GNSS interferometric reflectometry applications. *GPS Solutions*, 28, 165.
 - Larson, K. M., Ray, R. D., Williams, S. D. P. (2017). A 10-year comparison of water levels measured with a geodetic GPS receiver versus a conventional tide gauge. *Journal of Atmospheric and Oceanic Technology*, 34, 295–307. (Friday Harbor, station SC02.)
+- Santamaría-Gómez, A., Watson, C., Gravelle, M., King, M., Wöppelmann, G. (2015). Levelling co-located GNSS and tide gauge stations using GNSS reflectometry. *Journal of Geodesy*, 89, 241–258.
 - Strandberg, J., Hobiger, T., Haas, R. (2016). Improving GNSS-R sea level determination through inverse modeling of SNR data. *Radio Science*, 51, 1286–1296.
 - Williams, S. D. P., Nievinski, F. G. (2017). Tropospheric delays in ground-based GNSS multipath reflectometry — experimental evidence from coastal sites. *Journal of Geophysical Research: Solid Earth*, 122, 2310–2327.
 - gnssrefl documentation: https://gnssrefl.readthedocs.io

@@ -32,7 +32,7 @@ One job for the whole period. Do not run several `gnssir` jobs on one station at
 gnssir sc02 2024 60 -doy_end 91
 ```
 
-Expect about 360 heights a day.
+Expect about 510 heights a day (about 350 without BeiDou).
 
 ## 4. Station checks
 
@@ -84,7 +84,7 @@ python -m scripts.station_page --spec my_page.yaml --out sc02_results.html
 
 | Quantity | Value at SC02 |
 |---|---|
-| Heights a day | about 360 |
+| Heights a day | about 510 with BeiDou, about 350 without |
 | Scatter of one height against the gauge | 0.10 m |
 | Slope against the gauge, refraction correction on | 0.998 |
 | Slope with no refraction correction | 0.985 |
