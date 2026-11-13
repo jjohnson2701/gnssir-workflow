@@ -13,8 +13,10 @@ What this script adds to `invsnr`:
   - days with an incomplete SNR file are left out, and the period is run in segments of
     whole days between them;
   - `invsnr` refuses to run when the gap between arcs is longer than the knot spacing.
-    The script runs it with the `risky` option and then removes every output time that
-    has no periodogram arc within `support_hours` on both sides.
+    The script first runs it inside that rule. Only if it stops, the script runs it again
+    with the `risky` option, reports that, and removes every output time that
+    has no periodogram arc within `support_hours` on both sides. A wider elevation range
+    for the inverse method (`inverse_elevation` in config/stations.yaml) removes most gaps.
 
 Run `gnssir` for the days first: the arc times come from its result files.
 
@@ -81,11 +83,12 @@ def snr_sizes(refl_code, station, year):
     return sizes
 
 
-def write_inverse_settings(refl_code, station, cfg, azimuth):
+def write_inverse_settings(refl_code, station, cfg, azimuth, elevation=None):
     """Write $REFL_CODE/input/<station>.inv.json from the station file (same content as invsnr_input)."""
     inv = {
         "station": station, "lat": cfg["lat"], "lon": cfg["lon"], "ht": cfg["ht"],
-        "rhlims": [cfg["minH"], cfg["maxH"]], "elvlims": [cfg["e1"], cfg["e2"]],
+        "rhlims": [cfg["minH"], cfg["maxH"]],
+        "elvlims": [float(elevation[0]), float(elevation[1])] if elevation else [cfg["e1"], cfg["e2"]],
         "azilims": [float(azimuth[0]), float(azimuth[1])], "pktnlim": cfg["PkNoise"],
         "precision": cfg.get("desiredP", 0.005), "l2c_only": True,
     }
@@ -95,28 +98,36 @@ def write_inverse_settings(refl_code, station, cfg, azimuth):
 
 
 def run(station, year, doy, doy_end, signal="L1+L2+L5", knot_hours=3, decimate=10, delta_out=300,
-        support_hours=1.5, refl_code=None, work_dir=None):
+        support_hours=1.5, refl_code=None, work_dir=None, elevation=None):
     """Run the inverse method. Returns (table, info). table columns: doy_fraction, mjd, rh."""
     refl_code = refl_code or os.environ["REFL_CODE"]
     station = station.lower()
     cfg = json.loads(Path(refl_code, "input", f"{station}.json").read_text())
     azimuth = widest_azimuth_range(cfg.get("azval2", [0, 360]))
-    write_inverse_settings(refl_code, station, cfg, azimuth)
+    write_inverse_settings(refl_code, station, cfg, azimuth, elevation)
     segments = whole_day_segments(snr_sizes(refl_code, station, year), doy, doy_end)
     arcs = load_results(refl_code, station, year, doy, doy_end)
     arcs = arcs[(arcs[:, 5] >= azimuth[0]) & (arcs[:, 5] <= azimuth[1])]
     arc_t = arcs[:, 1] + arcs[:, 4] / 24.0
-    parts, failed = [], []
+    parts, failed, risky = [], [], []
     work = Path(work_dir or Path(refl_code, "Files", station, "inverse"))
     for first, last in segments:
         seg = work / f"seg{first:03d}"
         seg.mkdir(parents=True, exist_ok=True)
         cmd = ["invsnr", station, str(year), str(first), signal, "-doy_end", str(last), "-dec", str(decimate),
-               "-plt", "F", "-risky", "T", "-knot_space", str(int(knot_hours)), "-delta_out", str(delta_out),
+               "-plt", "F", "-knot_space", str(int(knot_hours)), "-delta_out", str(delta_out),
                "-outfile_name", "out", "-outfile_type", "txt"]
-        with open(seg / "run.out", "w") as log:
-            subprocess.run(cmd, cwd=seg, stdout=log, stderr=subprocess.STDOUT, check=False)
         out = seg / "out.txt"
+        if out.exists():
+            out.unlink()
+        # first inside the gap rule of invsnr; only if it stops, with its "risky" option
+        for extra in ([], ["-risky", "T"]):
+            with open(seg / ("run_risky.out" if extra else "run.out"), "w") as log:
+                subprocess.run(cmd + extra, cwd=seg, stdout=log, stderr=subprocess.STDOUT, check=False)
+            if out.exists() and out.stat().st_size > 0:
+                if extra:
+                    risky.append((first, last))
+                break
         if not out.exists() or out.stat().st_size == 0:
             failed.append((first, last))
             continue
@@ -126,7 +137,8 @@ def run(station, year, doy, doy_end, signal="L1+L2+L5", knot_hours=3, decimate=1
     table = np.vstack(parts) if parts else np.empty((0, 3))
     inside = (table[:, 2] > cfg["minH"]) & (table[:, 2] < cfg["maxH"])
     keep = supported(table[:, 0], arc_t, support_hours) & inside
-    info = {"azimuth": azimuth, "segments": segments, "failed_segments": failed, "epochs": int(len(table)),
+    info = {"azimuth": azimuth, "elevation": elevation or (cfg["e1"], cfg["e2"]), "segments": segments,
+            "failed_segments": failed, "risky_segments": risky, "epochs": int(len(table)),
             "kept": int(keep.sum()), "outside_window": int((~inside).sum()), "arcs": int(len(arcs)), "work_dir": str(work)}
     return table[keep], info
 
@@ -140,13 +152,27 @@ def main(argv=None):
     p.add_argument("--signal", default="L1+L2+L5", help="L1, L2, L5, L1+L2, L1+L5 or L1+L2+L5; single signals can be unstable")
     p.add_argument("--knot_hours", type=int, default=3, help="spline knot spacing, whole hours")
     p.add_argument("--support_hours", type=float, default=1.5)
+    p.add_argument("--elevation", type=float, nargs=2, metavar=("LOW", "HIGH"),
+                   help="elevation range for the inverse method; default: inverse_elevation of config/stations.yaml, else the station file")
     p.add_argument("--out", required=True)
     a = p.parse_args(argv)
     if not os.environ.get("REFL_CODE"):
         raise SystemExit("Set REFL_CODE to the gnssrefl workspace.")
-    table, info = run(a.station, a.year, a.doy, a.doy_end, a.signal, a.knot_hours, support_hours=a.support_hours)
+    elevation = a.elevation
+    if elevation is None:
+        try:
+            from scripts.utils.station_config import load_station
+            elevation = load_station(a.station.upper()).get("inverse_elevation")
+        except Exception:
+            elevation = None
+    table, info = run(a.station, a.year, a.doy, a.doy_end, a.signal, a.knot_hours, support_hours=a.support_hours,
+                      elevation=elevation)
     np.savetxt(a.out, table, delimiter=",", header="doy_fraction,mjd,rh_m", comments="", fmt=["%.6f", "%.6f", "%.4f"])
-    print(f"Azimuth range used: {info['azimuth'][0]:g} to {info['azimuth'][1]:g} deg ({info['arcs']} periodogram arcs there).")
+    print(f"Azimuth range used: {info['azimuth'][0]:g} to {info['azimuth'][1]:g} deg ({info['arcs']} periodogram arcs there). "
+          f"Elevation {info['elevation'][0]:g} to {info['elevation'][1]:g} deg.")
+    if info["risky_segments"]:
+        print("Segments that needed the risky option (gaps longer than the knot spacing): "
+              + ", ".join(f"{f:03d}-{l:03d}" for f, l in info["risky_segments"]))
     print("Segments of whole days: " + ", ".join(f"{f:03d}-{l:03d}" for f, l in info["segments"]))
     if info["failed_segments"]:
         print("Segments with no output: " + ", ".join(f"{f:03d}-{l:03d}" for f, l in info["failed_segments"]))

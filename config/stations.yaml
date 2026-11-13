@@ -2,6 +2,8 @@
 #   gnssrefl_json  the gnssrefl settings file of the station (position, elevation, heights, limits)
 #   data_source    where the RINEX files come from: nps (default), earthscope, nrcan
 #   orbit_type     optional gnssrefl orbit choice
+#   inverse_elevation  optional [low, high] elevation range (deg) for the inverse method, when it should be
+#                  wider than the periodogram range of the gnssrefl file (more arcs, fewer gaps)
 #   reference      the gauge to compare with: usgs:<site>, coops:<id>, coops:auto, erddap:<dataset_id>, none
 # Details of the references (names, distances, datums) are in config/references/<STATION>.json.
 # That file is written by: python scripts/find_reference_stations.py --station <STATION> --update-config
@@ -22,6 +24,7 @@ NKAR:
 
 GLBX:
   gnssrefl_json: config/glbx.json
+  inverse_elevation: [2, 10]
   reference: erddap:edu_ua_glos_obs_station_bartlett_cove_ak   # Bartlett Cove, AK
 
 DESO:
