@@ -265,6 +265,13 @@ def process_single_day(
             result["errors"].append(f"Exception during rinex2snr step: {e}")
             return result
 
+    # Translation pass only: the orchestrator runs gnssir afterwards, one day at a time and in
+    # order. gnssir reads the SNR files of the neighbour days (arcs that cross midnight) and
+    # unpacks and repacks SNR files while it runs, so it must not run for several days at once.
+    if skip_options.get("translate_only", False):
+        result["status"] = "translated"
+        return result
+
     # Step 4: Run gnssir
     gnssir_success = True  # Default for skipping case
     if skip_options.get("skip_rh", False):

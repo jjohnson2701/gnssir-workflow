@@ -63,32 +63,46 @@ def process_station_parallel(
             "skip_quicklook": False,
         }
 
-    # Generate tasks list for parallel processing
-    task_args_list = []
-    for doy in range(doy_range[0], doy_range[1] + 1):
-        task_args = (
-            station_config,
-            year,
-            doy,
-            tool_paths,
-            project_root,
-            refl_code_base,
-            orbits_base,
-            skip_options,
-        )
-        task_args_list.append(task_args)
+    # Two passes. Pass 1 (parallel): download and translate each day to an SNR file.
+    # Pass 2 (one day at a time, in order): gnssir. gnssir reads the SNR files of the
+    # neighbour days for arcs that cross midnight, and it unpacks and repacks SNR files
+    # while it runs. Running it for several days at once cuts midnight arcs and can
+    # destroy SNR files.
+    days = list(range(doy_range[0], doy_range[1] + 1))
 
-    # Create multiprocessing pool
-    logging.info(f"Starting parallel processing using {num_cores} cores")
+    def args_for(doy, options):
+        return (station_config, year, doy, tool_paths, project_root, refl_code_base, orbits_base, options)
 
-    # Process in parallel
-    task_results = []
+    logging.info(f"Pass 1: download and translation using {num_cores} cores")
+    translate_options = {**skip_options, "translate_only": True}
+    first_pass = []
     try:
         with multiprocessing.Pool(processes=num_cores) as pool:
-            # Map tasks to pool
-            task_results = pool.map(process_single_day_wrapper, task_args_list)
+            first_pass = pool.map(process_single_day_wrapper, [args_for(d, translate_options) for d in days])
     except Exception as e:
-        logging.error(f"Exception during parallel processing: {e}")
+        logging.error(f"Exception during parallel translation: {e}")
+
+    logging.info("Pass 2: gnssir, one day at a time")
+    want_quicklook = not skip_options.get("skip_quicklook", False)
+    height_options = {**skip_options, "skip_download": True, "skip_snr": True, "skip_quicklook": True}
+    task_results = []
+    for doy, first in zip(days, first_pass):
+        if first.get("status") != "translated":
+            task_results.append(first)  # failed in pass 1; keep its errors
+            continue
+        try:
+            task_results.append(process_single_day_wrapper(args_for(doy, height_options)))
+        except Exception as e:
+            logging.error(f"Exception in gnssir for day {doy}: {e}")
+    if want_quicklook:
+        logging.info("Pass 3: quickLook plots")
+        plot_options = {**height_options, "skip_rh": True, "skip_quicklook": False}
+        for doy, res in zip(days, task_results):
+            if res.get("status") == "success":
+                try:
+                    process_single_day_wrapper(args_for(doy, plot_options))
+                except Exception as e:
+                    logging.error(f"Exception in quickLook for day {doy}: {e}")
 
     # Process results, aggregate data, and generate plots
     results = finalize_station_processing(
