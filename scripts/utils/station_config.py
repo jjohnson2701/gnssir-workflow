@@ -88,7 +88,7 @@ def _expand(station: str, entry: Dict[str, Any], root: Path, references_dir: Pat
         full["latitude_deg"] = g.get("lat")
         full["longitude_deg"] = g.get("lon")
         full["ellipsoidal_height_m"] = g.get("ht")
-    for key in ("data_source", "orbit_type", "inverse_elevation"):
+    for key in ("data_source", "orbit_type", "inverse_elevation", "rinex3_name"):
         if entry.get(key) is not None:
             full[key] = entry[key]
 

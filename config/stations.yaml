@@ -4,6 +4,7 @@
 #   orbit_type     optional gnssrefl orbit choice
 #   inverse_elevation  optional [low, high] elevation range (deg) for the inverse method, when it should be
 #                  wider than the periodogram range of the gnssrefl file (more arcs, fewer gaps)
+#   rinex3_name    optional 9-character RINEX 3 name for EarthScope stations (default <STATION>00USA)
 #   reference      the gauge to compare with: usgs:<site>, coops:<id>, coops:auto, erddap:<dataset_id>, none
 # Details of the references (names, distances, datums) are in config/references/<STATION>.json.
 # That file is written by: python scripts/find_reference_stations.py --station <STATION> --update-config

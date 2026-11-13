@@ -186,11 +186,32 @@ def process_single_day(
     # downloaded file is given to rinex2snr as it is (-input_file).
     rinex_input_file = rinex3_file_path if data_source == "nps" else None
 
+    # EarthScope: take the multi-GNSS RINEX 3 file from the EarthScope archive and give it to
+    # rinex2snr as a file. `rinex2snr -archive unavco` was seen to hang with no message.
+    # If the archive has no RINEX 3 file for the day, the old route is used.
+    earthscope_unpacked = None
+    snr_exists = check_file_exists(snr_file_path, min_size_bytes=MIN_SNR_SIZE_BYTES) or check_file_exists(
+        snr_file_path_gz, min_size_bytes=MIN_SNR_SIZE_BYTES)
+    if data_source == "earthscope" and not snr_exists:
+        try:
+            from ..earthscope_rinex3 import download as es_download, unpack as es_unpack
+
+            long_name = (station_config.get("rinex3_name") or f"{station_id.upper()}00USA").upper()
+            packed = es_download(long_name, year, doy, rinex3_dir)
+            if packed is not None:
+                earthscope_unpacked = es_unpack(packed, rinex3_dir)
+                rinex_input_file = earthscope_unpacked
+                day_logger.info(f"Step 1: EarthScope RINEX 3 file {packed.name}")
+            else:
+                day_logger.warning("No EarthScope RINEX 3 file for this day; using rinex2snr -archive unavco")
+        except Exception as e:
+            day_logger.warning(f"EarthScope RINEX 3 download failed ({e}); using rinex2snr -archive unavco")
+
     # Step 3: Run rinex2snr
     # Non-NPS sources: pass data_source as -archive flag to rinex2snr.
     # "earthscope" is an alias for "unavco" (backward compatibility).
     # Orbit type defaults to "gnss3" but can be overridden per station.
-    if data_source == "nps":
+    if data_source == "nps" or earthscope_unpacked is not None:
         rinex2snr_archive = None
         rinex2snr_orbit = station_config.get("orbit_type", "gnss")
     else:
@@ -264,6 +285,9 @@ def process_single_day(
             day_logger.error(f"Exception during rinex2snr step: {e}")
             result["errors"].append(f"Exception during rinex2snr step: {e}")
             return result
+
+    if earthscope_unpacked is not None:
+        Path(earthscope_unpacked).unlink(missing_ok=True)  # the packed download is kept
 
     # Translation pass only: the orchestrator runs gnssir afterwards, one day at a time and in
     # order. gnssir reads the SNR files of the neighbour days (arcs that cross midnight) and

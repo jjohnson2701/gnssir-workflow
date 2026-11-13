@@ -65,21 +65,31 @@ def download(station9, year, doy, out_dir, interval="15S", tries=3):
     return None
 
 
-def translate(crx_gz, work_dir, snr_type=66):
-    """Unpack one compact RINEX 3 file and run rinex2snr on it. Returns True on success."""
+def unpack(crx_gz, work_dir):
+    """Unpack one compact RINEX 3 file (.crx.gz) to a RINEX 3 observation file. Returns its path."""
     work_dir = Path(work_dir)
     crx = work_dir / Path(crx_gz).name[:-3]
     with gzip.open(crx_gz, "rb") as src, open(crx, "wb") as dst:
         shutil.copyfileobj(src, dst)
-    rnx = crx.with_suffix(".rnx")
     try:
         subprocess.run([crx2rnx_path(), "-f", str(crx)], check=True, cwd=work_dir)
-        done = subprocess.run(["rinex2snr", "-input_file", str(rnx), "-snr", str(snr_type)], cwd=work_dir,
+    finally:
+        crx.unlink(missing_ok=True)
+    return crx.with_suffix(".rnx")
+
+
+def translate(crx_gz, work_dir, snr_type=66, orbit="gnss"):
+    """Unpack one compact RINEX 3 file and run rinex2snr on it. Returns True on success.
+
+    orbit "gnss" gives multi-GNSS orbits, BeiDou included; the rinex2snr default leaves BeiDou out.
+    """
+    rnx = unpack(crx_gz, work_dir)
+    try:
+        done = subprocess.run(["rinex2snr", "-input_file", str(rnx), "-snr", str(snr_type), "-orb", orbit], cwd=work_dir,
                               capture_output=True, text=True)
         return "SUCCESS" in done.stdout
     finally:
-        for f in (crx, rnx):
-            f.unlink(missing_ok=True)
+        rnx.unlink(missing_ok=True)
 
 
 def main(argv=None):
@@ -90,6 +100,7 @@ def main(argv=None):
     p.add_argument("--doy", type=int, required=True)
     p.add_argument("--doy_end", type=int)
     p.add_argument("--interval", default="15S", help="sample interval in the file name (default 15S)")
+    p.add_argument("--orbit", default="gnss", help="rinex2snr orbit choice (default gnss: all systems, BeiDou included)")
     p.add_argument("--keep", default="earthscope_rinex3", help="folder for the downloaded files")
     a = p.parse_args(argv)
     for var in ("REFL_CODE", "ORBITS"):
@@ -104,7 +115,7 @@ def main(argv=None):
         if f is None:
             missing.append(doy)
             continue
-        if translate(f, keep):
+        if translate(f, keep, orbit=a.orbit):
             ok += 1
         else:
             failed.append(doy)

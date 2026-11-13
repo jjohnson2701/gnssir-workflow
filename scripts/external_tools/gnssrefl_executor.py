@@ -109,6 +109,7 @@ def execute_rinex2snr(
             shell=False,
             cwd=cwd_for_rinex2snr,
             env=my_env,
+            timeout=1800,  # a download inside rinex2snr was seen to hang with no message
         )
 
         # Log the direct output from the command
