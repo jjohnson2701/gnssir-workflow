@@ -1,0 +1,33 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "priority_param_codes": [
+      "00065",
+      "62610",
+      "62611",
+      "62620"
+    ],
+    "target_usgs_site": null,
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "Unknown",
+    "notes": "Kenai Fjords National Park, Alaska - reference station TBD"
+  },
+  "external_data_sources": {
+    "noaa_coops": {
+      "enabled": true,
+      "search_radius_km": 100,
+      "preferred_stations": [],
+      "data_products": [
+        "predictions",
+        "water_level"
+      ],
+      "datum": "NAVD88",
+      "time_zone": "gmt",
+      "interval": "h"
+    },
+    "ndbc_buoys": {
+      "enabled": false
+    }
+  }
+}

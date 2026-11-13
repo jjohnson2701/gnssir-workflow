@@ -1,0 +1,59 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "target_usgs_site": null,
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "Unknown"
+  },
+  "external_data_sources": {
+    "hydat": {
+      "enabled": true,
+      "primary_reference": true,
+      "station_id": "02GC027",
+      "station_name": "Lake Erie at Port Stanley",
+      "distance_km": 0.5,
+      "datum": "IGLD85",
+      "notes": "Co-located HYDAT gauge on Lake Erie"
+    },
+    "noaa_coops": {
+      "enabled": true,
+      "preferred_stations": [
+        "9063038",
+        "9063063"
+      ],
+      "nearest_station": {
+        "id": "9063038",
+        "name": "Erie, PA",
+        "distance_km": 109,
+        "latitude": 42.154,
+        "longitude": -80.076
+      },
+      "data_products": [
+        "water_level"
+      ],
+      "datum": "IGLD85"
+    },
+    "ec_climate": {
+      "enabled": true,
+      "station_id": 50093,
+      "climate_id": "6144473",
+      "station_name": "London A",
+      "distance_km": 40,
+      "latitude": 43.03,
+      "longitude": -81.15,
+      "notes": "Port Stanley EC station (4677) ended 1993; London A is nearest active"
+    },
+    "dfo_iwls": {
+      "iwls_id": "5cebf1e43d0f4a073c4bc3c8",
+      "code": "12400",
+      "name": "Port Stanley",
+      "lat": 42.657883,
+      "lon": -81.213833,
+      "distance_km": 0.0,
+      "wlo_recent_rows": 3360,
+      "wlf_recent_rows": 0,
+      "wlp_recent_rows": -1
+    }
+  }
+}

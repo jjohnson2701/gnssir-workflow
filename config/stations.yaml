@@ -1,0 +1,112 @@
+# Station settings for gnssir-workflow. One short block per station.
+#   gnssrefl_json  the gnssrefl settings file of the station (position, elevation, heights, limits)
+#   data_source    where the RINEX files come from: nps (default), earthscope, nrcan
+#   orbit_type     optional gnssrefl orbit choice
+#   reference      the gauge to compare with: usgs:<site>, coops:<id>, coops:auto, erddap:<dataset_id>, none
+# Details of the references (names, distances, datums) are in config/references/<STATION>.json.
+# That file is written by: python scripts/find_reference_stations.py --station <STATION> --update-config
+
+FORA:
+  gnssrefl_json: config/fora_params.json
+  reference: usgs:02043433
+
+UMNQ:
+  gnssrefl_json: config/umnq.json
+  data_source: earthscope
+  reference: none
+
+NKAR:
+  gnssrefl_json: config/nkar.json
+  data_source: earthscope
+  reference: erddap:global_hourly_fast   # Nuuk, Godthaab
+
+GLBX:
+  gnssrefl_json: config/glbx.json
+  reference: erddap:edu_ua_glos_obs_station_bartlett_cove_ak   # Bartlett Cove, AK
+
+DESO:
+  gnssrefl_json: config/deso.json
+  reference: none
+
+VALR:
+  gnssrefl_json: config/valr.json
+  reference: usgs:16229000
+
+MDAI:
+  gnssrefl_json: config/mdai.json
+  reference: usgs:0148472405
+
+KEFJ:
+  gnssrefl_json: config/kefj.json
+  reference: coops:auto
+
+NIAQ:
+  gnssrefl_json: config/niaq.json
+  data_source: earthscope
+  orbit_type: gnss
+  reference: erddap:global_hourly_fast   # Upernavik harbour
+
+LRSK:
+  gnssrefl_json: config/lrsk.json
+  data_source: earthscope
+  reference: none
+
+CBRG:
+  gnssrefl_json: config/cbrg.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9052058   # Rochester
+
+CLWD:
+  gnssrefl_json: config/clwd.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9075065   # Alpena
+
+GOD2:
+  gnssrefl_json: config/god2.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9014098   # Fort Gratiot
+
+KNGV:
+  gnssrefl_json: config/kngv.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9063079   # Marblehead
+
+MCHN:
+  gnssrefl_json: config/mchn.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9099004   # Point Iroquois
+
+PARY:
+  gnssrefl_json: config/pary.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9075065   # Alpena
+
+PSTA:
+  gnssrefl_json: config/psta.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9063038   # Erie, PA
+
+PWEL:
+  gnssrefl_json: config/pwel.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9052058   # Rochester
+
+ROSS:
+  gnssrefl_json: config/ross.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9099018   # Marquette C.G.
+
+TOBY:
+  gnssrefl_json: config/toby.json
+  data_source: nrcan
+  orbit_type: nav
+  reference: coops:9075065   # Alpena

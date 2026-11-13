@@ -1,0 +1,63 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "target_usgs_site": null,
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "Unknown"
+  },
+  "external_data_sources": {
+    "hydat": {
+      "enabled": true,
+      "primary_reference": true,
+      "station_id": "02BD004",
+      "station_name": "Lake Superior at Michipicoten Harbour",
+      "distance_km": 0.5,
+      "datum": "IGLD85",
+      "notes": "Co-located HYDAT gauge on Lake Superior"
+    },
+    "noaa_coops": {
+      "enabled": true,
+      "preferred_stations": [
+        "9099004"
+      ],
+      "nearest_station": {
+        "id": "9099004",
+        "name": "Point Iroquois",
+        "distance_km": 165,
+        "latitude": 46.484,
+        "longitude": -84.631
+      },
+      "data_products": [
+        "water_level"
+      ],
+      "datum": "IGLD85"
+    },
+    "ec_climate": {
+      "enabled": true,
+      "station_id": 52998,
+      "climate_id": "6059413",
+      "station_name": "Wawa A",
+      "distance_km": 12,
+      "latitude": 47.97,
+      "longitude": -84.79,
+      "secondary": {
+        "station_id": 51958,
+        "climate_id": "6054425",
+        "station_name": "Lake Superior Provincial Park",
+        "distance_km": 28
+      }
+    },
+    "dfo_iwls": {
+      "iwls_id": "5cebf1e43d0f4a073c4bc37e",
+      "code": "10750",
+      "name": "Michipicoten",
+      "lat": 47.961326,
+      "lon": -84.900844,
+      "distance_km": 0.01,
+      "wlo_recent_rows": 3360,
+      "wlf_recent_rows": 0,
+      "wlp_recent_rows": -1
+    }
+  }
+}

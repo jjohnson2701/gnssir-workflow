@@ -6,7 +6,7 @@
 GNSS-IR Station Processing Script
 
 This script runs the complete processing workflow for a station based on
-configuration in stations_config.json:
+configuration in config/stations.yaml:
 
 1. Core GNSS-IR Processing (RINEX download, conversion, SNR extraction, RH retrieval)
 1.5. Subdaily Spline Analysis (RHdot correction, IF bias removal, spline fitting)
@@ -46,7 +46,7 @@ import scripts.results_handler as results_handler  # noqa: E402
 DEFAULT_GNSSREFL_WORKSPACE = Path.home() / "gnssir_ws"
 DEFAULT_REFL_CODE_BASE = DEFAULT_GNSSREFL_WORKSPACE / "refl_code"
 DEFAULT_ORBITS_BASE = DEFAULT_GNSSREFL_WORKSPACE / "orbits"
-DEFAULT_STATIONS_CONFIG_PATH = project_root / "config" / "stations_config.json"
+DEFAULT_STATIONS_CONFIG_PATH = project_root / "config" / "stations.yaml"
 DEFAULT_TOOL_PATHS_CONFIG_PATH = project_root / "config" / "tool_paths.json"
 DEFAULT_MAIN_LOG_FILE = project_root / "run_log.txt"
 
@@ -56,8 +56,9 @@ logger = logging.getLogger(__name__)
 
 def load_config(station: str, config_path: Path) -> dict:
     """Load station configuration."""
-    with open(config_path) as f:
-        config = json.load(f)
+    from scripts.utils.station_config import load_stations
+
+    config = load_stations(config_path)
 
     if station not in config:
         available = list(config.keys())
@@ -73,7 +74,13 @@ def get_reference_source(station_config: dict) -> tuple:
     Returns:
         tuple: (source_name, reason) - e.g., ('erddap', 'primary_reference=true')
     """
-    # Check ERDDAP first (highest priority)
+    # The `reference:` line of stations.yaml decides, when it is present
+    chosen = station_config.get("reference")
+    if isinstance(chosen, dict) and chosen.get("source"):
+        return (chosen["source"], f"reference: {chosen['source']}:{chosen.get('id')}"
+                if chosen["source"] != "none" else "reference: none")
+
+    # Old single-file format: ERDDAP first (highest priority)
     erddap = station_config.get("erddap", {})
     if not erddap:
         erddap = station_config.get("external_data_sources", {}).get("erddap", {})
@@ -265,7 +272,7 @@ Examples:
     )
     parser.add_argument("--skip_comparison", action="store_true", help="Skip reference comparison")
     parser.add_argument("--skip_viz", action="store_true", help="Skip visualization scripts")
-    parser.add_argument("--config", type=str, default=None, help="Path to stations_config.json")
+    parser.add_argument("--config", type=str, default=None, help="Path to stations.yaml")
     parser.add_argument(
         "--validate", action="store_true", help="Validate configuration and exit without processing"
     )
@@ -310,7 +317,7 @@ Examples:
     if args.config:
         config_path = Path(args.config)
     else:
-        config_path = project_root / "config" / "stations_config.json"
+        config_path = project_root / "config" / "stations.yaml"
 
     python_exe = sys.executable
 
@@ -366,10 +373,10 @@ Examples:
         print("To find and configure a reference station, run:")
         print(f"  python scripts/find_reference_stations.py --station {args.station}")
         print()
-        print("Then add the reference to config/stations_config.json under:")
-        print("  - 'usgs_comparison.target_usgs_site' for USGS gauges")
-        print("  - 'external_data_sources.noaa_coops' for CO-OPS tide gauges")
-        print("  - 'erddap' for ERDDAP data sources")
+        print("Then set the reference line in config/stations.yaml, for example:")
+        print("  reference: usgs:02043433")
+        print("  reference: coops:8651370")
+        print("  reference: erddap:<dataset_id>")
         print()
         print("Processing will continue, but Phase 2 (Reference Matching) will be skipped.")
         print("=" * 70)

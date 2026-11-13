@@ -574,9 +574,9 @@ def load_data(station: str, year: int, results_dir: Path):
                 print(f"Applied RHdot+IF corrections to {n_matched}/{len(df)} retrievals")
 
     # Get station config
-    config_file = project_root / "config" / "stations_config.json"
-    with open(config_file) as f:
-        config = json.load(f)
+    from scripts.utils.station_config import load_stations
+
+    config = load_stations()
 
     station_config = config[station]
     antenna_height = station_config["ellipsoidal_height_m"]

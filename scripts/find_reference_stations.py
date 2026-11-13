@@ -65,11 +65,9 @@ def load_station_config(station: str, config_path: Path) -> Optional[dict]:
     if not config_path.exists():
         logger.error(f"Config file not found: {config_path}")
         return None
+    from scripts.utils.station_config import load_station
 
-    with open(config_path) as f:
-        config = json.load(f)
-
-    return config.get(station)
+    return load_station(station, config_path)
 
 
 def search_usgs_gauges(lat: float, lon: float, radius_km: float = 100) -> List[ReferenceStation]:
@@ -492,42 +490,10 @@ def print_results(results: List[ReferenceStation], gnss_station: str = None):
         print("=" * 80)
         print("CONFIGURATION INSTRUCTIONS")
         print("-" * 60)
-        print("Add the following to your station in config/stations_config.json:")
+        ref_line = {"USGS": "usgs", "CO-OPS": "coops"}.get(best.source, "erddap") + f":{best.station_id}"
+        print("Set this line for the station in config/stations.yaml:")
         print()
-
-        if best.source == "USGS":
-            print(
-                f"""  "usgs_comparison": {{
-    "target_usgs_site": "{best.station_id}",
-    "usgs_gauge_stated_datum": "{best.datum}",
-    "distance_km": {best.distance_km}
-  }}"""
-            )
-        elif best.source == "CO-OPS":
-            print(
-                f"""  "external_data_sources": {{
-    "noaa_coops": {{
-      "enabled": true,
-      "target_station": "{best.station_id}",
-      "station_name": "{best.station_name}",
-      "distance_km": {best.distance_km}
-    }}
-  }}"""
-            )
-        elif "ERDDAP" in best.source:
-            server_id = best.source.split("-")[-1] if "-" in best.source else "AOOS"
-            is_colocated = best.distance_km < 1
-            print(
-                f"""  "erddap": {{
-    "enabled": true,
-    "dataset_id": "{best.station_id}",
-    "station_name": "{best.station_name}",
-    "distance_km": {best.distance_km},
-    "server": "{server_id}"\
-{', ' + chr(10) + '    "primary_reference": true' if is_colocated else ''}
-  }}"""
-            )
-
+        print(f"  reference: {ref_line}")
         print()
         print("Or run with --update-config to auto-update the config file:")
         station_arg = gnss_station or "STATION"
@@ -537,69 +503,65 @@ def print_results(results: List[ReferenceStation], gnss_station: str = None):
         print()
 
 
-def update_station_config(station: str, best_ref: ReferenceStation, config_path: Path) -> bool:
-    """Update station configuration with best reference."""
-    logger.info(f"Updating configuration for {station}...")
+def update_station_config(
+    station: str, best_ref: ReferenceStation, config_path: Path, all_refs: Optional[List[ReferenceStation]] = None
+) -> bool:
+    """Write the reference catalog of the station and set its `reference:` line.
 
-    with open(config_path) as f:
-        config = json.load(f)
+    The catalog (config/references/<STATION>.json) keeps what the search found.
+    stations.yaml gets only the one-line choice.
+    """
+    from scripts.utils import station_config as sc
 
-    if station not in config:
-        logger.error(f"Station {station} not found in config")
-        return False
+    references_dir = config_path.parent / "references"
+    catalog = sc.load_catalog(station, references_dir)
+    catalog.setdefault("note", "Reference catalog. Written by find_reference_stations; safe to regenerate.")
+    usgs = catalog.setdefault("usgs_comparison", {})
+    external = catalog.setdefault("external_data_sources", {})
+    if all_refs:
+        catalog["candidates"] = [
+            {"source": r.source, "id": r.station_id, "name": r.station_name, "distance_km": r.distance_km,
+             "datum": r.datum, "latitude": r.latitude, "longitude": r.longitude}
+            for r in all_refs
+        ]
 
-    station_config = config[station]
-
-    # Update based on source type
     if best_ref.source == "USGS":
-        if "usgs_comparison" not in station_config:
-            station_config["usgs_comparison"] = {}
-        station_config["usgs_comparison"]["target_usgs_site"] = best_ref.station_id
-        station_config["usgs_comparison"]["usgs_gauge_stated_datum"] = best_ref.datum
-        station_config["usgs_comparison"][
-            "notes"
-        ] = f"Using {best_ref.station_name} at {best_ref.distance_km}km"
-
+        usgs["target_usgs_site"] = best_ref.station_id
+        usgs["usgs_gauge_stated_datum"] = best_ref.datum
+        usgs["notes"] = f"Using {best_ref.station_name} at {best_ref.distance_km}km"
+        reference = f"usgs:{best_ref.station_id}"
     elif best_ref.source == "CO-OPS":
-        if "external_data_sources" not in station_config:
-            station_config["external_data_sources"] = {}
-        if "noaa_coops" not in station_config["external_data_sources"]:
-            station_config["external_data_sources"]["noaa_coops"] = {}
-
-        coops = station_config["external_data_sources"]["noaa_coops"]
+        coops = external.setdefault("noaa_coops", {})
         coops["enabled"] = True
         coops["preferred_stations"] = [best_ref.station_id]
         coops["nearest_station"] = {
-            "id": best_ref.station_id,
-            "name": best_ref.station_name,
-            "distance_km": best_ref.distance_km,
+            "id": best_ref.station_id, "name": best_ref.station_name, "distance_km": best_ref.distance_km,
         }
-
+        reference = f"coops:{best_ref.station_id}"
     elif "ERDDAP" in best_ref.source:
-        if "erddap" not in station_config:
-            station_config["erddap"] = {}
+        erddap = external.setdefault("erddap", {})
+        erddap.update({
+            "enabled": True,
+            "dataset_id": best_ref.station_id,
+            "station_name": best_ref.station_name,
+            "distance_km": best_ref.distance_km,
+            "server": best_ref.source.split("-")[-1] if "-" in best_ref.source else "Unknown",
+            "latitude": best_ref.latitude,
+            "longitude": best_ref.longitude,
+        })
+        reference = f"erddap:{best_ref.station_id}"
+    else:
+        logger.error(f"Unknown reference source {best_ref.source}")
+        return False
 
-        server_id = best_ref.source.split("-")[-1] if "-" in best_ref.source else "Unknown"
-        station_config["erddap"]["enabled"] = True
-        station_config["erddap"]["dataset_id"] = best_ref.station_id
-        station_config["erddap"]["station_name"] = best_ref.station_name
-        station_config["erddap"]["distance_km"] = best_ref.distance_km
-        station_config["erddap"]["server"] = server_id
-
-        # If very close, mark as primary
-        if best_ref.distance_km < 1:
-            station_config["erddap"]["primary_reference"] = True
-
-    # Save config
-    backup_path = config_path.with_suffix(".json.bak")
-    with open(backup_path, "w") as f:
-        json.dump(config, f, indent=2)
-    logger.info(f"Created backup at {backup_path}")
-
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
-    logger.info(f"Updated {config_path}")
-
+    path = sc.write_catalog(station, catalog, references_dir)
+    logger.info(f"Wrote reference catalog {path}")
+    try:
+        sc.set_reference(station, reference, config_path)
+    except ValueError as e:
+        logger.error(str(e))
+        return False
+    logger.info(f"Set 'reference: {reference}' for {station} in {config_path}")
     return True
 
 
@@ -617,7 +579,7 @@ def main():
     parser.add_argument(
         "--update-config", action="store_true", help="Update station config with best reference"
     )
-    parser.add_argument("--config", type=str, help="Path to stations_config.json")
+    parser.add_argument("--config", type=str, help="Path to stations.yaml")
     args = parser.parse_args()
 
     # Determine paths
@@ -627,7 +589,7 @@ def main():
     if args.config:
         config_path = Path(args.config)
     else:
-        config_path = project_root / "config" / "stations_config.json"
+        config_path = project_root / "config" / "stations.yaml"
 
     # Get coordinates
     if args.station:
@@ -661,7 +623,7 @@ def main():
     # Update config if requested
     if args.update_config and results:
         best = results[0]
-        if update_station_config(args.station, best, config_path):
+        if update_station_config(args.station, best, config_path, results):
             print(f"\nConfiguration updated with {best.source} station {best.station_id}")
         else:
             print("\nFailed to update configuration")

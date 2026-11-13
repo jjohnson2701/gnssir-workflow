@@ -1,0 +1,67 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 75,
+    "priority_param_codes": [
+      "00065",
+      "62610",
+      "62611",
+      "62620"
+    ],
+    "target_usgs_site": "15057596",
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "NAVD88",
+    "notes": "Using SALMON R AT GUSTAVUS AK (15057596) at 8.6km - has active data and NAVD88 datum. Nearest gauge 15057600 (ALDER C) at 0.82km has no recent data."
+  },
+  "external_data_sources": {
+    "noaa_coops": {
+      "enabled": true,
+      "search_radius_km": 100,
+      "preferred_stations": [
+        "9452634",
+        "9452210"
+      ],
+      "nearest_station": {
+        "id": "9452634",
+        "name": "Elfin Cove",
+        "distance_km": 39.4
+      },
+      "data_products": [
+        "predictions",
+        "water_level"
+      ],
+      "datum": "NAVD88",
+      "time_zone": "gmt",
+      "interval": "h"
+    },
+    "ndbc_buoys": {
+      "enabled": false,
+      "search_radius_km": 200,
+      "preferred_buoys": [],
+      "data_types": [
+        "meteorological",
+        "wave_spec"
+      ],
+      "update_interval_hours": 1,
+      "max_days_back": 45
+    },
+    "erddap": {
+      "enabled": true,
+      "primary_reference": true,
+      "server": "AOOS",
+      "base_url": "https://erddap.aoos.org/erddap",
+      "dataset_id": "edu_ua_glos_obs_station_bartlett_cove_ak",
+      "station_name": "Bartlett Cove, AK",
+      "distance_km": 0.004,
+      "latitude": 58.4551,
+      "longitude": -135.8885,
+      "variables": {
+        "water_level": "sea_surface_height_above_geopotential_datum",
+        "time": "time"
+      },
+      "datum": "NAVD88",
+      "notes": "Co-located ERDDAP water level station from AOOS (Alaska Ocean Observing System). Much closer than USGS (8.6km) or CO-OPS (39.4km)"
+    },
+    "last_updated": "2025-06-02T10:48:01.914496"
+  }
+}

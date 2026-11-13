@@ -1,0 +1,57 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "target_usgs_site": null,
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "Unknown"
+  },
+  "external_data_sources": {
+    "hydat": {
+      "enabled": true,
+      "primary_reference": true,
+      "station_id": "02EA014",
+      "station_name": "Lake Huron at Parry Sound",
+      "distance_km": 0.5,
+      "datum": "IGLD85",
+      "notes": "Co-located HYDAT gauge on Georgian Bay"
+    },
+    "noaa_coops": {
+      "enabled": true,
+      "preferred_stations": [
+        "9075065"
+      ],
+      "nearest_station": {
+        "id": "9075065",
+        "name": "Alpena",
+        "distance_km": 268,
+        "latitude": 45.063,
+        "longitude": -83.429
+      },
+      "data_products": [
+        "water_level"
+      ],
+      "datum": "IGLD85"
+    },
+    "ec_climate": {
+      "enabled": true,
+      "station_id": 32128,
+      "climate_id": "6116257",
+      "station_name": "Parry Sound CCG",
+      "distance_km": 0.5,
+      "latitude": 45.34,
+      "longitude": -80.04
+    },
+    "dfo_iwls": {
+      "iwls_id": "5cebf1e43d0f4a073c4bc487",
+      "code": "11375",
+      "name": "Parry Sound",
+      "lat": 45.33855,
+      "lon": -80.035882,
+      "distance_km": 0.01,
+      "wlo_recent_rows": 3360,
+      "wlf_recent_rows": 0,
+      "wlp_recent_rows": -1
+    }
+  }
+}

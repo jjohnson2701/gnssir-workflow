@@ -6,7 +6,7 @@
 Generate matched subdaily data using ERDDAP water level reference.
 
 This script:
-1. Reads station configuration from stations_config.json
+1. Reads station configuration from config/stations.yaml
 2. Loads GNSS-IR reflector height data
 3. Loads ERDDAP water level data (based on config)
 4. Matches observations based on timestamps (nearest neighbor)
@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 
 def load_station_config(station: str, config_path: Path) -> dict:
     """Load station configuration from JSON file."""
-    with open(config_path) as f:
-        config = json.load(f)
+    from scripts.utils.station_config import load_stations
+
+    config = load_stations(config_path)
 
     if station not in config:
         raise ValueError(f"Station {station} not found in config. Available: {list(config.keys())}")
@@ -284,7 +285,7 @@ def main():
         "--config",
         type=str,
         default=None,
-        help="Path to stations_config.json (default: auto-detect)",
+        help="Path to stations.yaml (default: auto-detect)",
     )
     args = parser.parse_args()
 
@@ -295,7 +296,7 @@ def main():
     if args.config:
         config_path = Path(args.config)
     else:
-        config_path = project_root / "config" / "stations_config.json"
+        config_path = project_root / "config" / "stations.yaml"
 
     results_dir = project_root / "results_annual" / args.station
 

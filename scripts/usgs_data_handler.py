@@ -12,7 +12,7 @@ from utils.geo_utils import haversine_distance, get_bounding_box
 
 # Define project root and config path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-STATIONS_CONFIG_PATH = PROJECT_ROOT / "config" / "stations_config.json"
+STATIONS_CONFIG_PATH = PROJECT_ROOT / "config" / "stations.yaml"
 
 
 # =============================================================================
@@ -21,12 +21,11 @@ STATIONS_CONFIG_PATH = PROJECT_ROOT / "config" / "stations_config.json"
 
 
 def load_config(config_path=None):
-    """Load configuration from JSON file."""
-    if config_path is None:
-        config_path = STATIONS_CONFIG_PATH
+    """Load the settings of all stations."""
     try:
-        with open(config_path, "r") as f:
-            return json.load(f)
+        from scripts.utils.station_config import load_stations
+
+        return load_stations(config_path)
     except Exception as e:
         logging.error(f"Error loading configuration from {config_path}: {e}")
         return None

@@ -29,11 +29,10 @@ def config_dir(project_root):
 @pytest.fixture
 def stations_config(config_dir):
     """Load the stations configuration."""
-    config_path = config_dir / "stations_config.json"
-    if config_path.exists():
-        with open(config_path) as f:
-            return json.load(f)
-    return {}
+    from scripts.utils.station_config import load_stations
+
+    config_path = config_dir / "stations.yaml"
+    return load_stations(config_path) if config_path.exists() else {}
 
 
 @pytest.fixture

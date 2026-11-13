@@ -1,0 +1,58 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "target_usgs_site": null,
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "Unknown"
+  },
+  "external_data_sources": {
+    "hydat": {
+      "enabled": true,
+      "primary_reference": true,
+      "station_id": "02BA004",
+      "station_name": "Lake Superior at Rossport",
+      "distance_km": 0.5,
+      "datum": "IGLD85",
+      "notes": "Co-located HYDAT gauge on Lake Superior"
+    },
+    "noaa_coops": {
+      "enabled": true,
+      "preferred_stations": [
+        "9099018",
+        "9099064"
+      ],
+      "nearest_station": {
+        "id": "9099018",
+        "name": "Marquette C.G.",
+        "distance_km": 260,
+        "latitude": 46.546,
+        "longitude": -87.379
+      },
+      "data_products": [
+        "water_level"
+      ],
+      "datum": "IGLD85"
+    },
+    "ec_climate": {
+      "enabled": true,
+      "station_id": 50132,
+      "climate_id": "6048262",
+      "station_name": "Thunder Bay A",
+      "distance_km": 50,
+      "latitude": 48.37,
+      "longitude": -89.32
+    },
+    "dfo_iwls": {
+      "iwls_id": "5cebf1e43d0f4a073c4bc376",
+      "code": "10220",
+      "name": "Rossport",
+      "lat": 48.833665,
+      "lon": -87.519593,
+      "distance_km": 0.0,
+      "wlo_recent_rows": 3360,
+      "wlf_recent_rows": 0,
+      "wlp_recent_rows": -1
+    }
+  }
+}

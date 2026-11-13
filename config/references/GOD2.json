@@ -1,0 +1,57 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "target_usgs_site": null,
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "Unknown"
+  },
+  "external_data_sources": {
+    "hydat": {
+      "enabled": true,
+      "primary_reference": true,
+      "station_id": "02FE012",
+      "station_name": "Lake Huron at Goderich",
+      "distance_km": 1,
+      "datum": "IGLD85",
+      "notes": "Co-located HYDAT gauge on Lake Huron"
+    },
+    "noaa_coops": {
+      "enabled": true,
+      "preferred_stations": [
+        "9014098"
+      ],
+      "nearest_station": {
+        "id": "9014098",
+        "name": "Fort Gratiot",
+        "distance_km": 99,
+        "latitude": 43.007,
+        "longitude": -82.423
+      },
+      "data_products": [
+        "water_level"
+      ],
+      "datum": "IGLD85"
+    },
+    "ec_climate": {
+      "enabled": true,
+      "station_id": 7747,
+      "climate_id": "6122847",
+      "station_name": "Goderich",
+      "distance_km": 1,
+      "latitude": 43.77,
+      "longitude": -81.72
+    },
+    "dfo_iwls": {
+      "iwls_id": "5cebf1e43d0f4a073c4bc3a3",
+      "code": "11860",
+      "name": "Goderich",
+      "lat": 43.745354,
+      "lon": -81.727796,
+      "distance_km": 0.01,
+      "wlo_recent_rows": 3360,
+      "wlf_recent_rows": 0,
+      "wlp_recent_rows": -1
+    }
+  }
+}

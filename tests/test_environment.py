@@ -45,19 +45,19 @@ class TestConfigFiles:
 
     @pytest.mark.unit
     def test_stations_config_exists(self, config_dir):
-        """Test that stations_config.json exists."""
-        config_path = config_dir / "stations_config.json"
+        """Test that stations.yaml exists."""
+        config_path = config_dir / "stations.yaml"
         assert config_path.exists()
 
     @pytest.mark.unit
     def test_stations_config_valid_json(self, config_dir):
-        """Test that stations_config.json is valid JSON."""
-        config_path = config_dir / "stations_config.json"
+        """Test that stations.yaml loads."""
+        config_path = config_dir / "stations.yaml"
 
-        with open(config_path) as f:
-            config = json.load(f)
+        from scripts.utils.station_config import load_stations
 
-        assert isinstance(config, dict)
+        config = load_stations(config_path)
+        assert isinstance(config, dict) and len(config) > 0
 
     @pytest.mark.unit
     def test_tool_paths_exists(self, config_dir):
