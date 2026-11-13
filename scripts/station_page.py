@@ -4,7 +4,7 @@
 
 The page has a summary table and one section per station with the same four blocks:
 where the reflections come from, the water level series, the effect of the
-peak-to-noise limit, and the station checks. All figures are embedded, so the page is
+peak-to-noise limit, height quality against wind (optional), and the station checks. All figures are embedded, so the page is
 one file.
 
 Input is a small YAML file. Only `stations` and the station names are required.
@@ -27,6 +27,10 @@ Input is a small YAML file. Only `stations` and the station names are required.
         inverse_csv: path/to/inverse.csv     # optional; output of scripts.inverse_heights
         open_extension: open                 # optional; gnssir run with the limits off, for the limit plot
         rinex: path/to/file.rnx              # optional; for the L2 signal check
+        wind_csv: path/to/wind.csv           # optional, with a gauge; needs a time column and a speed column (m/s)
+        wind_time: time
+        wind_speed: speed
+        wind_name: sensor at the gauge
         notes: ["free text line", "another line"]
 
 Usage:
@@ -117,7 +121,7 @@ def station_block(sta, spec, top, refl_code, fig_dir):
     import pandas as pd
 
     from scripts.visualizer.periodogram_circle import make_figure
-    from scripts.visualizer.station_figures import series_figure, tuning_figure, tuning_table
+    from scripts.visualizer.station_figures import series_figure, tuning_figure, tuning_table, wind_figure, wind_table
 
     year, d1, d2 = top["year"], top["doy"], top["doy_end"]
     cfg = json.loads(Path(refl_code, "input", f"{sta}.json").read_text())
@@ -149,6 +153,11 @@ def station_block(sta, spec, top, refl_code, fig_dir):
         out["tuning_png"] = str(Path(fig_dir, f"{sta}_tuning.png"))
         tuning_figure(out["tuning_png"], rows, cfg["PkNoise"])
         out["tuning"] = [r for r in rows if round(r["limit"], 1) in (0.0, round(cfg["PkNoise"], 1))]
+    if gauge and spec.get("wind_csv"):
+        wind = read_gauge(spec["wind_csv"], spec.get("wind_time", "time"), spec.get("wind_speed", "speed"), year)
+        out["wind"] = wind_table(t, d[:, 2], d[:, 13], d[:, 12], gauge[0], gauge[1], wind[0], wind[1])
+        out["wind_png"] = str(Path(fig_dir, f"{sta}_wind.png"))
+        wind_figure(out["wind_png"], out["wind"])
     # checks
     snr = sorted(glob.glob(f"{refl_code}/{year}/snr/{sta}/{sta}{d1:03d}0.{year % 100:02d}.snr*"))
     if snr:
@@ -193,6 +202,17 @@ def render(blocks, top):
                    f'<tr><td>off</td><td class="n">{a["per_day"]:.0f}</td><td class="n">{a["scatter_m"]:.3f} m</td><td class="n">{a["slope"]:.3f}</td></tr>'
                    f'<tr><td>{cfg["PkNoise"]:g} (in use)</td><td class="n">{c["per_day"]:.0f}</td><td class="n">{c["scatter_m"]:.3f} m</td><td class="n">{c["slope"]:.3f}</td></tr>'
                    '</tbody></table></div></div>')
+        wnd = ""
+        if "wind" in b:
+            trs = "".join(
+                f'<tr><td>{r["label"]} m/s</td><td class="n">{r["n"]}</td><td class="n">{r["scatter_m"]:.3f} m</td>'
+                f'<td class="n">{100 * r["outliers"]:.1f}%</td><td class="n">{r["pk"]:.1f}</td></tr>' if r["scatter_m"] is not None else
+                f'<tr><td>{r["label"]} m/s</td><td class="n">{r["n"]}</td><td colspan="3">too few arcs</td></tr>' for r in b["wind"])
+            wnd = (f'<h3>Wind</h3><div class="pair"><figure>{_img(b["wind_png"], "Scatter of single heights against the gauge, and share of arcs, by wind speed")}'
+                   f'<figcaption>Days {top["doy"]:03d} to {top["doy_end"]:03d}. Wind: {e(sp.get("wind_name", "wind sensor"))}, at the time of each arc. '
+                   'Scatter of single heights against the gauge, from one fit over all arcs.</figcaption></figure>'
+                   '<div class="tw"><table><thead><tr><th>Wind</th><th>Arcs</th><th>Scatter</th><th>Above 0.30 m</th><th>Peak-to-noise</th></tr></thead>'
+                   f'<tbody>{trs}</tbody></table></div></div>')
         checks = ""
         if "sampling" in b:
             s = min(b["sampling"]["signals"].values(), key=lambda v: v["wavelength_m"])
@@ -227,6 +247,7 @@ def render(blocks, top):
 <figure>{_img(b["series"], "Water level from single arcs" + (", the inverse method" if sp.get("inverse_csv") else "") + (" and the gauge" if has_g else ""))}
 <figcaption>Days {top["series_days"][0]:03d} to {top["series_days"][1]:03d}. {series_cap}</figcaption></figure>
 {tun}
+{wnd}
 <h3>Station checks</h3>
 <ul>{checks}</ul>
 </section>

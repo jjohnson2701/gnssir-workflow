@@ -140,3 +140,58 @@ def tuning_figure(out, rows, limit_in_use, min_kept=0.03):
     fig.tight_layout()
     fig.savefig(out, dpi=130)
     plt.close(fig)
+
+
+WIND_BINS = ((0, 2), (2, 4), (4, 6), (6, 8), (8, 99))
+
+
+def wind_table(t, rh, pk, edotf, gauge_t, gauge_wl, wind_t, wind_speed, bins=WIND_BINS, min_arcs=100):
+    """Height quality against wind speed at the time of each arc.
+
+    One fit of (-RH) on the gauge with the height-rate term gives the residuals. Returns a
+    list of dicts per wind bin: label, n, share, scatter_m (robust), outliers (share of
+    residuals above 0.30 m) and pk (median peak-to-noise); bins with fewer than `min_arcs`
+    arcs have scatter_m = None.
+    """
+    t, rh, pk, edotf = (np.asarray(v, float) for v in (t, rh, pk, edotf))
+    wl = np.interp(t, gauge_t, gauge_wl)
+    rate = (np.interp(t + 300 / 86400, gauge_t, gauge_wl) - np.interp(t - 300 / 86400, gauge_t, gauge_wl)) / 600 * 3600
+    A = np.c_[wl, edotf * rate, np.ones(len(t))]
+    res = -rh - A @ np.linalg.lstsq(A, -rh, rcond=None)[0]
+    res = res - np.median(res)
+    wind = np.interp(t, wind_t, wind_speed)
+    rows = []
+    for lo, hi in bins:
+        m = (wind >= lo) & (wind < hi)
+        row = {"label": f"{lo:g} to {hi:g}" if hi < 90 else f"above {lo:g}", "lo": lo, "n": int(m.sum()),
+               "share": float(m.mean()), "scatter_m": None, "outliers": None, "pk": None}
+        if m.sum() >= min_arcs:
+            r = res[m]
+            row.update(scatter_m=float(1.4826 * np.median(np.abs(r - np.median(r)))),
+                       outliers=float((np.abs(r) > 0.30).mean()), pk=float(np.median(pk[m])))
+        rows.append(row)
+    return rows
+
+
+def wind_figure(out, rows):
+    """Scatter of single heights against the gauge, and share of arcs, per wind bin."""
+    ok = [r for r in rows if r["scatter_m"] is not None]
+    x = np.arange(len(rows))
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(5.6, 4.4), sharex=True, gridspec_kw={"height_ratios": [2, 1]})
+    a1.plot([rows.index(r) for r in ok], [r["scatter_m"] for r in ok], "o-", color=BLUE, lw=2, ms=6)
+    for r in ok:
+        a1.annotate(f"{r['scatter_m']:.3f}", (rows.index(r), r["scatter_m"]), textcoords="offset points", xytext=(0, 8),
+                    ha="center", fontsize=8.5, color=INK)
+    a1.set_ylabel("scatter against\nthe gauge (m)", color=INK, fontsize=9)
+    a1.set_ylim(0, 1.35 * max(r["scatter_m"] for r in ok))
+    a2.bar(x, [100 * r["share"] for r in rows], color=GREY, width=0.6)
+    a2.set_ylabel("share of\narcs (%)", color=INK, fontsize=9)
+    a2.set_xticks(x)
+    a2.set_xticklabels([r["label"] for r in rows])
+    a2.set_xlabel("wind speed at the time of the arc (m/s)", color=INK)
+    for ax in (a1, a2):
+        _style(ax)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+

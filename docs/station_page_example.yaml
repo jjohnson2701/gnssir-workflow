@@ -31,6 +31,10 @@ stations:
     inverse_csv: /path/to/work/sc02/sc02_inverse.csv
     open_extension: open
     rinex: /path/to/work/sc02/SC0200USA_R_20240600000_01D_15S_MO.rnx
+    wind_csv: /path/to/work/sc02/ref/friday_harbor_wind_2024.csv
+    wind_time: time
+    wind_speed: speed
+    wind_name: sensor at the NOAA gauge
     notes:
       - "Published for this station: about 0.12 m per height with GPS L1 (Larson, Ray and Williams 2017). GPS L1 alone gives 0.10 to 0.14 m here."
       - A 30 s rate keeps 99% of the arcs with 3% more scatter.
