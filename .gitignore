@@ -129,3 +129,4 @@ models/
 # Generated executed notebooks (large outputs; source notebooks gitignored too)
 notebooks/
 
+docs_archive_*/

@@ -122,12 +122,13 @@ pytest
 ## Documentation
 
 - [Installation](docs/INSTALL.md)
+- [Worked example: Friday Harbor](docs/PROCESSING_EXAMPLE.md)
 - [Parameters](docs/params_reference.md)
 - [Methodology](docs/METHODOLOGY.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Changelog](docs/CHANGELOG.md)
 
-The files in `docs/` were written for the earlier version (gnssrefl 3, RINEX 2 conversion, dashboard) and are not yet updated.
+`METHODOLOGY.md` and `ARCHITECTURE.md` were written for the earlier version (gnssrefl 3, RINEX 2 conversion, dashboard) and are not yet updated.
 
 ## Acknowledgments
 
