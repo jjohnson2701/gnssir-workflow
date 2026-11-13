@@ -40,6 +40,7 @@ conda create -n gnssrefl4 python=3.12
 conda activate gnssrefl4
 pip install gnssrefl
 pip install -r requirements.txt
+pip install contextily pyproj pillow   # for the site image in the circular plot
 ```
 
 gnssrefl needs two environment variables. The workflow sets them for its own runs; set them yourself for the single commands in the table above.

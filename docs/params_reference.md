@@ -200,7 +200,7 @@ Here's a complete params file for a coastal GNSS station:
     "minH": 5.0,
     "maxH": 12.0,
     "e1": 2.0,
-    "e2": 5.0,
+    "e2": 10.0,
     "NReg": [5.0, 12.0],
     "PkNoise": 2.0,
     "polyV": 4,

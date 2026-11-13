@@ -17,6 +17,7 @@ pip install gnssrefl
 git clone https://github.com/jjohnson2701/gnssir-workflow.git
 cd gnssir-workflow
 pip install -r requirements.txt
+pip install contextily pyproj pillow   # for the site image in the circular plot
 ```
 
 Put `CRX2RNX` in a folder of your choice and point `EXE` to that folder.

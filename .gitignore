@@ -130,3 +130,9 @@ models/
 notebooks/
 
 docs_archive_*/
+
+# local output folders and backups
+html_workspace/
+results/
+results_diagnostic/
+*.bak

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (workflow rework, November 2026)
 - gnssrefl 4.2.3 and Python 3.10 or newer. RINEX 3 is read directly; the RINEX 3 to RINEX 2 conversion and `gfzrnx` are removed.
+- GLBX elevation range is 2 to 10 degrees (was 2 to 5): half the scatter of single heights and twice the arcs in a 61-day test.
 - Station settings: short `config/stations.yaml` plus generated `config/references/<STATION>.json`.
 - Days are translated in parallel, then `gnssir` runs one day at a time, in order (complete midnight arcs, no SNR file collisions).
 - Removed from this branch: Streamlit and Dash dashboards, ice and camera work (kept on the `gnssir-surface` branch).
@@ -27,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GLBX station height had the wrong sign.
 - EarthScope stations: the workflow downloads the RINEX 3 file itself (the gnssrefl archive download did not return).
 - Two tests depended on the host (ffmpeg on the path, local GLBX files).
+- Signal groups: Galileo 206 is E6 and 208 is E5; they were exchanged. BeiDou 305, 307 and 308 added.
+- The code passes the `black` and `flake8` checks of the CI again.
 
 ### Added
 - Initial public release preparation
