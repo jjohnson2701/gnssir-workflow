@@ -20,9 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/station_page.py`: static results page for a list of stations, with optional wind block.
 - `scripts/earthscope_rinex3.py`: EarthScope RINEX 3 download and translation.
 - Station SC02 (Friday Harbor) as a development station.
+- Circular plot: the site image is a public-domain air photo (USDA NAIP from USGS) in the United States; option `--imagery`.
+- `docs/METHODOLOGY.md` and `docs/ARCHITECTURE.md` rewritten for this version.
 
 ### Fixed (November 2026)
 - GLBX station height had the wrong sign.
+- EarthScope stations: the workflow downloads the RINEX 3 file itself (the gnssrefl archive download did not return).
+- Two tests depended on the host (ffmpeg on the path, local GLBX files).
 
 ### Added
 - Initial public release preparation

@@ -130,8 +130,6 @@ pytest
 - [Architecture](docs/ARCHITECTURE.md)
 - [Changelog](docs/CHANGELOG.md)
 
-`METHODOLOGY.md` and `ARCHITECTURE.md` were written for the earlier version (gnssrefl 3, RINEX 2 conversion, dashboard) and are not yet updated.
-
 ## Acknowledgments
 
 - [gnssrefl](https://github.com/kristinemlarson/gnssrefl), the GNSS-IR processing package this workflow is built on

@@ -1,724 +1,133 @@
-# GNSS-IR Processing Workflow Methodology
+# Methodology
 
-## Overview
+This document explains how the workflow gets a water level from a GNSS station, how it compares the result with a gauge, and what our tests showed. For the commands, see the [README](../README.md) and the [worked example](PROCESSING_EXAMPLE.md). For each setting, see the [parameter reference](params_reference.md).
 
-This document describes the complete methodology for GNSS Interferometric Reflectometry (GNSS-IR) processing, including data acquisition, processing steps, validation against external water level measurements, and visualization. The workflow transforms raw RINEX observation data into validated water level estimates through a series of automated processing stages.
+## 1. The measurement
 
----
+A GNSS antenna receives each satellite signal twice: directly, and after a reflection from the surface around the antenna. The two signals interfere. As the satellite rises or sets, the signal-to-noise ratio (SNR) that the receiver records goes up and down in a regular pattern.
 
-## Table of Contents
-
-1. [Scientific Background](#1-scientific-background)
-2. [Software Dependencies](#2-software-dependencies)
-3. [Directory Structure](#3-directory-structure)
-4. [Configuration Files](#4-configuration-files)
-5. [Processing Pipeline](#5-processing-pipeline)
-6. [Output Files](#6-output-files)
-7. [External Data Integration](#7-external-data-integration)
-8. [Validation and Analysis](#8-validation-and-analysis)
-9. [Interactive Dashboard](#9-interactive-dashboard)
-10. [Steps to Replicate](#10-steps-to-replicate)
-
----
-
-## 1. Scientific Background
-
-### 1.1 GNSS Interferometric Reflectometry (GNSS-IR)
-
-GNSS-IR uses signal-to-noise ratio (SNR) data from geodetic-quality GNSS receivers to measure environmental parameters. When GNSS signals reflect off nearby surfaces (e.g., water), they interfere with direct signals, creating oscillations in the SNR data. The frequency of these oscillations is related to the height of the antenna above the reflecting surface (the **Reflector Height**, RH).
-
-### 1.2 Key Equations
-
-**Reflector Height from SNR Frequency:**
-```
-RH = λ / (2 * sin(e))
-```
-Where:
-- RH = Reflector Height (meters)
-- λ = Carrier wavelength
-- e = Satellite elevation angle
-
-**Water Surface Elevation (WSE):**
-```
-WSE_ellipsoidal = Antenna_Ellipsoidal_Height - RH
-```
-
-**Demeaned Comparison:**
-```
-WSE_demeaned = WSE - mean(WSE)
-```
-
----
-
-## 2. Software Dependencies
-
-### 2.1 External Command-Line Tools
-
-| Tool | Purpose | Source |
-|------|---------|--------|
-| `gfzrnx` | RINEX 3 → RINEX 2.11 format conversion | GFZ Potsdam |
-| `rinex2snr` | Extract SNR data from RINEX observations | gnssrefl package |
-| `gnssir` | Calculate reflector heights from SNR data | gnssrefl package |
-| `quickLook` | Generate quality assurance diagnostic plots | gnssrefl package |
-
-Tool paths are configured in `config/tool_paths.json`.
-
-### 2.2 Python Dependencies
-
-**Core Processing:**
-- `gnssrefl>=3.12.0` - GNSS-IR processing library
-- `pandas>=2.0.3` - Data manipulation
-- `numpy>=1.26.4` - Numerical computing
-- `scipy>=1.15.2` - Scientific computing
-
-**Data Acquisition:**
-- `requests>=2.31.0` - HTTP requests for RINEX downloads and external APIs
-- `dataretrieval>=1.0.12` - USGS water data API
-
-**Visualization:**
-- `matplotlib>=3.7.2` - Plotting
-- `streamlit>=1.30.0` - Interactive dashboard
-
-**Geospatial:**
-- `geopy>=2.4.1` - Distance calculations
-- `contextily>=1.6.2` - Basemap tiles
-
-Install all dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-### 2.3 Environment Variables
-
-The gnssrefl tools require two environment variables:
-```bash
-export REFL_CODE=/path/to/gnssrefl_data_workspace/refl_code
-export ORBITS=/path/to/gnssrefl_data_workspace/orbits
-```
-
-These are automatically set by the processing scripts.
-
----
-
-## 3. Directory Structure
+The pattern is regular in the sine of the elevation angle `e`. Its frequency depends on the height `H` of the antenna above the reflecting surface (the reflector height) and on the wavelength `λ` of the signal:
 
 ```
-GNSSIRWorkflow/
-├── config/                          # Configuration files
-│   ├── stations_config.json         # Station definitions and metadata
-│   ├── tool_paths.json              # Paths to external executables
-│   ├── fora_params.json             # Station-specific GNSS-IR parameters
-│   └── {station}_params.json        # Additional station parameters
-│
-├── scripts/                         # Processing scripts
-│   ├── process_station.py           # Single entry point for full workflow
-│   ├── usgs_comparison.py           # USGS validation analysis
-│   ├── core_processing/             # Core processing modules
-│   │   ├── config_loader.py         # Configuration management
-│   │   ├── daily_gnssir_worker.py   # Single-day processing
-│   │   ├── parallel_orchestrator.py # Multi-core coordination
-│   │   └── workspace_setup.py       # gnssrefl environment setup
-│   ├── external_tools/              # External tool wrappers
-│   │   ├── preprocessor.py          # RINEX conversion (gfzrnx)
-│   │   └── gnssrefl_executor.py     # gnssrefl tool execution
-│   ├── external_apis/               # External data integration
-│   │   ├── noaa_coops.py            # NOAA CO-OPS tide data
-│   │   └── ndbc_client.py           # NDBC buoy data
-│   ├── utils/                       # Utility modules
-│   │   ├── data_manager.py          # RINEX download, file management
-│   │   ├── logging_config.py        # Centralized logging
-│   │   └── segmented_analysis.py    # Monthly/seasonal analysis
-│   ├── visualizer/                  # Visualization modules
-│   │   ├── comparison.py            # Comparison plots
-│   │   ├── timeseries.py            # Time series plots
-│   │   └── dashboard_plots.py       # Dashboard-specific plots
-│   └── results_handler.py           # Combine daily results
-│
-├── dashboard_components/            # Streamlit dashboard modules
-│   ├── __init__.py
-│   ├── data_loader.py               # Data loading with caching
-│   ├── station_metadata.py          # Station info utilities
-│   └── tabs/                        # Dashboard tabs
-│       ├── overview_tab.py
-│       ├── monthly_data_tab.py
-│       ├── subdaily_tab.py
-│       ├── yearly_residual_tab.py
-│       └── diagnostics_tab.py
-│
-├── data/                            # Processing data (per station/year)
-│   └── {STATION}/
-│       └── {YEAR}/
-│           ├── rinex3/              # Downloaded RINEX 3 files
-│           ├── rh_daily/            # Daily reflector height results
-│           ├── logs_daily/          # Per-day processing logs
-│           └── quicklook_plots_daily/ # QA diagnostic plots
-│
-├── gnssrefl_data_workspace/         # gnssrefl working directory
-│   ├── refl_code/                   # REFL_CODE environment
-│   │   ├── {YEAR}/
-│   │   │   ├── rinex/               # RINEX 2.11 files
-│   │   │   ├── snr/                 # SNR files
-│   │   │   └── results/             # gnssir output
-│   │   ├── input/                   # Station JSON configs
-│   │   └── Files/                   # quickLook outputs
-│   └── orbits/                      # Satellite orbit files
-│
-├── results_annual/                  # Combined annual results
-│   └── {STATION}/
-│       ├── {STATION}_{YEAR}_combined_rh.csv      # Daily aggregated RH
-│       ├── {STATION}_{YEAR}_combined_raw.csv     # All subdaily retrievals
-│       ├── {STATION}_{YEAR}_enhanced_comparison.csv
-│       ├── {STATION}_{YEAR}_wse_usgs_comparison.png
-│       ├── {STATION}_{YEAR}_demeaned_comparison.png
-│       └── {STATION}_{YEAR}_*.png   # Various analysis plots
-│
-├── logs/                            # Main processing logs
-├── tests/                           # Test suite
-├── tools/                           # External binaries (gfzrnx)
-│
-├── dashboard.py         # Main dashboard application
-├── requirements.txt                 # Python dependencies
-└── CLAUDE.md                        # Project documentation
+SNR pattern  ~  A · cos( 4π H sin(e) / λ  +  phase )
 ```
 
----
-
-## 4. Configuration Files
-
-### 4.1 Station Configuration (`config/stations_config.json`)
-
-Defines station metadata, coordinates, and reference data sources. RINEX files are downloaded from the NPS GNSS archive at `https://gnss.nps.gov/doi-gnss` (configured in `scripts/utils/data_manager.py`).
-
-```json
-{
-  "FORA": {
-    "station_id_4char_lower": "fora",
-    "ellipsoidal_height_m": -30.917,
-    "latitude_deg": 35.9393968812,
-    "longitude_deg": -75.7081602909,
-    "gnssir_json_params_path": "config/fora_params.json",
-    "usgs_comparison": {
-      "target_usgs_site": "02043433",
-      "usgs_parameter_code_to_use": "00065",
-      "usgs_gauge_stated_datum": "NAVD88"
-    },
-    "external_data_sources": {
-      "noaa_coops": {
-        "enabled": true,
-        "preferred_stations": ["8651370", "8652587"],
-        "datum": "NAVD88"
-      },
-      "ndbc_buoys": {
-        "enabled": true,
-        "preferred_buoys": ["44025", "44014", "41025"]
-      }
-    }
-  }
-}
-```
-
-### 4.2 Tool Paths (`config/tool_paths.json`)
-
-Paths to external command-line tools. Uses tool names (found via PATH) by default:
-
-```json
-{
-  "gfzrnx_path": "gfzrnx",
-  "rinex2snr_path": "rinex2snr",
-  "gnssir_path": "gnssir",
-  "quicklook_path": "quickLook"
-}
-```
-
-When tools are installed in your conda environment, they're automatically in PATH.
-
-### 4.3 GNSS-IR Parameters (`config/{station}_params.json`)
-
-Station-specific processing parameters for gnssir:
-
-```json
-{
-  "station": "fora",
-  "lat": 35.9393968812,
-  "lon": -75.7081602909,
-  "ht": -30.917,
-  "minH": 5.0,
-  "maxH": 15.0,
-  "e1": 4.0,
-  "e2": 13.0,
-  "azval2": [0.0, 80.0, 340.0, 360.0],
-  "freqs": [1, 20, 5, 101, 102, 201, 205, 206, 207, 208, 302, 306],
-  "reqAmp": [6.4],
-  "PkNoise": 2.7,
-  "refraction": true
-}
-```
-
-Key parameters:
-- `minH`, `maxH`: Expected reflector height range (meters)
-- `e1`, `e2`: Elevation angle range for analysis (degrees)
-- `azval2`: Azimuth mask (exclude directions with obstructions)
-- `freqs`: GNSS frequencies to use (GPS L1=1, L2C=20, L5=5, etc.)
-- `reqAmp`: Minimum amplitude threshold
-- `PkNoise`: Minimum peak-to-noise ratio
-
----
-
-## 5. Processing Pipeline
-
-### 5.1 Pipeline Overview
+A higher antenna gives a faster pattern. The workflow finds the frequency, which gives `H`. The water level is the antenna height minus `H`:
 
 ```
-┌─────────────────────┐
-│  Station Config     │
-│  (coordinates,      │
-│   parameters)       │
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  For Each Day       │◄──── Parallel Processing
-│  in Date Range      │      (multiprocessing.Pool)
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Download RINEX 3   │  Source: NPS GNSS archive
-│  from NPS archive   │  URL: gnss.nps.gov/doi-gnss
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Convert RINEX 3    │  Tool: gfzrnx
-│  → RINEX 2.11       │  Output: {station}{doy}0.{yy}o
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Extract SNR Data   │  Tool: rinex2snr
-│  by Satellite       │  Output: {station}{doy}0.{yy}.snr66
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Calculate          │  Tool: gnssir
-│  Reflector Heights  │  Output: {doy}.txt (multiple RH per day)
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Generate QA Plots  │  Tool: quickLook (background thread)
-│  (LSP, summary)     │  Output: PNG files
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Combine Daily      │  Aggregate: mean, median, std, min, max, count
-│  Results            │  Output: {STATION}_{YEAR}_combined_rh.csv
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Transform to WSE   │  WSE = Antenna_Height - RH
-│  (Water Surface     │  Then demean for comparison
-│   Elevation)        │
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Retrieve External  │  Sources: USGS, NOAA CO-OPS, NDBC
-│  Validation Data    │
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Time Series        │  Cross-correlation analysis
-│  Alignment          │  Optimal lag detection
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Statistical        │  Correlation, RMSE, Bias
-│  Comparison         │  Monthly/Seasonal segmentation
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│  Generate Plots &   │  Time series, scatter, residuals
-│  Dashboard          │  Interactive Streamlit app
-└─────────────────────┘
+water level = antenna height − H
 ```
 
-### 5.2 Step-by-Step Details
+The reflected signal is weak compared with the direct signal, and the surface is not the only reflector. The method therefore needs many satellite passes and clear rules for which passes to keep.
 
-#### Step 1: Load Station Configuration
-```python
-from scripts.core_processing.config_loader import load_station_config
-station_config = load_station_config(stations_config_path, 'FORA', project_root)
+**Where the reflection comes from.** The antenna senses an area on the surface, not a point. For one pass this area (the first Fresnel zone) is a long ellipse that points toward the satellite. At a 5 m height and 5 degrees elevation it reaches about 100 m from the antenna. A lower elevation or a higher antenna gives a longer reach. The circular plot draws these zones on an image of the site.
+
+## 2. Processing steps
+
+| Step | Tool | Result |
+|---|---|---|
+| 1. Get the observation file | NPS archive, EarthScope (`scripts/earthscope_rinex3.py`), or another archive that gnssrefl knows | one RINEX file per day |
+| 2. Translate | gnssrefl `rinex2snr` | one SNR file per day: elevation, azimuth, time and SNR for each satellite and signal |
+| 3. Heights of single arcs | gnssrefl `gnssir` | one reflector height per arc that passes the checks |
+| 4. Smooth series | gnssrefl `subdaily`, or the inverse method (`scripts/inverse_heights.py`) | water level against time |
+| 5. Compare | gauge comparison scripts, `scripts/station_page.py` | statistics and figures |
+
+The workflow gives a RINEX 3 file to `rinex2snr` as it is. It does not convert to RINEX 2: a conversion can replace the civil L2 signal (L2C) with the weaker legacy signal (see section 5).
+
+### Arcs and the periodogram (step 3)
+
+An arc is one rising or setting pass of one satellite, for one signal, inside the elevation range and the azimuth mask of the station. For each arc `gnssir`:
+
+1. removes the slow trend of the direct signal with a polynomial;
+2. computes a Lomb-Scargle periodogram of the remaining SNR against `sin(e)`, for heights between `minH` and `maxH`;
+3. takes the height of the highest peak.
+
+An arc passes when its peak is high enough (`reqAmp`), stands out from the rest of the periodogram (`PkNoise`, the peak-to-noise limit), and the arc covers enough of the elevation range. Arcs outside the azimuth mask are not used.
+
+### Two corrections
+
+**Refraction.** The atmosphere bends the signal, so the satellite appears higher than it is. Without a correction all heights are too small by a constant factor. The factor is larger at lower elevations. gnssrefl corrects the elevation angle with a model; the default (Bennett) is the one the workflow uses.
+
+**Moving surface.** The periodogram assumes that the height is constant during the arc. With a tide, the height changes during the arc, and the measured height is shifted by an amount that is proportional to the rate of the water level:
+
+```
+shift = (rate of height change) × tan(e) / (de/dt)
 ```
 
-#### Step 2: Download RINEX 3 from NPS Archive
-- Source: `https://gnss.nps.gov/doi-gnss/Rinex/{YEAR}/{DOY}/...`
-- Downloads via HTTP using requests library
-- Validates file size (minimum 500 KB)
+gnssrefl gives the factor `tan(e)/(de/dt)` for each arc (column `edotF`). `subdaily` estimates the rate from a first spline fit and removes the shift. At a station with no tide the shift is negligible.
 
-#### Step 3: Convert RINEX 3 → RINEX 2.11
-```bash
-gfzrnx -finp FORA2600.24o -fout fora2600.24o -vo 2 -f
+### Smooth series: two methods (step 4)
+
+**`subdaily`** fits a spline (8 knots per day) through the heights of the single arcs, removes outliers, applies the correction for the moving surface, and removes offsets between signals.
+
+**The inverse method** (gnssrefl `invsnr`, after Strandberg et al. 2016) does not use the single heights. It describes the water level as one smooth curve (a spline with a knot every 3 hours) and fits that curve to the SNR data of all arcs together. Arcs that are too weak to pass the periodogram checks still add information. In our tests this method was closer to the gauge than `subdaily` at both tidal stations (section 5). It needs arcs in every knot interval: the wrapper stops at long gaps and removes output where fewer arcs support the curve.
+
+## 3. Comparison with a gauge
+
+A GNSS station and a gauge do not share a height reference in general, and they are often some distance apart. The workflow compares them in a way that does not hide a scale error.
+
+For the single arcs it fits
+
 ```
-- Converts multi-constellation RINEX 3 to legacy RINEX 2.11 format
-- Required because gnssrefl tools expect RINEX 2.11
-
-#### Step 4: Extract SNR Data
-```bash
-rinex2snr fora 2024 260 -snr 66 -nolook T
-```
-- Extracts Signal-to-Noise Ratio data for all satellites
-- SNR code 66 = both low and high rate observations
-- Output: `fora2600.24.snr66`
-
-#### Step 5: Calculate Reflector Heights
-```bash
-gnssir fora 2024 260
-```
-- Performs Lomb-Scargle periodogram analysis on SNR data
-- Outputs multiple reflector height retrievals per day
-- Each retrieval tagged with timestamp, satellite, azimuth, amplitude, etc.
-
-#### Step 6: Generate QA Plots
-```bash
-quickLook fora 2024 260
-```
-- Generates diagnostic plots showing:
-  - LSP (Lomb-Scargle Periodogram)
-  - RH vs azimuth
-  - Quality metrics
-
-#### Step 7: Combine Daily Results
-- Reads individual `{doy}.txt` files
-- Aggregates to daily statistics:
-  - `rh_count`: Number of valid retrievals
-  - `rh_mean_m`, `rh_median_m`: Central tendency
-  - `rh_std_m`: Variability
-  - `rh_min_m`, `rh_max_m`: Range
-
-#### Step 8: Transform to Water Surface Elevation
-```python
-WSE_ellipsoidal = Antenna_Ellipsoidal_Height - RH_median
-WSE_demeaned = WSE - WSE.mean()
+−H = slope × gauge + k × edotF × (gauge rate) + constant
 ```
 
----
+and reports two numbers:
 
-## 6. Output Files
+- **Slope.** 1.000 means that a 1 m change at the gauge is a 1 m change in the GNSS height. A slope below 1 points to a missing refraction correction or to weak arcs.
+- **Scatter.** The spread of the differences after the fit, as a robust standard deviation (1.4826 × the median absolute deviation). A few outliers do not change it.
 
-### 6.1 Daily Processing Outputs
+For a smooth series the workflow shifts the series by one constant (the median difference) and fits no scale.
 
-| File | Location | Description |
-|------|----------|-------------|
-| `{STATION}{DOY}0.{YY}o` | `data/{STATION}/{YEAR}/rinex3/` | Downloaded RINEX 3 file |
-| `{station}{doy}0.{yy}o` | `gnssrefl_data_workspace/refl_code/{YEAR}/rinex/` | Converted RINEX 2.11 |
-| `{station}{doy}0.{yy}.snr66` | `gnssrefl_data_workspace/refl_code/{YEAR}/snr/` | SNR data file |
-| `{doy}.txt` | `gnssrefl_data_workspace/refl_code/{YEAR}/results/` | gnssir reflector heights |
-| `{station}_{year}_{doy}.txt` | `data/{STATION}/{YEAR}/rh_daily/` | Copied RH results |
-| `{station}_{year}_{doy}.log` | `data/{STATION}/{YEAR}/logs_daily/` | Processing log |
-| `*.png` | `data/{STATION}/{YEAR}/quicklook_plots_daily/` | QA diagnostic plots |
+When no gauge is near the station, `scripts/station_check.py` gives the scatter of the single heights about their own spline. This number shows the precision, not the accuracy.
 
-### 6.2 Annual Combined Outputs
+## 4. Visual checks
 
-| File | Description |
-|------|-------------|
-| `{STATION}_{YEAR}_combined_rh.csv` | Daily aggregated reflector heights |
-| `{STATION}_{YEAR}_combined_raw.csv` | All subdaily retrievals |
-| `{STATION}_{YEAR}_enhanced_comparison.csv` | Merged GNSS-IR + USGS data |
-| `{STATION}_{YEAR}_wse_usgs_comparison.png` | WSE vs USGS time series |
-| `{STATION}_{YEAR}_demeaned_comparison.png` | Demeaned comparison |
-| `{STATION}_{YEAR}_monthly_correlation_demeaned.png` | Monthly correlation analysis |
-| `{STATION}_{YEAR}_seasonal_correlation_demeaned.png` | Seasonal correlation |
-| `{STATION}_{YEAR}_subdaily_overview.png` | Subdaily comparison plot |
+- **Circular plot** (`scripts/visualizer/periodogram_circle.py`): the periodograms of one day by azimuth, in two views. *Height above the surface* shows the reflector height. *Distance from the water level* shows each reflection against the water level at the time of the pass, so reflections from the water lie on one ring at any tide and fixed reflectors do not. Use it to set the azimuth mask.
+- **Station page** (`scripts/station_page.py`): for each station the circular plot, the water level series against the gauge, the effect of the peak-to-noise limit, and the height quality against wind speed when wind data exist.
 
-### 6.3 Combined RH CSV Format
+## 5. What the tests in 2024 showed
 
-```csv
-date,rh_count,rh_mean_m,rh_median_m,rh_std_m,rh_min_m,rh_max_m,datetime,year,doy
-2024-01-12,50,8.024,8.012,0.080,7.83,8.18,2024-01-12,2024,12
-2024-01-13,15,8.087,8.090,0.082,7.92,8.23,2024-01-13,2024,13
-```
+Three stations: GLBX (Gustavus, Alaska; elevation 2 to 5 degrees; 6 m tide; gauge 0.3 km away), SC02 (Friday Harbor, Washington; 5 to 13 degrees; 3 m tide; gauge at Friday Harbor) and FORA (Fort Raleigh, North Carolina; wind-driven water level; no usable gauge). The plan of each test was written before the run. Days 001 to 182 unless stated.
 
----
+| Question | GLBX | SC02 |
+|---|---|---|
+| Slope with no refraction correction | 0.953 | 0.985 |
+| Slope with the Bennett correction | 0.999 | 0.998 |
+| Scatter of single arcs against the gauge | 0.195 m | 0.104 m |
+| `subdaily` series against the gauge | 0.10 to 0.11 m | 0.026 m |
+| Inverse method against the gauge | 0.041 m | 0.018 m |
+| Arcs kept with 30 s data in place of 1 s or 15 s | 51% | 99% |
 
-## 7. External Data Integration
+- **Refraction.** Keep the correction on. The more complex models in gnssrefl did not do better than Bennett; all of them use a climate average, not the weather of the day.
+- **Peak-to-noise limit.** At GLBX a limit of 2.0 lowers the scatter from 0.29 m to 0.20 m and brings the slope from 0.954 to 1.000. At SC02 the limit changes little.
+- **Inverse method.** A wider elevation range helps: at GLBX 0.071 m with 2 to 5 degrees and 0.041 m with 2 to 10 degrees. Use all signals together.
+- **L2 signal.** A RINEX 2 file made from a RINEX 3 file can hold the legacy L2 signal, with an SNR 7 to 19 dB below the civil signal. `scripts/station_check.py` shows which signal a file holds.
+- **Wind.** At SC02 the heights of single arcs are not worse in strong wind (0.111 m scatter below 2 m/s, 0.095 m above 8 m/s). The inverse method is a little worse on windy days (1.6 to 2.2 cm).
 
-### 7.1 USGS Water Data
+## 6. Limits and open points
 
-**API:** USGS Water Services (`dataretrieval` package)
+- The numbers above come from three stations and six months. They are not general limits of the method.
+- FORA has no gauge that follows its water level (the nearest gauges are 21 and 27 km away and correlate poorly). Its results show precision only.
+- At SC02 the height from the lower half of the elevation range differs from the height of the upper half by −11 to +15 cm, with a different sign for the L1 and the L2/L5 signals. We do not know the cause. It can be an effect of the antenna.
+- At GLBX the refraction correction gives the right slope but adds 12 to 15% scatter. We do not know the cause.
+- The comparison assumes that the gauge shows the water level under the reflection zones. This is not true where the gauge is far away or behind an inlet.
+- Small water bodies, vegetation and ice are outside the tests.
 
-**Parameter Codes (priority order):**
-- `62610`: Water level, NAVD88 (preferred)
-- `62611`: Water level, NGVD29
-- `62620`: Water level, MSL
-- `00065`: Gage height (stage)
-
-```python
-from scripts.usgs_data_handler import fetch_usgs_gauge_data
-usgs_df, gauge_info, param_code = fetch_usgs_gauge_data(
-    site_code="02043433",
-    parameter_code="00065",
-    start_date_str="2024-01-01",
-    end_date_str="2024-12-31",
-    service="iv"  # instantaneous values
-)
-```
-
-### 7.2 NOAA CO-OPS Tide Data
-
-**API:** `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter`
-
-```python
-from scripts.external_apis.noaa_coops import NOAACOOPSClient
-client = NOAACOOPSClient()
-
-# Tide predictions
-predictions = client.get_tide_predictions(
-    station_id="8651370",
-    start_date=datetime(2024, 1, 1),
-    end_date=datetime(2024, 12, 31),
-    datum="NAVD88"
-)
-
-# Water level observations
-observations = client.get_water_level_observations(
-    station_id="8651370",
-    start_date=datetime(2024, 1, 1),
-    end_date=datetime(2024, 12, 31)
-)
-```
-
-### 7.3 NDBC Buoy Data
-
-**API:** `https://www.ndbc.noaa.gov/data/realtime2/`
-
-```python
-from scripts.external_apis.ndbc_client import NDBCClient
-client = NDBCClient()
-
-# Meteorological data (wind, waves, pressure)
-met_data = client.get_meteorological_data(station_id="44025", days_back=45)
-
-# Wave spectral data
-wave_data = client.get_wave_data(station_id="44025", days_back=45)
-```
-
----
-
-## 8. Validation and Analysis
-
-### 8.1 Time Lag Analysis
-
-Cross-correlation analysis to find optimal temporal alignment:
-
-```python
-from scripts.time_lag_analyzer import calculate_time_lag_correlation
-
-lag_days, correlation, confidence, all_lags = calculate_time_lag_correlation(
-    gnssir_series=merged_df['wse_ellips_m'],
-    usgs_series=merged_df['usgs_value_m'],
-    max_lag_days=10
-)
-```
-
-### 8.2 Statistical Metrics
-
-| Metric | Formula | Description |
-|--------|---------|-------------|
-| Correlation (r) | Pearson correlation | Linear relationship strength |
-| RMSE | √(mean((GNSS - USGS)²)) | Root Mean Square Error |
-| Bias | mean(GNSS - USGS) | Systematic offset |
-| MAE | mean(\|GNSS - USGS\|) | Mean Absolute Error |
-
-### 8.3 Segmented Analysis
-
-Monthly and seasonal correlation analysis:
-
-```python
-from scripts.utils.segmented_analysis import (
-    generate_monthly_segments,
-    generate_seasonal_segments,
-    perform_segmented_correlation
-)
-
-monthly_segments = generate_monthly_segments(2024)
-monthly_correlations, monthly_data = perform_segmented_correlation(
-    merged_df, monthly_segments,
-    gnss_col='wse_ellips_m_demeaned',
-    usgs_col='usgs_value_m_demeaned'
-)
-```
-
----
-
-## 9. Interactive Dashboard
-
-### 9.1 Launch Dashboard
-
-```bash
-streamlit run dashboard.py
-```
-
-### 9.2 Dashboard Tabs
-
-| Tab | Purpose |
-|-----|---------|
-| **Overview** | Summary statistics, data availability, correlation metrics |
-| **Monthly Data** | Month-by-month comparison and correlation |
-| **Subdaily** | Individual retrieval comparison against reference |
-| **Yearly Residuals** | Annual residual analysis and patterns |
-| **Diagnostics** | Quality metrics, outlier detection |
-
-### 9.3 Features
-
-- Station selection from configured stations
-- Year and DOY range selection
-- Multi-source data integration (USGS, CO-OPS, NDBC)
-- Real-time correlation calculations
-- Interactive plots with zoom/pan
-- Data export capabilities
-
----
-
-## 10. Steps to Replicate
-
-### 10.1 Environment Setup
-
-```bash
-# 1. Clone repository
-git clone <repository_url>
-cd GNSSIRWorkflow
-
-# 2. Create Python virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
-
-# 3. Install Python dependencies
-pip install -r requirements.txt
-
-# 4. Install gnssrefl package
-pip install gnssrefl
-
-# 5. Install gfzrnx (Option A: conda, or Option B: manual download)
-# Conda: conda install -c eumetsat gfzrnx
-# Manual: https://gnss.gfz.de/services/gfzrnx
-# If manual, place in tools/ directory and make executable:
-chmod +x tools/gfzrnx
-
-# 6. Update tool_paths.json with correct paths
-```
-
-### 10.2 Configure a Station
-
-1. Add station to `config/stations_config.json`
-2. Create station parameters file `config/{station}_params.json`
-3. Verify station exists in NPS GNSS archive at `https://gnss.nps.gov/doi-gnss`
-
-### 10.3 Run Processing Pipeline
-
-```bash
-# Full workflow: GNSS-IR processing, reference comparison, visualization
-python scripts/process_station.py \
-    --station FORA \
-    --year 2024 \
-    --doy_start 1 \
-    --doy_end 365 \
-    --num_cores 8
-
-# GNSS-IR processing only (skip comparison and visualization)
-python scripts/process_station.py \
-    --station FORA \
-    --year 2024 \
-    --doy_start 1 \
-    --doy_end 365 \
-    --skip_comparison \
-    --skip_viz
-```
-
-### 10.4 Run Validation Analysis
-
-```bash
-# Enhanced USGS comparison with time lag analysis
-python scripts/usgs_comparison.py \
-    --station FORA \
-    --year 2024 \
-    --max_lag_days 5 \
-    --log_level INFO
-```
-
-### 10.5 Launch Dashboard
-
-```bash
-streamlit run dashboard.py
-```
-
-### 10.6 Quick Test
-
-```bash
-# Process 7 days for testing
-python scripts/process_station.py \
-    --station FORA \
-    --year 2024 \
-    --doy_start 260 \
-    --doy_end 266 \
-    --num_cores 4
-```
-
----
-
-## Appendix A: Available Stations
-
-| Station | Location | Coordinates | Reference Source |
-|---------|----------|-------------|------------------|
-| FORA | North Carolina, USA | 35.94°N, 75.71°W | USGS + CO-OPS |
-| GLBX | Alaska, USA | 58.46°N, 135.89°W | CO-OPS |
-| VALR | Hawaii, USA | 21.37°N, 157.94°W | CO-OPS + USGS |
-| MDAI | Maryland, USA | 38.14°N, 75.19°W | USGS |
-| UMNQ | Greenland | 70.68°N, 52.12°W | — |
-| DESO | Florida, USA | 27.52°N, 82.64°W | — |
-
----
-
-## Appendix B: USGS Parameter Codes
-
-| Code | Description | Preferred |
-|------|-------------|-----------|
-| 62610 | Water level, NAVD88 | ✓ (Primary) |
-| 62611 | Water level, NGVD29 | Secondary |
-| 62620 | Water level, MSL | Tertiary |
-| 00065 | Gage height (stage) | Fallback |
-
----
-
-## Appendix C: GNSS Frequency Codes
+## 7. Signal codes in gnssrefl
 
 | Code | System | Signal |
-|------|--------|--------|
-| 1 | GPS | L1 C/A |
-| 5 | GPS | L5 |
-| 20 | GPS | L2C |
+|---|---|---|
+| 1, 20, 5 | GPS | L1, L2C, L5 |
 | 101, 102 | GLONASS | L1, L2 |
-| 201, 205-208 | Galileo | E1, E5a/E6/E7/E8 |
-| 302, 306 | BeiDou | B2, B6 |
-
-*Source: gnssrefl/gps.py lines 1790-1830*
-
----
+| 201, 205, 206, 207, 208 | Galileo | E1, E5a, E6, E5b, E5 |
+| 301 to 308 | BeiDou | see the gnssrefl documentation |
 
 ## References
 
-1. Larson, K.M., et al. (2013). "GPS multipath and its relation to near-surface soil moisture content." IEEE J-STARS.
-2. Larson, K.M. (2019). "Unanticipated Uses of the Global Positioning System." Annual Review of Earth and Planetary Sciences.
-3. gnssrefl documentation: https://github.com/kristinemlarson/gnssrefl
-
----
-
-*Document generated: January 2025*
-*Version: 1.0*
+- Bennett, G. G. (1982). The calculation of astronomical refraction in marine navigation. *Journal of Navigation*, 35, 255–259.
+- Larson, K. M. (2024). gnssrefl: an open source software package in python for GNSS interferometric reflectometry applications. *GPS Solutions*, 28, 165.
+- Larson, K. M., Ray, R. D., Williams, S. D. P. (2017). A 10-year comparison of water levels measured with a geodetic GPS receiver versus a conventional tide gauge. *Journal of Atmospheric and Oceanic Technology*, 34, 295–307. (Friday Harbor, station SC02.)
+- Strandberg, J., Hobiger, T., Haas, R. (2016). Improving GNSS-R sea level determination through inverse modeling of SNR data. *Radio Science*, 51, 1286–1296.
+- Williams, S. D. P., Nievinski, F. G. (2017). Tropospheric delays in ground-based GNSS multipath reflectometry — experimental evidence from coastal sites. *Journal of Geophysical Research: Solid Earth*, 122, 2310–2327.
+- gnssrefl documentation: https://gnssrefl.readthedocs.io
