@@ -91,6 +91,8 @@ class TestAssembleWithFfmpeg:
         output = tmp_path / "test.gif"
 
         monkeypatch.setattr(mod, "FFMPEG_PATH", "/nonexistent/ffmpeg")
+        # ffmpeg on PATH is an accepted fallback, so hide that too
+        monkeypatch.setattr(mod.shutil, "which", lambda name: None)
 
         with pytest.raises((FileNotFoundError, RuntimeError)):
             mod.assemble_with_ffmpeg(
