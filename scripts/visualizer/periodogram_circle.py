@@ -72,7 +72,7 @@ def load_day(station, year, doy, freqs=None):
     # All azimuths are extracted so that the plot also shows what the mask leaves out.
     arcs = quiet(
         extract_arcs_from_station, station, year, doy, freq=freqs, buffer_hours=buffer_hours,
-        dec=int(cfg.get("dec", 1)), e1=cfg["e1"], e2=cfg["e2"], ellist=cfg.get("ellist") or [],
+        dec=int(cfg.get("dec") or 1), e1=cfg["e1"], e2=cfg["e2"], ellist=cfg.get("ellist") or [],
         azlist=[0, 360], polyV=cfg["polyV"], pele=cfg["pele"], dbhz=cfg.get("dbhz", False),
         gzip=False, station_config=cfg, sat_list=cfg.get("onesat"), attach_results=["gnssir"],
         refraction_verbose=False,
