@@ -18,11 +18,6 @@ UMNQ:
   data_source: earthscope
   reference: none
 
-NKAR:
-  gnssrefl_json: config/nkar.json
-  data_source: earthscope
-  reference: erddap:global_hourly_fast   # Nuuk, Godthaab
-
 GLBX:
   gnssrefl_json: config/glbx.json
   inverse_elevation: [2, 10]
@@ -43,77 +38,6 @@ MDAI:
 KEFJ:
   gnssrefl_json: config/kefj.json
   reference: coops:auto
-
-NIAQ:
-  gnssrefl_json: config/niaq.json
-  data_source: earthscope
-  orbit_type: gnss
-  reference: erddap:global_hourly_fast   # Upernavik harbour
-
-LRSK:
-  gnssrefl_json: config/lrsk.json
-  data_source: earthscope
-  reference: none
-
-CBRG:
-  gnssrefl_json: config/cbrg.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9052058   # Rochester
-
-CLWD:
-  gnssrefl_json: config/clwd.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9075065   # Alpena
-
-GOD2:
-  gnssrefl_json: config/god2.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9014098   # Fort Gratiot
-
-KNGV:
-  gnssrefl_json: config/kngv.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9063079   # Marblehead
-
-MCHN:
-  gnssrefl_json: config/mchn.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9099004   # Point Iroquois
-
-PARY:
-  gnssrefl_json: config/pary.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9075065   # Alpena
-
-PSTA:
-  gnssrefl_json: config/psta.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9063038   # Erie, PA
-
-PWEL:
-  gnssrefl_json: config/pwel.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9052058   # Rochester
-
-ROSS:
-  gnssrefl_json: config/ross.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9099018   # Marquette C.G.
-
-TOBY:
-  gnssrefl_json: config/toby.json
-  data_source: nrcan
-  orbit_type: nav
-  reference: coops:9075065   # Alpena
 
 SC02:   # Friday Harbor, WA. Open view, about 350 arcs a day, NOAA gauge with wind sensor at 300 m.
   gnssrefl_json: config/sc02.json
