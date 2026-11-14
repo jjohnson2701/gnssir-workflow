@@ -254,6 +254,7 @@ Process a month with the limits off (`reqAmp` all 0, `PkNoise` 0, as an extensio
 
 - GLBX: scatter falls from 0.29 m with no limit to 0.20 m at 2.0, and the slope against the gauge moves from 0.954 to 1.000. Weak arcs are biased toward the middle of the height window, not only noisy. Above 2.0 the time coverage drops.
 - SC02: the limit changes the scatter by 1% up to 2.8.
+- GLBX with the wider range of 2 to 10 degrees: the limit changes almost nothing (0.094 m with and without it). The limit matters where the arcs are short.
 - Once the peak-to-noise limit is set, the amplitude limit (`reqAmp`) removed almost nothing at these stations.
 
 Most arcs that the limit rejects still hold the true peak: at GLBX 58% of rejected arcs have a peak at the expected height, against 0.2% at a wrong height. The inverse method uses that information.

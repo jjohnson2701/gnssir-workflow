@@ -100,7 +100,7 @@ Three stations: GLBX (Gustavus, Alaska; elevation 2 to 5 degrees; 6 m tide; gaug
 | Arcs kept with 30 s data in place of 1 s or 15 s | 51% | 99% |
 
 - **Refraction.** Keep the correction on. The more complex models in gnssrefl did not do better than Bennett; all of them use a climate average, not the weather of the day.
-- **Peak-to-noise limit.** At GLBX a limit of 2.0 lowers the scatter from 0.29 m to 0.20 m and brings the slope from 0.954 to 1.000. At SC02 the limit changes little.
+- **Peak-to-noise limit.** At GLBX with 2 to 5 degrees a limit of 2.0 lowers the scatter from 0.29 m to 0.20 m and brings the slope from 0.954 to 1.000. With 2 to 10 degrees the limit changes almost nothing (0.094 m with and without it). At SC02 the limit changes little. So the limit matters where the arcs are short.
 - **Elevation range.** At GLBX a wider range also helps the single arcs. In days 060 to 120, against the gauge and with one offset per signal: 2 to 5 degrees gives 80 arcs a day and 0.181 m scatter; 5 to 10 degrees gives 198 and 0.125 m; 2 to 10 degrees gives 183 and 0.085 m, with a slope of 0.996 and the same time coverage. The station file now uses 2 to 10 degrees. The other GLBX numbers in this section were made with 2 to 5 degrees.
 - **Inverse method.** A wider elevation range helps: at GLBX 0.071 m with 2 to 5 degrees and 0.041 m with 2 to 10 degrees. Use all signals together.
 - **L2 signal.** A RINEX 2 file made from a RINEX 3 file can hold the legacy L2 signal, with an SNR 7 to 19 dB below the civil signal. `scripts/station_check.py` shows which signal a file holds.
