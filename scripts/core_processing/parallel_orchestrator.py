@@ -10,6 +10,22 @@ from .workspace_setup import setup_gnssrefl_workspace, register_station_coordina
 from ..visualizer.timeseries import plot_annual_rh_timeseries
 
 
+def _failed_day(doy, message):
+    return {"doy": doy, "status": "failed", "errors": [message], "skipped_steps": []}
+
+
+def _safe_day(args):
+    """Run one day. An exception becomes a failed result for that day, so one bad day cannot
+    stop the other days or drop out of the summary."""
+    try:
+        return process_single_day_wrapper(args)
+    except BaseException as e:  # SystemExit included: a lost pool task would block the pool
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        logging.error(f"Exception for day {args[2]}: {type(e).__name__}: {e}")
+        return _failed_day(args[2], f"{type(e).__name__}: {e}")
+
+
 def process_station_parallel(
     station_config,
     year,
@@ -36,7 +52,7 @@ def process_station_parallel(
         num_cores (int): Number of cores to use for parallel processing
         results_handler (module, optional): Module with combine_daily_rh_results func.
         skip_options (dict, optional): Boolean flags for skipping steps if output
-            exists. Keys: skip_download, skip_rinex_conversion, skip_snr, skip_rh,
+            exists. Keys: skip_download, skip_snr, skip_rh,
             skip_quicklook
 
     Returns:
@@ -58,16 +74,20 @@ def process_station_parallel(
     if skip_options is None:
         skip_options = {
             "skip_download": False,
-            "skip_rinex_conversion": False,
             "skip_snr": False,
             "skip_rh": False,
             "skip_quicklook": False,
         }
 
-    # Generate tasks list for parallel processing
-    task_args_list = []
-    for doy in range(doy_range[0], doy_range[1] + 1):
-        task_args = (
+    # Two passes. Pass 1 (parallel): download and translate each day to an SNR file.
+    # Pass 2 (one day at a time, in order): gnssir. gnssir reads the SNR files of the
+    # neighbour days for arcs that cross midnight, and it unpacks and repacks SNR files
+    # while it runs. Running it for several days at once cuts midnight arcs and can
+    # destroy SNR files.
+    days = list(range(doy_range[0], doy_range[1] + 1))
+
+    def args_for(doy, options):
+        return (
             station_config,
             year,
             doy,
@@ -75,21 +95,45 @@ def process_station_parallel(
             project_root,
             refl_code_base,
             orbits_base,
-            skip_options,
+            options,
         )
-        task_args_list.append(task_args)
 
-    # Create multiprocessing pool
-    logging.info(f"Starting parallel processing using {num_cores} cores")
+    logging.info(f"Pass 1: download and translation using {num_cores} cores")
+    translate_options = {**skip_options, "translate_only": True}
+    if station_config.get("data_source") == "earthscope":
+        try:  # refresh the saved EarthScope login once here, not in every worker at the same time
+            from ..earthscope_rinex3 import access_token
 
-    # Process in parallel
-    task_results = []
+            access_token()
+        except Exception as e:
+            logging.warning(f"EarthScope login could not be refreshed: {e}")
     try:
         with multiprocessing.Pool(processes=num_cores) as pool:
-            # Map tasks to pool
-            task_results = pool.map(process_single_day_wrapper, task_args_list)
-    except Exception as e:
-        logging.error(f"Exception during parallel processing: {e}")
+            first_pass = pool.map(_safe_day, [args_for(d, translate_options) for d in days])
+    except Exception as e:  # the pool itself failed; no day can go on
+        logging.error(f"Exception during parallel translation: {e}")
+        first_pass = [_failed_day(d, f"translation pool failed: {e}") for d in days]
+
+    logging.info("Pass 2: gnssir, one day at a time")
+    want_quicklook = not skip_options.get("skip_quicklook", False)
+    height_options = {
+        **skip_options,
+        "skip_download": True,
+        "skip_snr": True,
+        "skip_quicklook": True,
+    }
+    task_results = []
+    for doy, first in zip(days, first_pass):
+        if first.get("status") != "translated":
+            task_results.append(first)  # failed in pass 1; keep its errors
+            continue
+        task_results.append(_safe_day(args_for(doy, height_options)))
+    if want_quicklook:
+        logging.info("Pass 3: quickLook plots")
+        plot_options = {**height_options, "skip_rh": True, "skip_quicklook": False}
+        for doy, res in zip(days, task_results):
+            if res.get("status") == "success":
+                _safe_day(args_for(doy, plot_options))
 
     # Process results, aggregate data, and generate plots
     results = finalize_station_processing(

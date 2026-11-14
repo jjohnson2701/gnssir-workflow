@@ -7,7 +7,8 @@
 #
 # After creating the environment, install the package:
 #   pip install -e .              # Core only
-#   pip install -e .[dashboard]   # With Streamlit dashboard
+#   pip install -e .[figures]     # With the site image for the circular plot
+#   pip install -e .[earthscope]  # With the EarthScope RINEX 3 download
 #   pip install -e .[all]         # Everything
 
 name: gnssir-workflow
@@ -16,8 +17,8 @@ channels:
   - defaults
 
 dependencies:
-  # Python version (3.9 recommended and tested)
-  - python=3.9
+  # Python version (3.10 or newer; 3.12 tested)
+  - python=3.12
 
   # Core scientific packages (conda versions often better optimized)
   - numpy>=1.24.0
@@ -43,7 +44,7 @@ dependencies:
 
   # Install remaining packages via pip
   - pip:
-      - gnssrefl>=3.12.0
+      - gnssrefl>=4.2.3
       - dataretrieval>=1.0.0
       # Install the workflow package itself in editable mode
       # Run after environment creation: pip install -e .

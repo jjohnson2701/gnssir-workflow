@@ -1,0 +1,45 @@
+# Station settings for gnssir-workflow. One short block per station.
+#   gnssrefl_json  the gnssrefl settings file of the station (position, elevation, heights, limits)
+#   data_source    where the RINEX files come from: nps (default), earthscope, nrcan
+#   orbit_type     optional gnssrefl orbit choice
+#   inverse_elevation  optional [low, high] elevation range (deg) for the inverse method, when it should be
+#                  wider than the periodogram range of the gnssrefl file (more arcs, fewer gaps)
+#   rinex3_name    optional 9-character RINEX 3 name for EarthScope stations (default <STATION>00USA)
+#   reference      the gauge to compare with: usgs:<site>, coops:<id>, coops:auto, erddap:<dataset_id>, none
+# Details of the references (names, distances, datums) are in config/references/<STATION>.json.
+# That file is written by: python scripts/find_reference_stations.py --station <STATION> --update-config
+
+FORA:
+  gnssrefl_json: config/fora_params.json
+  reference: usgs:02043433
+
+UMNQ:
+  gnssrefl_json: config/umnq.json
+  data_source: earthscope
+  reference: none
+
+GLBX:
+  gnssrefl_json: config/glbx.json
+  inverse_elevation: [2, 10]
+  reference: erddap:edu_ua_glos_obs_station_bartlett_cove_ak   # Bartlett Cove, AK
+
+DESO:
+  gnssrefl_json: config/deso.json
+  reference: none
+
+VALR:
+  gnssrefl_json: config/valr.json
+  reference: usgs:16229000
+
+MDAI:
+  gnssrefl_json: config/mdai.json
+  reference: usgs:0148472405
+
+KEFJ:
+  gnssrefl_json: config/kefj.json
+  reference: coops:auto
+
+SC02:   # Friday Harbor, WA. Open view, about 350 arcs a day, NOAA gauge with wind sensor at 300 m.
+  gnssrefl_json: config/sc02.json
+  data_source: earthscope
+  reference: coops:9449880   # Friday Harbor

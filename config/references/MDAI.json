@@ -1,0 +1,33 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "priority_param_codes": [
+      "62610",
+      "62611",
+      "62620",
+      "00065"
+    ],
+    "target_usgs_site": "0148472405",
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "NAVD88",
+    "notes": "Using BUNTINGS GUT NEAR CEDARTOWN, MD (0148472405) at 0.46km - optimal nearby gauge"
+  },
+  "external_data_sources": {
+    "noaa_coops": {
+      "enabled": true,
+      "search_radius_km": 100,
+      "preferred_stations": [],
+      "data_products": [
+        "predictions",
+        "water_level"
+      ],
+      "datum": "NAVD88",
+      "time_zone": "lst_ldt",
+      "interval": "h"
+    },
+    "ndbc_buoys": {
+      "enabled": false
+    }
+  }
+}

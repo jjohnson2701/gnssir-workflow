@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (workflow rework, November 2026)
+- gnssrefl 4.2.3 and Python 3.10 or newer. RINEX 3 is read directly; the RINEX 3 to RINEX 2 conversion and `gfzrnx` are removed.
+- GLBX elevation range is 2 to 10 degrees (was 2 to 5): half the scatter of single heights and twice the arcs in a 61-day test.
+- Station settings: short `config/stations.yaml` plus generated `config/references/<STATION>.json`.
+- Days are translated in parallel, then `gnssir` runs one day at a time, in order (complete midnight arcs, no SNR file collisions).
+- Removed from this branch: Streamlit and Dash dashboards, ice and camera work (kept on the `gnssir-surface` branch).
+
+### Added (November 2026)
+- `scripts/station_check.py`: sampling check, L2 signal check, scatter about a smooth curve.
+- `scripts/inverse_heights.py`: smooth water level from the gnssrefl inverse method, with its own elevation range.
+- `scripts/visualizer/periodogram_circle.py`: circular plot with site image, in two views (height above the surface, distance from the water level).
+- `scripts/station_page.py`: static results page for a list of stations, with optional wind block.
+- `scripts/earthscope_rinex3.py`: EarthScope RINEX 3 download and translation.
+- Station SC02 (Friday Harbor) as a development station.
+- Circular plot: the site image is a public-domain air photo (USDA NAIP from USGS) in the United States; option `--imagery`.
+- `docs/METHODOLOGY.md` and `docs/ARCHITECTURE.md` rewritten for this version.
+
+### Fixed (November 2026)
+- GLBX station height had the wrong sign.
+- EarthScope stations: the workflow downloads the RINEX 3 file itself (the gnssrefl archive download did not return).
+- Two tests depended on the host (ffmpeg on the path, local GLBX files).
+- Signal groups: Galileo 206 is E6 and 208 is E5; they were exchanged. BeiDou 305, 307 and 308 added.
+- The code passes the `black` and `flake8` checks of the CI again.
+
 ### Added
 - Initial public release preparation
 - Package infrastructure (pyproject.toml, LICENSE)

@@ -6,6 +6,7 @@ import logging
 import subprocess
 import shutil
 import threading
+import time
 from pathlib import Path
 
 
@@ -19,9 +20,13 @@ def execute_rinex2snr(
     logs_dir,
     snr_code="66",
     rinex2_filename_override=None,
+    archive=None,
+    orbit=None,
+    input_file=None,
+    retry=True,
 ):
     """
-    Execute rinex2snr command to extract SNR data from RINEX 2 file.
+    Execute rinex2snr to extract SNR data from a RINEX file (version 2.11 or 3).
 
     Args:
         rinex2snr_exe_path (str): Path to rinex2snr executable
@@ -33,6 +38,8 @@ def execute_rinex2snr(
         logs_dir (str or Path): Directory for logs
         snr_code (str, optional): SNR code. Defaults to "66".
         rinex2_filename_override (str, optional): Override the default RINEX 2 filename.
+        input_file (str or Path, optional): Local RINEX file (version 2.11 or 3) to translate.
+            gnssrefl 4 reads both versions, so no conversion step is needed.
 
     Returns:
         bool: True on success, False on failure
@@ -51,16 +58,25 @@ def execute_rinex2snr(
 
     try:
         # Construct the rinex2snr command
-        cmd = [
-            rinex2snr_exe_path,
-            station_4char_lower,
-            str(year),
-            doy_padded,
-            "-snr",
-            snr_code,
-            "-nolook",
-            "T",
-        ]
+        if input_file:
+            # Local file: gnssrefl takes station, year and day from the file itself
+            cmd = [rinex2snr_exe_path, "-input_file", str(input_file), "-snr", snr_code]
+        else:
+            cmd = [
+                rinex2snr_exe_path,
+                station_4char_lower,
+                str(year),
+                doy_padded,
+                "-snr",
+                snr_code,
+            ]
+            if archive:
+                cmd.extend(["-archive", archive])
+            else:
+                cmd.extend(["-nolook", "T"])
+
+        if orbit:
+            cmd.extend(["-orb", orbit])
 
         # Add optional overrides
         if rinex2_filename_override:
@@ -70,6 +86,10 @@ def execute_rinex2snr(
         my_env = os.environ.copy()
         my_env["REFL_CODE"] = str(refl_code_base)
         my_env["ORBITS"] = str(orbits_base)
+        # EXE tells gnssrefl where to find CRX2RNX and other binaries
+        if "EXE" not in my_env:
+            exe_dir = shutil.which("CRX2RNX") or shutil.which("crx2rnx")
+            my_env["EXE"] = str(Path(exe_dir).parent) if exe_dir else str(refl_code_base)
 
         # Working directory
         cwd_for_rinex2snr = str(refl_code_base)
@@ -89,6 +109,7 @@ def execute_rinex2snr(
             shell=False,
             cwd=cwd_for_rinex2snr,
             env=my_env,
+            timeout=1800,  # a download inside rinex2snr was seen to hang with no message
         )
 
         # Log the direct output from the command
@@ -128,6 +149,26 @@ def execute_rinex2snr(
                 f"Expected SNR file not found at {expected_snr_file} or {expected_snr_file_gz}"
             )
             day_logger.error("rinex2snr returned success (code 0) but no SNR file was created")
+            if retry:
+                # Seen when two runs fetch the same orbit file at the same time: wait, then try
+                # once more
+                day_logger.warning("Retrying rinex2snr once after 20 s")
+                time.sleep(20)
+                return execute_rinex2snr(
+                    rinex2snr_exe_path,
+                    station_4char_lower,
+                    year,
+                    doy_padded,
+                    refl_code_base,
+                    orbits_base,
+                    logs_dir,
+                    snr_code=snr_code,
+                    rinex2_filename_override=rinex2_filename_override,
+                    archive=archive,
+                    orbit=orbit,
+                    input_file=input_file,
+                    retry=False,
+                )
             return False
 
     except Exception as e:
@@ -173,6 +214,9 @@ def execute_gnssir(
         my_env = os.environ.copy()
         my_env["REFL_CODE"] = str(refl_code_base)
         my_env["ORBITS"] = str(orbits_base)
+        if "EXE" not in my_env:
+            exe_dir = shutil.which("CRX2RNX") or shutil.which("crx2rnx")
+            my_env["EXE"] = str(Path(exe_dir).parent) if exe_dir else str(refl_code_base)
 
         # Working directory
         cwd_for_gnssir = str(refl_code_base)
@@ -186,7 +230,14 @@ def execute_gnssir(
 
         # Execute gnssir with capture_output=True to capture stdout/stderr
         process_gnssir = subprocess.run(
-            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_gnssir, env=my_env
+            cmd,
+            capture_output=True,
+            text=True,
+            shell=False,
+            cwd=cwd_for_gnssir,
+            env=my_env,
+            # one day takes minutes; a job that hangs must not block the days after it
+            timeout=3600,
         )
 
         # Log the direct output from the command
@@ -356,6 +407,9 @@ def execute_quicklook(
         my_env = os.environ.copy()
         my_env["REFL_CODE"] = str(refl_code_base)
         my_env["ORBITS"] = str(orbits_base)
+        if "EXE" not in my_env:
+            exe_dir = shutil.which("CRX2RNX") or shutil.which("crx2rnx")
+            my_env["EXE"] = str(Path(exe_dir).parent) if exe_dir else str(refl_code_base)
 
         # Working directory
         cwd_for_quicklook = str(refl_code_base)
@@ -369,7 +423,13 @@ def execute_quicklook(
 
         # Execute quickLook with capture_output=True to capture stdout/stderr
         process_quicklook = subprocess.run(
-            cmd, capture_output=True, text=True, shell=False, cwd=cwd_for_quicklook, env=my_env
+            cmd,
+            capture_output=True,
+            text=True,
+            shell=False,
+            cwd=cwd_for_quicklook,
+            env=my_env,
+            timeout=900,
         )
 
         # Log the direct output from the command

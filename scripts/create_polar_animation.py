@@ -1,27 +1,338 @@
-# ABOUTME: Creates animated GIF showing water level on satellite imagery with regional context
-# ABOUTME: Overlays GNSS-IR data directly on Fresnel zone satellite view
+# ABOUTME: Creates animated GIF showing water level on satellite imagery with regional context.
+# ABOUTME: Overlays GNSS-IR reflection points on satellite basemap with time series.
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge
 import matplotlib.colors as mcolors
 from matplotlib.cm import ScalarMappable
 from pathlib import Path
 import argparse
 from datetime import timedelta
-import imageio.v2 as imageio
-import tempfile
 import json
+import multiprocessing as mp
+import subprocess
+import shutil
 import contextily as ctx
 from pyproj import Transformer
+from matplotlib.colors import LightSource
 
-# GPS L1 wavelength for Fresnel zone calculations
-GPS_L1_WAVELENGTH = 0.1903  # meters
+# Approximate number of days per season (quarter year)
+SEASONAL_CHUNK_DAYS = 91
+
+
+def _find_ffmpeg():
+    """Locate ffmpeg binary, checking conda base env if not on PATH."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    # Common conda location
+    conda_ffmpeg = Path.home() / "miniconda3" / "bin" / "ffmpeg"
+    if conda_ffmpeg.exists():
+        return str(conda_ffmpeg)
+    return "ffmpeg"
+
+
+FFMPEG_PATH = _find_ffmpeg()
+
+
+def split_into_seasons(doy_start, doy_end, chunk_days=SEASONAL_CHUNK_DAYS):
+    """Split a DOY range into seasonal chunks, merging small remainders."""
+    chunks = []
+    start = doy_start
+    while start <= doy_end:
+        end = min(start + chunk_days - 1, doy_end)
+        # Merge small remainder (<30 days) into this chunk
+        if end < doy_end and (doy_end - end) < 30:
+            end = doy_end
+        chunks.append((start, end))
+        start = end + 1
+    return chunks
+
+
+def detect_tidal_extremes(ref_df, wl_col="wl_dm", min_separation_hours=4):
+    """
+    Detect high and low tide times from regularly-sampled reference data.
+
+    Uses scipy peak detection on the water level signal to find alternating
+    highs (peaks) and lows (troughs).
+
+    Args:
+        ref_df: DataFrame with 'datetime' and water level column
+        wl_col: Name of the water level column
+        min_separation_hours: Minimum hours between consecutive extremes
+
+    Returns:
+        numpy array of datetime64 values at each tidal extreme
+    """
+    from scipy.signal import find_peaks
+
+    df = ref_df.dropna(subset=[wl_col]).sort_values("datetime").reset_index(drop=True)
+    if len(df) < 3:
+        return np.array([], dtype="datetime64[ns]")
+
+    wl = df[wl_col].values
+    times = df["datetime"].values
+
+    # Compute minimum distance in samples from the median time step
+    dt_median = np.median(np.diff(times) / np.timedelta64(1, "h"))
+    min_distance = max(1, int(min_separation_hours / dt_median))
+
+    highs, _ = find_peaks(wl, distance=min_distance)
+    lows, _ = find_peaks(-wl, distance=min_distance)
+
+    extreme_indices = np.sort(np.concatenate([highs, lows]))
+    return times[extreme_indices]
+
+
+def detect_tidal_extremes_from_gnssir(df, wl_col="WSE_dm", min_separation_hours=4):
+    """
+    Detect tidal extremes from irregularly-sampled GNSS-IR water surface data.
+
+    Resamples the noisy signal to a regular 30-minute grid using a rolling
+    median, then applies peak detection.
+
+    Args:
+        df: DataFrame with 'datetime' and water level column
+        wl_col: Name of the water level column
+        min_separation_hours: Minimum hours between consecutive extremes
+
+    Returns:
+        numpy array of datetime64 values at each tidal extreme
+    """
+    from scipy.signal import find_peaks
+
+    df_sorted = df.dropna(subset=[wl_col]).sort_values("datetime").copy()
+    if len(df_sorted) < 10:
+        return np.array([], dtype="datetime64[ns]")
+
+    # Resample to regular 30-min grid
+    df_sorted = df_sorted.set_index("datetime")
+    resampled = df_sorted[wl_col].resample("30min").median().dropna()
+
+    if len(resampled) < 6:
+        return np.array([], dtype="datetime64[ns]")
+
+    # Smooth with 3h rolling window to suppress noise
+    smoothed = resampled.rolling(6, center=True, min_periods=3).mean().dropna()
+
+    if len(smoothed) < 6:
+        return np.array([], dtype="datetime64[ns]")
+
+    wl = smoothed.values
+    times = smoothed.index.values
+
+    min_distance = max(1, int(min_separation_hours / 0.5))  # 0.5h sample interval
+
+    highs, _ = find_peaks(wl, distance=min_distance)
+    lows, _ = find_peaks(-wl, distance=min_distance)
+
+    extreme_indices = np.sort(np.concatenate([highs, lows]))
+    return times[extreme_indices]
+
+
+def build_frame_windows(mode, ref_df, df, start_time, end_time, bin_hours, window_hours):
+    """
+    Build list of (bin_start, bin_end, center_time) tuples for animation frames.
+
+    In analysis mode, windows span from one tidal extreme to the next (variable
+    width, one tidal phase per frame). In presentation mode, windows use fixed
+    bin_hours centered on detected extremes or regular intervals.
+
+    Returns:
+        List of (bin_start, bin_end, center_time) as pd.Timestamp tuples.
+    """
+    # Detect tidal extremes
+    extremes = np.array([], dtype="datetime64[ns]")
+    if ref_df is not None and "wl_dm" in ref_df.columns and len(ref_df) > 10:
+        extremes = detect_tidal_extremes(ref_df)
+        extremes = extremes[
+            (extremes >= np.datetime64(start_time)) & (extremes <= np.datetime64(end_time))
+        ]
+
+    if len(extremes) < 2 and df is not None:
+        extremes = detect_tidal_extremes_from_gnssir(df)
+        extremes = extremes[
+            (extremes >= np.datetime64(start_time)) & (extremes <= np.datetime64(end_time))
+        ]
+
+    if mode == "analysis" and len(extremes) >= 2:
+        # Variable windows: each frame spans one tidal phase (extreme to extreme)
+        windows = []
+        for i in range(len(extremes) - 1):
+            win_start = pd.Timestamp(extremes[i])
+            win_end = pd.Timestamp(extremes[i + 1])
+            center = win_start + (win_end - win_start) / 2
+            windows.append((win_start, win_end, center))
+        return windows
+
+    # Presentation mode or fallback: fixed-width bins
+    if len(extremes) >= 2:
+        # Center bins on detected extremes
+        half_window = timedelta(hours=window_hours / 2)
+        windows = []
+        for ext in extremes:
+            center = pd.Timestamp(ext)
+            windows.append((center - half_window, center + half_window, center))
+        return windows
+
+    # No tidal signal: regular bins
+    frame_centers = pd.date_range(
+        start=start_time.floor(f"{bin_hours}h") + timedelta(hours=bin_hours),
+        end=end_time.ceil(f"{bin_hours}h"),
+        freq=f"{bin_hours}h",
+    )
+    half_window = timedelta(hours=window_hours / 2)
+    return [(ct - half_window, ct + half_window, ct) for ct in frame_centers]
+
+
+def render_satellite_fresnel_basemap(sat_path, station_lat, station_lon, buffer_m, cache_dir):
+    """
+    Generate reflection point basemap from a satellite image GeoTIFF.
+
+    Clips the image to a buffer around the station and renders it in
+    local-meter coordinates (origin at station).
+
+    Args:
+        sat_path: Path to satellite GeoTIFF (e.g., Sentinel-2 TCI)
+        station_lat: Station latitude in degrees
+        station_lon: Station longitude in degrees
+        buffer_m: Buffer radius in meters around station
+        cache_dir: Directory to save the cached basemap PNG
+
+    Returns:
+        dict with 'path', 'extent', 'local_coords' or None on failure.
+    """
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    try:
+        with rasterio.open(sat_path) as src:
+            sat_crs = src.crs
+            t = Transformer.from_crs("EPSG:4326", str(sat_crs), always_xy=True)
+            sx, sy = t.transform(station_lon, station_lat)
+
+            # Clip to buffer around station in the image's native CRS
+            window = from_bounds(
+                sx - buffer_m,
+                sy - buffer_m,
+                sx + buffer_m,
+                sy + buffer_m,
+                transform=src.transform,
+            )
+            rgb = src.read(window=window)
+
+        if rgb.size == 0:
+            return None
+
+        # Transpose to (rows, cols, bands) for imshow
+        img = np.moveaxis(rgb, 0, -1)
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        extent = [-buffer_m, buffer_m, -buffer_m, buffer_m]
+        ax.imshow(img, extent=extent, origin="upper")
+        ax.axis("off")
+        basemap_path = Path(cache_dir) / "basemap_fresnel_local.png"
+        fig.savefig(basemap_path, dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
+
+        return {
+            "path": basemap_path,
+            "extent": extent,
+            "local_coords": True,
+        }
+    except Exception as e:
+        print(f"  WARNING: Satellite basemap failed: {e}")
+        return None
+
+
+def render_local_fresnel_basemap(dem_array, dem_resolution, buffer_m, cache_dir):
+    """
+    Generate reflection point basemap from a DEM array when tile servers are unavailable.
+
+    Creates a hillshaded terrain image with water bodies colored blue. The station
+    is assumed to be at the center of the DEM array.
+
+    Args:
+        dem_array: 2D numpy array of elevation values (station at center)
+        dem_resolution: DEM pixel size in meters
+        buffer_m: Buffer radius in meters around station
+        cache_dir: Directory to save the cached basemap PNG
+
+    Returns:
+        dict with 'path' (Path to PNG), 'extent' (local-meter extent), 'local_coords' (True)
+        or None if DEM is all nodata.
+    """
+    valid = dem_array[dem_array > -9999]
+    if len(valid) == 0:
+        return None
+
+    # Detect water: pixels near or below sea level (coastal GNSS-IR stations)
+    # Stereo DEMs produce noisy low/negative elevations over featureless water
+    water_mask = (dem_array < 2.0) & (dem_array > -9999)
+
+    # Generate hillshade
+    ls = LightSource(azdeg=315, altdeg=45)
+    hs = ls.hillshade(dem_array, vert_exag=3, dx=dem_resolution, dy=dem_resolution)
+
+    # Build RGBA composite: terrain hillshade with blue water
+    rows, cols = dem_array.shape
+    rgba = np.zeros((rows, cols, 4))
+
+    # Land: brown/tan hillshade
+    land_cmap = plt.cm.YlOrBr
+    land_norm = (dem_array - valid.min()) / max(valid.max() - valid.min(), 1.0)
+    land_norm = np.clip(land_norm, 0, 1)
+    land_colors = land_cmap(land_norm)
+    land_colors[..., :3] = land_colors[..., :3] * 0.6 + hs[..., np.newaxis] * 0.4
+
+    # Water: dark blue
+    water_colors = np.zeros((rows, cols, 4))
+    water_colors[..., 0] = 0.15  # R
+    water_colors[..., 1] = 0.3  # G
+    water_colors[..., 2] = 0.55  # B
+    water_colors[..., 3] = 1.0
+
+    # Composite
+    rgba[~water_mask] = land_colors[~water_mask]
+    rgba[water_mask] = water_colors[water_mask]
+
+    # Clip to buffer around center
+    center_r, center_c = rows // 2, cols // 2
+    buf_px = int(buffer_m / dem_resolution)
+    r0 = max(0, center_r - buf_px)
+    r1 = min(rows, center_r + buf_px)
+    c0 = max(0, center_c - buf_px)
+    c1 = min(cols, center_c + buf_px)
+    clip = rgba[r0:r1, c0:c1]
+
+    # Save as PNG
+    fig, ax = plt.subplots(figsize=(10, 10))
+    extent = [-buffer_m, buffer_m, -buffer_m, buffer_m]
+    ax.imshow(clip, extent=extent, origin="upper")
+    ax.axis("off")
+    basemap_path = Path(cache_dir) / "basemap_fresnel_local.png"
+    fig.savefig(basemap_path, dpi=100, bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+
+    return {
+        "path": basemap_path,
+        "extent": extent,
+        "local_coords": True,
+    }
 
 
 def render_cached_basemaps(
-    metadata, transformer, station_x, station_y, gauge_x, gauge_y, region_bounds, cache_dir: Path
+    metadata,
+    transformer,
+    station_x,
+    station_y,
+    gauge_x,
+    gauge_y,
+    region_bounds,
+    cache_dir: Path,
+    local_dem=None,
+    local_satellite=None,
 ) -> dict:
     """
     Pre-render the three map basemaps once and cache them as images.
@@ -48,11 +359,9 @@ def render_cached_basemaps(
         zoom_level = 9
 
     outer_refl_dist = metadata.get("outer_reflection_dist", 230)
-    outer_fresnel_r = metadata.get("outer_fresnel_radius", 5)
-    buffer_close = int(outer_refl_dist + outer_fresnel_r + 20)
+    buffer_close = int(outer_refl_dist + 20)
 
-    # Store geometry info
-    cache_paths["buffer_wide"] = buffer_wide
+    # Store geometry info (buffer_wide may be updated by satellite imagery below)
     cache_paths["buffer_close"] = buffer_close
     cache_paths["zoom_level"] = zoom_level
 
@@ -69,7 +378,7 @@ def render_cached_basemaps(
     ax_coast.set_ylim(ec_y_min, ec_y_max)
 
     try:
-        ctx.add_basemap(ax_coast, source=ctx.providers.CartoDB.Positron, zoom=7)
+        ctx.add_basemap(ax_coast, source=ctx.providers.Esri.WorldGrayCanvas, zoom=7)
     except Exception:
         ax_coast.set_facecolor("#c6e2ff")
 
@@ -83,87 +392,142 @@ def render_cached_basemaps(
     cache_paths["coast"] = coast_path
     cache_paths["coast_extent"] = [ec_x_min, ec_x_max, ec_y_min, ec_y_max]
 
-    # === Render Regional Context (Esri WorldImagery) ===
+    # === Render Regional Context (Esri WorldImagery or local satellite) ===
     print("  Caching regional context basemap...")
-    fig_map, ax_map = plt.subplots(figsize=(10, 10))
 
     center_x = (station_x + gauge_x) / 2
     center_y = (station_y + gauge_y) / 2
+    regional_rendered = False
 
-    ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
-    ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
+    if local_satellite is not None:
+        sat_path_str, station_lat, station_lon = local_satellite
+        import rasterio as _rio
 
-    try:
-        ctx.add_basemap(ax_map, source=ctx.providers.Esri.WorldImagery, zoom=zoom_level)
-    except Exception:
-        ax_map.set_facecolor("lightblue")
+        with _rio.open(sat_path_str) as _src:
+            sat_half = (
+                min(_src.bounds.right - _src.bounds.left, _src.bounds.top - _src.bounds.bottom) / 2
+            )
+        sat_result = render_satellite_fresnel_basemap(
+            sat_path=sat_path_str,
+            station_lat=station_lat,
+            station_lon=station_lon,
+            buffer_m=int(sat_half),
+            cache_dir=cache_dir,
+        )
+        if sat_result is not None:
+            # Rename to regional basemap path
+            regional_path = Path(cache_dir) / "basemap_regional.png"
+            Path(sat_result["path"]).rename(regional_path)
+            cache_paths["regional"] = regional_path
+            buffer_wide = int(sat_half)
+            cache_paths["regional_extent"] = sat_result["extent"]
+            cache_paths["regional_local_coords"] = True
+            regional_rendered = True
 
-    ax_map.set_aspect("equal")
-    ax_map.axis("off")
+    if not regional_rendered:
+        fig_map, ax_map = plt.subplots(figsize=(10, 10))
 
-    map_path = cache_dir / "basemap_regional.png"
-    fig_map.savefig(map_path, dpi=100, bbox_inches="tight", pad_inches=0)
-    plt.close(fig_map)
+        ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
+        ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
 
-    cache_paths["regional"] = map_path
-    cache_paths["regional_extent"] = [
-        center_x - buffer_wide,
-        center_x + buffer_wide,
-        center_y - buffer_wide,
-        center_y + buffer_wide,
-    ]
+        try:
+            ctx.add_basemap(ax_map, source=ctx.providers.Esri.WorldImagery, zoom=zoom_level)
+        except Exception:
+            ax_map.set_facecolor("lightblue")
+
+        ax_map.set_aspect("equal")
+        ax_map.axis("off")
+
+        map_path = cache_dir / "basemap_regional.png"
+        fig_map.savefig(map_path, dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close(fig_map)
+
+        cache_paths["regional"] = map_path
+        cache_paths["regional_extent"] = [
+            center_x - buffer_wide,
+            center_x + buffer_wide,
+            center_y - buffer_wide,
+            center_y + buffer_wide,
+        ]
+        cache_paths["regional_local_coords"] = False
+
+    cache_paths["buffer_wide"] = buffer_wide
     cache_paths["center_x"] = center_x
     cache_paths["center_y"] = center_y
 
-    # === Render Fresnel Zone Close-up (Esri WorldImagery high zoom) ===
-    print("  Caching Fresnel zone basemap...")
-    fig_sat, ax_sat = plt.subplots(figsize=(12, 12))
+    # === Render reflection point close-up basemap ===
+    # Priority: satellite imagery > DEM > tile server
+    print("  Caching reflection point basemap...")
+    fresnel_rendered = False
 
-    ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
-    ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
+    if local_satellite is not None:
+        sat_path, station_lat, station_lon = local_satellite
+        print(f"  Using satellite imagery basemap ({Path(sat_path).name})...")
+        sat_result = render_satellite_fresnel_basemap(
+            sat_path=sat_path,
+            station_lat=station_lat,
+            station_lon=station_lon,
+            buffer_m=buffer_close,
+            cache_dir=cache_dir,
+        )
+        if sat_result is not None:
+            cache_paths["fresnel"] = sat_result["path"]
+            cache_paths["fresnel_extent"] = sat_result["extent"]
+            cache_paths["fresnel_local_coords"] = True
+            fresnel_rendered = True
 
-    try:
-        ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom="auto")
-    except Exception:
+    if not fresnel_rendered and local_dem is not None:
+        dem_array, dem_resolution = local_dem
+        print("  Using local DEM basemap (2m resolution)...")
+        local_result = render_local_fresnel_basemap(
+            dem_array=dem_array,
+            dem_resolution=dem_resolution,
+            buffer_m=buffer_close,
+            cache_dir=cache_dir,
+        )
+        if local_result is not None:
+            cache_paths["fresnel"] = local_result["path"]
+            cache_paths["fresnel_extent"] = local_result["extent"]
+            cache_paths["fresnel_local_coords"] = True
+            fresnel_rendered = True
+
+    if not fresnel_rendered:
+        # Fall back to tile server imagery.
+        # Use at least 200m buffer so zoom=auto stays ≤18 (Esri tiles available).
+        tile_buffer = max(buffer_close, 200)
+        fig_sat, ax_sat = plt.subplots(figsize=(12, 12))
+        ax_sat.set_xlim(station_x - tile_buffer, station_x + tile_buffer)
+        ax_sat.set_ylim(station_y - tile_buffer, station_y + tile_buffer)
+
         try:
-            ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
-        except Exception:
-            ax_sat.set_facecolor("lightblue")
+            ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom="auto")
+            print(f"  Reflection basemap: tile server OK (zoom=auto, tile_buffer={tile_buffer}m)")
+        except Exception as e1:
+            print(f"  Reflection basemap: zoom=auto failed ({e1}), trying zoom=18")
+            try:
+                ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=18)
+                print("  Reflection basemap: tile server OK (zoom=18)")
+            except Exception as e2:
+                print(f"  Reflection basemap: tile server failed ({e2}), using lightblue fallback")
+                ax_sat.set_facecolor("lightblue")
 
-    ax_sat.set_aspect("equal")
-    ax_sat.axis("off")
+        ax_sat.set_aspect("equal")
+        ax_sat.axis("off")
+        sat_path = cache_dir / "basemap_fresnel.png"
+        fig_sat.savefig(sat_path, dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close(fig_sat)
 
-    sat_path = cache_dir / "basemap_fresnel.png"
-    fig_sat.savefig(sat_path, dpi=100, bbox_inches="tight", pad_inches=0)
-    plt.close(fig_sat)
-
-    cache_paths["fresnel"] = sat_path
-    cache_paths["fresnel_extent"] = [
-        station_x - buffer_close,
-        station_x + buffer_close,
-        station_y - buffer_close,
-        station_y + buffer_close,
-    ]
+        cache_paths["fresnel"] = sat_path
+        cache_paths["fresnel_extent"] = [
+            station_x - tile_buffer,
+            station_x + tile_buffer,
+            station_y - tile_buffer,
+            station_y + tile_buffer,
+        ]
+        cache_paths["fresnel_local_coords"] = False
 
     print("  Basemap caching complete.")
     return cache_paths
-
-
-def calculate_fresnel_radius(reflector_height: float, elevation_deg: float) -> float:
-    """
-    Calculate first Fresnel zone radius on reflecting surface.
-
-    Args:
-        reflector_height: Distance from antenna to reflecting surface (meters)
-        elevation_deg: Satellite elevation angle (degrees)
-
-    Returns:
-        First Fresnel zone radius (meters)
-    """
-    elev_rad = np.radians(elevation_deg)
-    slant_distance = reflector_height / np.sin(elev_rad)
-    fresnel_radius = np.sqrt((GPS_L1_WAVELENGTH * slant_distance) / 2)
-    return fresnel_radius
 
 
 def load_data(station: str, year: int, results_dir: Path):
@@ -179,12 +543,41 @@ def load_data(station: str, year: int, results_dir: Path):
     df = pd.read_csv(raw_file)
     df["datetime"] = pd.to_datetime(df["date"]) + pd.to_timedelta(df["UTCtime"], unit="h")
 
-    # Get station config (relative to script location)
+    # Apply RHdot + IF bias corrections if available
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
-    config_file = project_root / "config" / "stations_config.json"
-    with open(config_file) as f:
-        config = json.load(f)
+    station_lower = station.lower()
+    local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
+    if_corrected_path = (
+        local_refl
+        / "Files"
+        / station_lower
+        / f"{station_lower}_{year}_subdaily_edit.txt.withrhdotIF"
+    )
+    if if_corrected_path.exists():
+        from scripts.utils.subdaily_loader import load_corrected_retrievals
+
+        corrected = load_corrected_retrievals(if_corrected_path)
+        # Match on MJD+sat+freq (unique per retrieval) and replace RH
+        if len(corrected) > 0 and "MJD" in df.columns:
+            merge_keys = ["MJD", "sat", "freq"]
+            available_keys = [k for k in merge_keys if k in df.columns and k in corrected.columns]
+            merged = df.merge(
+                corrected[available_keys + ["rh_if_corrected"]],
+                on=available_keys,
+                how="left",
+            )
+            n_matched = merged["rh_if_corrected"].notna().sum()
+            if n_matched > 0:
+                df.loc[merged["rh_if_corrected"].notna(), "RH"] = merged.loc[
+                    merged["rh_if_corrected"].notna(), "rh_if_corrected"
+                ].values
+                print(f"Applied RHdot+IF corrections to {n_matched}/{len(df)} retrievals")
+
+    # Get station config
+    from scripts.utils.station_config import load_stations
+
+    config = load_stations()
 
     station_config = config[station]
     antenna_height = station_config["ellipsoidal_height_m"]
@@ -222,12 +615,14 @@ def load_data(station: str, year: int, results_dir: Path):
     # Determine reference type and coordinates
     ref_source = "Unknown"
     ref_site_id = "Unknown"
+    has_reference = False
     gauge_lat, gauge_lon = station_lat, station_lon  # Default to station location
 
     # Check ERDDAP first if configured and file exists
     if erddap_file and erddap_file.exists():
         ref_source = f"{erddap_station_name} ERDDAP" if erddap_station_name else "ERDDAP"
         ref_site_id = erddap_station_name or "ERDDAP Station"
+        has_reference = True
         if "latitude" in erddap_config and "longitude" in erddap_config:
             gauge_lat = erddap_config["latitude"]
             gauge_lon = erddap_config["longitude"]
@@ -237,6 +632,7 @@ def load_data(station: str, year: int, results_dir: Path):
         ref_source = "CO-OPS"
         nearest = noaa_coops["nearest_station"]
         ref_site_id = nearest.get("id", "Unknown")
+        has_reference = True
         if "latitude" in nearest and "longitude" in nearest:
             gauge_lat = nearest["latitude"]
             gauge_lon = nearest["longitude"]
@@ -244,80 +640,71 @@ def load_data(station: str, year: int, results_dir: Path):
     elif usgs_info and usgs_info.get("target_usgs_site"):
         ref_source = "USGS"
         ref_site_id = usgs_info.get("target_usgs_site", "Unknown")
+        has_reference = True
         if "usgs_latitude" in usgs_info and "usgs_longitude" in usgs_info:
             gauge_lat = usgs_info["usgs_latitude"]
             gauge_lon = usgs_info["usgs_longitude"]
             print(f"Using USGS gauge {ref_site_id} at ({gauge_lat}, {gauge_lon})")
+        else:
+            # Coordinates not in config — query NWIS
+            try:
+                import dataretrieval.nwis as nwis
+
+                site_info, _ = nwis.get_info(sites=ref_site_id)
+                gauge_lat = float(site_info["dec_lat_va"].iloc[0])
+                gauge_lon = float(site_info["dec_long_va"].iloc[0])
+                print(f"Using USGS gauge {ref_site_id} at ({gauge_lat}, {gauge_lon}) [from NWIS]")
+            except Exception as e:
+                print(f"  Could not fetch USGS gauge coords for {ref_site_id}: {e}")
     elif coops_info and coops_info.get("target_station"):
         ref_source = "CO-OPS"
         ref_site_id = coops_info.get("target_station", "Unknown")
+        has_reference = True
         if "station_latitude" in coops_info and "station_longitude" in coops_info:
             gauge_lat = coops_info["station_latitude"]
             gauge_lon = coops_info["station_longitude"]
             print(f"Using CO-OPS station {ref_site_id} at ({gauge_lat}, {gauge_lon})")
 
-    # Get azimuth mask and elevation angles from GNSS-IR config
-    gnssir_config_path = project_root / station_config.get("gnssir_json_params_path", "")
-    az_ranges = [[0, 80], [330, 360]]
-    e1, e2 = 5.0, 15.0  # Default elevation angles
-    if gnssir_config_path.exists():
-        with open(gnssir_config_path) as f:
-            gnssir_config = json.load(f)
-            azval = gnssir_config.get("azval2", [])
-            if len(azval) >= 2:
-                az_ranges = [
-                    [azval[i], azval[i + 1]] for i in range(0, len(azval), 2) if i + 1 < len(azval)
-                ]
-            e1 = gnssir_config.get("e1", e1)  # Min elevation (outer Fresnel zone)
-            e2 = gnssir_config.get("e2", e2)  # Max elevation (inner Fresnel zone)
-
-    # Calculate actual RH and elevation ranges from data
+    # Calculate reflection distance range from data (for view extent)
     mean_rh = df["RH"].mean()
-    min_rh = df["RH"].min()
     max_rh = df["RH"].max()
 
     df["elev_avg"] = (df["eminO"] + df["emaxO"]) / 2.0
     actual_elev_min = df["elev_avg"].min()
-    actual_elev_max = df["elev_avg"].max()
 
-    # Calculate Fresnel zone boundaries using min/max RH and elevation
-    # Inner zone: closest reflections (low RH, high elevation)
-    inner_fresnel_radius = calculate_fresnel_radius(min_rh, actual_elev_max)
-    inner_reflection_dist = min_rh / np.tan(np.radians(actual_elev_max))
-
-    # Outer zone: farthest reflections (high RH, low elevation)
-    outer_fresnel_radius = calculate_fresnel_radius(max_rh, actual_elev_min)
+    # Farthest reflection distance (high RH, low elevation) sets the view extent
     outer_reflection_dist = max_rh / np.tan(np.radians(actual_elev_min))
 
     print(f"Station {station}:")
-    print(f"  RH range: {min_rh:.2f}m to {max_rh:.2f}m (mean: {mean_rh:.2f}m)")
-    print(f"  Config elevation range: {e1}°-{e2}°")
-    print(f"  Actual elevation range: {actual_elev_min:.2f}°-{actual_elev_max:.2f}°")
-    print(
-        f"  Inner reflection: {inner_reflection_dist:.1f}m from antenna, "
-        f"Fresnel radius: {inner_fresnel_radius:.1f}m"
-    )
-    print(
-        f"  Outer reflection: {outer_reflection_dist:.1f}m from antenna, "
-        f"Fresnel radius: {outer_fresnel_radius:.1f}m"
-    )
+    print(f"  RH range: {df['RH'].min():.2f}m to {max_rh:.2f}m (mean: {mean_rh:.2f}m)")
+    print(f"  Actual elevation range: {actual_elev_min:.2f}°-{df['elev_avg'].max():.2f}°")
+    print(f"  Max reflection distance: {outer_reflection_dist:.1f}m from antenna")
+
+    # Load azimuth limits from gnssir params
+    az_start, az_end = 0, 360
+    params_path = station_config.get("gnssir_json_params_path", "")
+    try:
+        with open(project_root / params_path) as _pf:
+            _params = json.load(_pf)
+        _azval = _params.get("azval2", [0, 360])
+        if len(_azval) >= 2:
+            az_start, az_end = _azval[0], _azval[1]
+    except Exception:
+        pass
 
     metadata = {
         "ref_source": ref_source,
         "ref_site_id": ref_site_id,
-        "az_ranges": az_ranges,
+        "has_reference": has_reference,
         "station_lat": station_lat,
         "station_lon": station_lon,
         "gauge_lat": gauge_lat,
         "gauge_lon": gauge_lon,
         "station_name": station,
-        "inner_fresnel_radius": inner_fresnel_radius,
-        "outer_fresnel_radius": outer_fresnel_radius,
-        "inner_reflection_dist": inner_reflection_dist,
         "outer_reflection_dist": outer_reflection_dist,
         "mean_rh": mean_rh,
-        "elev_min": e1,
-        "elev_max": e2,
+        "az_start": az_start,
+        "az_end": az_end,
     }
 
     df["WSE"] = antenna_height - df["RH"]
@@ -348,9 +735,22 @@ def load_data(station: str, year: int, results_dir: Path):
         ref_df = pd.read_csv(erddap_file, skiprows=[1])  # Skip units row
         # ERDDAP files have 'time' and water level columns
         ref_df["datetime"] = pd.to_datetime(ref_df["time"], utc=True).dt.tz_convert(None)
-        # Use NAVD88 datum for consistency
-        if "water_surface_above_navd88" in ref_df.columns:
-            ref_df["wl"] = ref_df["water_surface_above_navd88"]
+        # Find water level column from config or common names
+        wl_col = erddap_config.get("variables", {}).get("water_level", None)
+        if wl_col is None or wl_col not in ref_df.columns:
+            for col in [
+                "water_surface_above_navd88",
+                "sea_surface_height_above_geopotential_datum",
+                "sea_level",
+                "water_level",
+                "wl",
+            ]:
+                if col in ref_df.columns:
+                    wl_col = col
+                    break
+        if wl_col and wl_col in ref_df.columns:
+            units_scale = erddap_config.get("variables", {}).get("units_scale", 1.0)
+            ref_df["wl"] = ref_df[wl_col] * units_scale
             ref_df["wl_dm"] = ref_df["wl"] - ref_df["wl"].mean()
     elif usgs_file.exists():
         ref_df = pd.read_csv(usgs_file)
@@ -389,6 +789,602 @@ def load_data(station: str, year: int, results_dir: Path):
     return df, ref_df, metadata
 
 
+def render_cover_frame(metadata, frame_config, output_path):
+    """
+    Render a single cover frame with map context panels and station metadata.
+
+    Shown for ~3 seconds at animation start. Contains all 3 basemap panels
+    (regional overview, regional context, reflection point basemap) plus
+    station info text. Dimensions match animation frames for ffmpeg concat.
+    """
+    figsize = frame_config.get("figsize", (10, 10))
+    dpi = frame_config.get("dpi", 100)
+    cached_basemaps = frame_config["cached_basemaps"]
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(
+        2,
+        2,
+        hspace=0.15,
+        wspace=0.1,
+        top=0.93,
+        bottom=0.03,
+        left=0.03,
+        right=0.97,
+    )
+
+    station_name = metadata.get("station_name", "Unknown")
+    ref_source = metadata.get("ref_source", "Unknown")
+    ref_site_id = metadata.get("ref_site_id", "")
+    year = frame_config.get("year", "")
+    doy_start = frame_config.get("doy_start", "")
+    doy_end = frame_config.get("doy_end", "")
+
+    # Top-left: Regional overview
+    ax_coast = fig.add_subplot(gs[0, 0])
+    if cached_basemaps and "coast" in cached_basemaps:
+        coast_img = plt.imread(cached_basemaps["coast"])
+        ext = cached_basemaps["coast_extent"]
+        ax_coast.imshow(coast_img, extent=ext, aspect="auto")
+    ax_coast.set_aspect("equal")
+    ax_coast.axis("off")
+    ax_coast.set_title("Regional Overview", fontsize=11, fontweight="bold")
+
+    # Top-right: Regional context
+    ax_regional = fig.add_subplot(gs[0, 1])
+    if cached_basemaps and "regional" in cached_basemaps:
+        regional_img = plt.imread(cached_basemaps["regional"])
+        ext = cached_basemaps["regional_extent"]
+        ax_regional.imshow(regional_img, extent=ext, aspect="auto")
+    ax_regional.set_aspect("equal")
+    ax_regional.axis("off")
+    buffer_wide = cached_basemaps.get("buffer_wide", 5000)
+    map_scale_km = (buffer_wide * 2) / 1000
+    ax_regional.set_title(f"Regional ({map_scale_km:.0f} km)", fontsize=11, fontweight="bold")
+
+    # Bottom-left: Reflection point basemap
+    ax_fresnel = fig.add_subplot(gs[1, 0])
+    if cached_basemaps and "fresnel" in cached_basemaps:
+        fresnel_img = plt.imread(cached_basemaps["fresnel"])
+        ext = cached_basemaps["fresnel_extent"]
+        ax_fresnel.imshow(fresnel_img, extent=ext, aspect="auto")
+    ax_fresnel.set_aspect("equal")
+    ax_fresnel.axis("off")
+    outer_dist = metadata.get("outer_reflection_dist", 0)
+    ax_fresnel.set_title(f"Reflection Zone ({outer_dist:.0f}m)", fontsize=11, fontweight="bold")
+
+    # Bottom-right: Station metadata text
+    ax_text = fig.add_subplot(gs[1, 1])
+    ax_text.axis("off")
+
+    lat = metadata.get("station_lat", 0)
+    lon = metadata.get("station_lon", 0)
+    has_ref = metadata.get("has_reference", False)
+
+    info_lines = [
+        f"Station: {station_name}",
+        f"Year: {year}",
+        f"DOY: {doy_start} – {doy_end}",
+        f"Lat: {lat:.4f}°  Lon: {lon:.4f}°",
+        "",
+    ]
+    if has_ref:
+        ref_label = ref_source
+        if ref_site_id and ref_site_id != "Unknown":
+            ref_label += f" ({ref_site_id})"
+        info_lines.append(f"Reference: {ref_label}")
+        gauge_lat = metadata.get("gauge_lat", 0)
+        gauge_lon = metadata.get("gauge_lon", 0)
+        info_lines.append(f"Gauge: {gauge_lat:.4f}°, {gauge_lon:.4f}°")
+    else:
+        info_lines.append("Reference: None")
+
+    ax_text.text(
+        0.1,
+        0.85,
+        "\n".join(info_lines),
+        transform=ax_text.transAxes,
+        fontsize=13,
+        verticalalignment="top",
+        fontfamily="monospace",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8),
+    )
+
+    fig.suptitle(
+        f"{station_name} — GNSS-IR Polar Animation",
+        fontsize=16,
+        fontweight="bold",
+    )
+
+    plt.savefig(output_path, dpi=dpi, facecolor="white")
+    plt.close(fig)
+    return output_path
+
+
+def _draw_reflection_wedge(ax, origin_x, origin_y, df_all):
+    """Draw azimuth wedge(s) showing the range of possible retrievals.
+
+    Finds contiguous azimuth clusters in the data (gaps > 30° separate clusters).
+    For each cluster draws an outer arc at the farthest reflection distance and
+    radial boundary lines, in the style of the original animation.
+    """
+    if df_all is None or len(df_all) == 0:
+        return
+
+    azimuths = np.sort(df_all["Azim"].dropna().values)
+    if len(azimuths) == 0:
+        return
+
+    # Compute outer/inner reflection distances to match the scatter plot geometry exactly.
+    # Each point is plotted at RH / tan(elev_avg), so use the same formula here.
+    df = df_all.copy()
+    df["elev_avg"] = (df["eminO"] + df["emaxO"]) / 2.0
+    df["refl_dist"] = df["RH"] / np.tan(np.radians(df["elev_avg"]))
+    outer_dist = df["refl_dist"].max()
+    inner_dist = df["refl_dist"].min()
+
+    # Split azimuths into contiguous clusters at gaps > 30°
+    gaps = np.diff(azimuths)
+    gap_indices = np.where(gaps > 30)[0]
+    cluster_starts = np.concatenate([[0], gap_indices + 1])
+    cluster_ends = np.concatenate([gap_indices, [len(azimuths) - 1]])
+
+    for cs, ce in zip(cluster_starts, cluster_ends):
+        az_s = azimuths[cs]
+        az_e = azimuths[ce]
+        az_arc = np.linspace(az_s, az_e, max(int(az_e - az_s) + 1, 2))
+
+        # Outer arc
+        ax.plot(
+            origin_x + outer_dist * np.sin(np.radians(az_arc)),
+            origin_y + outer_dist * np.cos(np.radians(az_arc)),
+            color="cyan",
+            linewidth=1.5,
+            alpha=0.75,
+            zorder=4,
+        )
+        # Inner arc (if meaningfully different from origin)
+        if inner_dist > 2:
+            ax.plot(
+                origin_x + inner_dist * np.sin(np.radians(az_arc)),
+                origin_y + inner_dist * np.cos(np.radians(az_arc)),
+                color="cyan",
+                linewidth=0.8,
+                alpha=0.4,
+                linestyle="--",
+                zorder=4,
+            )
+        # Radial boundary lines
+        for az_deg in [az_s, az_e]:
+            az_rad = np.radians(az_deg)
+            ax.plot(
+                [origin_x, origin_x + outer_dist * np.sin(az_rad)],
+                [origin_y, origin_y + outer_dist * np.cos(az_rad)],
+                color="cyan",
+                linewidth=1.0,
+                alpha=0.7,
+                zorder=4,
+            )
+
+    return inner_dist, outer_dist
+
+
+def render_animation_frame(
+    df_all,
+    df_current,
+    df_accumulated,
+    df_filtered_out,
+    ref_df,
+    metadata,
+    frame_time,
+    frame_num,
+    total_frames,
+    output_path,
+    frame_config,
+    bin_start,
+    bin_end,
+):
+    """
+    Render a single animation frame with stacked layout: progress bar,
+    time series, and reflection points.
+
+    The progress bar shows position within the full animation period.
+    The time series uses a rolling window (14 days for presentation, 3 days
+    for analysis). The reflection point panel shows the cached basemap with
+    colored scatter points.
+    """
+    mode = frame_config.get("mode", "presentation")
+    start_time = frame_config["start_time"]
+    end_time = frame_config["end_time"]
+    vmin_wl = frame_config["vmin_wl"]
+    vmax_wl = frame_config["vmax_wl"]
+    figsize = frame_config.get("figsize", (10, 10))
+    dpi = frame_config.get("dpi", 100)
+    cached_basemaps = frame_config.get("cached_basemaps", {})
+
+    ref_source = metadata.get("ref_source", "Unknown")
+    ref_site_id = metadata.get("ref_site_id", "Unknown")
+    station_name = metadata.get("station_name", "Unknown")
+    outer_refl_dist = metadata.get("outer_reflection_dist", 230)
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(
+        3,
+        1,
+        height_ratios=[0.03, 0.30, 0.67],
+        hspace=0.08,
+        top=0.95,
+        bottom=0.03,
+        left=0.08,
+        right=0.92,
+    )
+
+    # === Progress bar ===
+    ax_progress = fig.add_subplot(gs[0])
+    total_seconds = (end_time - start_time).total_seconds()
+    if total_seconds > 0:
+        frac_start = (bin_start - start_time).total_seconds() / total_seconds
+        frac_end = (bin_end - start_time).total_seconds() / total_seconds
+        frac_start = max(0, min(1, frac_start))
+        frac_end = max(0, min(1, frac_end))
+    else:
+        frac_start, frac_end = 0, 1
+
+    ax_progress.axhspan(0, 1, xmin=0, xmax=1, color="#e0e0e0")
+    ax_progress.axhspan(0, 1, xmin=frac_start, xmax=frac_end, color="darkorange", alpha=0.9)
+    ax_progress.set_xlim(0, 1)
+    ax_progress.set_ylim(0, 1)
+    ax_progress.set_yticks([])
+
+    # DOY labels at edges
+
+    start_doy = start_time.timetuple().tm_yday
+    end_doy = end_time.timetuple().tm_yday
+    ax_progress.text(
+        0.01,
+        0.5,
+        f"DOY {start_doy}",
+        transform=ax_progress.transAxes,
+        fontsize=8,
+        va="center",
+        ha="left",
+    )
+    ax_progress.text(
+        0.99,
+        0.5,
+        f"DOY {end_doy}",
+        transform=ax_progress.transAxes,
+        fontsize=8,
+        va="center",
+        ha="right",
+    )
+    ax_progress.set_xticks([])
+    for spine in ax_progress.spines.values():
+        spine.set_visible(False)
+
+    # === Time series ===
+    ax_ts = fig.add_subplot(gs[1])
+
+    # Rolling window: 14 days for presentation, 3 days for analysis
+    if mode == "analysis":
+        ts_half_window = timedelta(days=1.5)
+    else:
+        ts_half_window = timedelta(days=7)
+
+    ts_left = frame_time - ts_half_window
+    ts_right = frame_time + ts_half_window
+    # Clamp to data range
+    ts_left = max(ts_left, start_time - timedelta(hours=2))
+    ts_right = min(ts_right, end_time + timedelta(hours=2))
+
+    # Reference label
+    if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
+        ref_legend_label = ref_source
+    else:
+        ref_legend_label = f"{ref_source} {ref_site_id}"
+
+    # Plot reference data
+    if ref_df is not None:
+        ref_window = ref_df[
+            (ref_df["datetime"] >= ts_left - timedelta(hours=6))
+            & (ref_df["datetime"] <= ts_right + timedelta(hours=6))
+        ]
+        if len(ref_window) > 0 and "wl_dm" in ref_window.columns:
+            ax_ts.plot(
+                ref_window["datetime"],
+                ref_window["wl_dm"] * 100,
+                "r-",
+                linewidth=2,
+                alpha=0.9,
+                label=ref_legend_label,
+                zorder=2,
+            )
+
+    # All GNSS-IR data (background)
+    ax_ts.scatter(
+        df_all["datetime"],
+        df_all["WSE_dm"] * 100,
+        c="lightgray",
+        s=8,
+        alpha=0.3,
+        label="GNSS-IR (all)",
+        zorder=1,
+    )
+
+    # Current window data
+    if len(df_current) > 0:
+        ax_ts.scatter(
+            df_current["datetime"],
+            df_current["WSE_dm"] * 100,
+            c="gold",
+            s=30,
+            edgecolors="darkorange",
+            linewidths=1.5,
+            alpha=0.95,
+            label="Current",
+            zorder=4,
+        )
+
+    # Filtered-out points
+    if len(df_filtered_out) > 0:
+        ax_ts.scatter(
+            df_filtered_out["datetime"],
+            df_filtered_out["WSE_dm"] * 100,
+            c="red",
+            s=20,
+            marker="x",
+            alpha=0.5,
+            label="Filtered out",
+            zorder=3,
+        )
+
+    # Highlight current window
+    if len(df_current) > 0:
+        window_start = df_current["datetime"].min()
+        window_end = df_current["datetime"].max()
+    else:
+        window_start = bin_start
+        window_end = bin_end
+    ax_ts.axvspan(window_start, window_end, alpha=0.15, color="gold", zorder=0)
+    window_center = window_start + (window_end - window_start) / 2
+    ax_ts.axvline(window_center, color="darkorange", linestyle="-", alpha=0.7, linewidth=2)
+
+    ax_ts.set_xlim(ts_left, ts_right)
+    # Y limits from data range with padding
+    all_wse = df_all["WSE_dm"] * 100
+    if len(all_wse) > 0:
+        ymin = all_wse.quantile(0.02) - 2
+        ymax = all_wse.quantile(0.98) + 2
+        ax_ts.set_ylim(ymin, ymax)
+
+    ax_ts.set_ylabel("Water Level (cm)", fontsize=10)
+    ax_ts.legend(loc="upper right", fontsize=7, ncol=2, framealpha=0.8)
+    ax_ts.grid(True, alpha=0.3)
+
+    import matplotlib.dates as mdates
+
+    ax_ts.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
+    ax_ts.xaxis.set_major_locator(mdates.AutoDateLocator())
+    plt.setp(ax_ts.xaxis.get_majorticklabels(), rotation=30, ha="right", fontsize=8)
+
+    ax_ts.set_title(
+        f"{station_name} — Frame {frame_num}/{total_frames}",
+        fontsize=11,
+        fontweight="bold",
+    )
+
+    # === Reflection points ===
+    ax_refl = fig.add_subplot(gs[2])
+    buffer_close = int(outer_refl_dist + 20)
+
+    use_local = cached_basemaps.get("fresnel_local_coords", False) if cached_basemaps else False
+    origin_x = 0 if use_local else cached_basemaps.get("center_x", 0)
+    origin_y = 0 if use_local else cached_basemaps.get("center_y", 0)
+
+    ax_refl.set_xlim(origin_x - buffer_close, origin_x + buffer_close)
+    ax_refl.set_ylim(origin_y - buffer_close, origin_y + buffer_close)
+
+    # Cached fresnel basemap
+    if cached_basemaps and "fresnel" in cached_basemaps:
+        fresnel_img = plt.imread(cached_basemaps["fresnel"])
+        ext = cached_basemaps["fresnel_extent"]
+        ax_refl.imshow(fresnel_img, extent=ext, aspect="auto", zorder=0)
+
+    # Station marker
+    ax_refl.plot(
+        origin_x,
+        origin_y,
+        "r^",
+        markersize=12,
+        markeredgecolor="white",
+        markeredgewidth=2,
+        zorder=10,
+    )
+
+    # Reflection wedge overlay
+    wedge_result = _draw_reflection_wedge(ax_refl, origin_x, origin_y, df_all)
+    inner_dist = wedge_result[0] if wedge_result else 0
+    outer_dist_wedge = wedge_result[1] if wedge_result else outer_refl_dist
+
+    # Colormap for water level
+    cmap = plt.cm.coolwarm
+    norm = mcolors.Normalize(vmin=vmin_wl, vmax=vmax_wl)
+
+    # Plot accumulated data (faded)
+    if len(df_accumulated) > 0:
+        for _, row in df_accumulated.iterrows():
+            az_rad = np.radians(row["Azim"])
+            elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
+            elev_rad = np.radians(elev_deg)
+            reflection_dist = row["RH"] / np.tan(elev_rad)
+            dx = reflection_dist * np.sin(az_rad)
+            dy = reflection_dist * np.cos(az_rad)
+            color = cmap(norm(row["WSE_dm"] * 100))
+            ax_refl.plot(
+                origin_x + dx,
+                origin_y + dy,
+                "o",
+                markersize=4,
+                color=color,
+                alpha=0.5,
+                markeredgecolor="none",
+            )
+
+    # Plot current data (prominent)
+    if len(df_current) > 0:
+        for _, row in df_current.iterrows():
+            az_rad = np.radians(row["Azim"])
+            elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
+            elev_rad = np.radians(elev_deg)
+            reflection_dist = row["RH"] / np.tan(elev_rad)
+            dx = reflection_dist * np.sin(az_rad)
+            dy = reflection_dist * np.cos(az_rad)
+            color = cmap(norm(row["WSE_dm"] * 100))
+            ax_refl.plot(
+                origin_x + dx,
+                origin_y + dy,
+                "o",
+                markersize=12,
+                color=color,
+                alpha=0.95,
+                markeredgecolor="darkorange",
+                markeredgewidth=2,
+                zorder=5,
+            )
+
+    # Colorbar
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax_refl, pad=0.02, shrink=0.7, aspect=20)
+    cbar.set_label("Water Level (cm)", fontsize=9)
+
+    # Compass
+    compass_offset = buffer_close * 0.8
+    ax_refl.annotate(
+        "N",
+        (origin_x, origin_y + compass_offset),
+        ha="center",
+        fontsize=11,
+        fontweight="bold",
+        color="white",
+    )
+    ax_refl.annotate(
+        "E",
+        (origin_x + compass_offset, origin_y),
+        ha="center",
+        fontsize=11,
+        fontweight="bold",
+        color="white",
+    )
+
+    ax_refl.set_aspect("equal")
+    ax_refl.axis("off")
+    ax_refl.set_title(
+        f"Fresnel Zone ({inner_dist:.0f}-{outer_dist_wedge:.0f}m) | Current: {len(df_current)} pts",
+        fontsize=10,
+    )
+
+    plt.savefig(output_path, dpi=dpi, facecolor="white")
+    plt.close(fig)
+
+
+def assemble_with_ffmpeg(
+    frames_dir,
+    cover_frame_path,
+    output_path,
+    fps=4,
+    cover_duration_s=3.0,
+    end_pause_s=2.0,
+    output_format="gif",
+):
+    """
+    Assemble animation frames into GIF or MP4 using ffmpeg concat demuxer.
+
+    Streams frames from disk — no need to load all into RAM. The cover frame
+    is held for cover_duration_s at the start, and the last frame is held
+    for end_pause_s at the end.
+    """
+    frames_dir = Path(frames_dir)
+    cover_frame_path = Path(cover_frame_path)
+    output_path = Path(output_path)
+
+    if not Path(FFMPEG_PATH).exists() and not shutil.which("ffmpeg"):
+        raise FileNotFoundError(f"ffmpeg not found at {FFMPEG_PATH}")
+
+    frame_files = sorted(frames_dir.glob("frame_*.png"))
+    if not frame_files:
+        raise RuntimeError("No frame_*.png files found in frames directory")
+
+    frame_duration = 1.0 / fps
+
+    # Write concat demuxer framelist
+    framelist_path = frames_dir / "framelist.txt"
+    with open(framelist_path, "w") as f:
+        f.write("ffconcat version 1.0\n")
+        # Cover frame
+        f.write(f"file '{cover_frame_path.resolve()}'\n")
+        f.write(f"duration {cover_duration_s}\n")
+        # Animation frames
+        for frame_file in frame_files[:-1]:
+            f.write(f"file '{frame_file.resolve()}'\n")
+            f.write(f"duration {frame_duration}\n")
+        # Last frame with end pause
+        f.write(f"file '{frame_files[-1].resolve()}'\n")
+        f.write(f"duration {end_pause_s}\n")
+        # Concat demuxer needs trailing file entry for last duration
+        f.write(f"file '{frame_files[-1].resolve()}'\n")
+
+    ffmpeg = FFMPEG_PATH if Path(FFMPEG_PATH).exists() else "ffmpeg"
+
+    if output_format == "gif":
+        # Single-pass GIF with inline palette generation (ffmpeg 3.4 compatible)
+        cmd_gif = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(framelist_path),
+            "-filter_complex",
+            "split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
+            "[s1][p]paletteuse=dither=bayer:bayer_scale=5",
+            "-loop",
+            "0",
+            str(output_path),
+        ]
+        result = subprocess.run(cmd_gif, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg GIF encoding failed: {result.stderr}")
+
+    elif output_format == "mp4":
+        # Use mpeg4 encoder (available in this ffmpeg build)
+        cmd_mp4 = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(framelist_path),
+            "-vcodec",
+            "mpeg4",
+            "-pix_fmt",
+            "yuv420p",
+            "-q:v",
+            "5",
+            str(output_path),
+        ]
+        result = subprocess.run(cmd_mp4, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg MP4 encoding failed: {result.stderr}")
+
+    print(f"Saved {output_format.upper()} to {output_path}")
+    return output_path
+
+
 def create_frame(
     df_all,
     df_current,
@@ -414,7 +1410,7 @@ def create_frame(
 ):
     """Create a single frame with regional context + satellite overlay."""
 
-    # Three-panel bottom layout: Regional Overview | Regional | Fresnel Zone
+    # Three-panel bottom layout: Regional Overview | Regional | Reflection Points
     # Reduced from 22x10 to 18x8 for smaller GIF size
     fig = plt.figure(figsize=(18, 8))
     gs = fig.add_gridspec(
@@ -432,15 +1428,10 @@ def create_frame(
 
     ref_source = metadata.get("ref_source", "Unknown")
     ref_site_id = metadata.get("ref_site_id", "Unknown")
+    has_reference = metadata.get("has_reference", False)
     station_name = metadata.get("station_name", "Unknown")
-    az_ranges = metadata.get("az_ranges", [[0, 80], [330, 360]])
 
-    # Get Fresnel zone geometry
-    inner_fresnel_r = metadata.get("inner_fresnel_radius", 3)
-    outer_fresnel_r = metadata.get("outer_fresnel_radius", 5)
-    inner_refl_dist = metadata.get("inner_reflection_dist", 90)
     outer_refl_dist = metadata.get("outer_reflection_dist", 230)
-    # mean_rh for distance calculations is computed internally
 
     # === Top panel: Time series (spans both columns) ===
     ax_ts = fig.add_subplot(gs[0, :])
@@ -501,23 +1492,30 @@ def create_frame(
             zorder=5,
         )
 
-    # Show filtered-out (low quality) points in current bin with X markers
+    # Show filtered-out (low quality) points with muted X markers
     if len(df_filtered_out) > 0:
         ax_ts.scatter(
             df_filtered_out["datetime"],
             df_filtered_out["WSE_dm"] * 100,
-            c="red",
-            s=60,
-            alpha=0.7,
+            c="salmon",
+            s=30,
+            alpha=0.35,
             marker="x",
-            linewidths=1.5,
-            zorder=4,
-            label="Current (filtered)",
+            linewidths=1,
+            zorder=2,
+            label="Filtered out",
         )
 
-    window_start = frame_time - timedelta(hours=3)
-    ax_ts.axvspan(window_start, frame_time, alpha=0.15, color="gold", zorder=0)
-    ax_ts.axvline(frame_time, color="darkorange", linestyle="-", alpha=0.7, linewidth=2)
+    # Highlight the current window on the time series
+    if len(df_current) > 0:
+        window_start = df_current["datetime"].min()
+        window_end = df_current["datetime"].max()
+    else:
+        window_start = frame_time - timedelta(hours=3)
+        window_end = frame_time
+    ax_ts.axvspan(window_start, window_end, alpha=0.15, color="gold", zorder=0)
+    window_center = window_start + (window_end - window_start) / 2
+    ax_ts.axvline(window_center, color="darkorange", linestyle="-", alpha=0.7, linewidth=2)
 
     ax_ts.set_xlim(start_time - timedelta(hours=2), end_time + timedelta(hours=2))
     # Calculate y-limits based on actual data range (with 10% padding, asymmetric)
@@ -529,13 +1527,17 @@ def create_frame(
     ax_ts.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%m/%d %H:%M"))
 
     # Create appropriate title based on reference source type
-    if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
-        ref_label = f"{ref_source}"
+    if ref_df is not None:
+        if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
+            ref_label = f"{ref_source}"
+        else:
+            ref_label = f"{ref_source} Gauge {ref_site_id}"
+        title_line1 = f"{station_name} Water Level: GNSS-IR vs {ref_label}"
     else:
-        ref_label = f"{ref_source} Gauge {ref_site_id}"
+        title_line1 = f"{station_name} Water Level: GNSS-IR"
 
     ax_ts.set_title(
-        f"{station_name} Water Level: GNSS-IR vs {ref_label}\n"
+        f"{title_line1}\n"
         f'Frame {frame_num}/{total_frames} — {frame_time.strftime("%Y-%m-%d %H:%M")} UTC',
         fontsize=12,
         fontweight="bold",
@@ -565,7 +1567,7 @@ def create_frame(
         ax_coast.imshow(coast_img, extent=ext, aspect="auto", zorder=0)
     else:
         try:
-            ctx.add_basemap(ax_coast, source=ctx.providers.CartoDB.Positron, zoom=7)
+            ctx.add_basemap(ax_coast, source=ctx.providers.Esri.WorldGrayCanvas, zoom=7)
         except Exception:
             ax_coast.set_facecolor("#c6e2ff")
 
@@ -605,33 +1607,36 @@ def create_frame(
         zorder=10,
         label="GNSS Station",
     )
-    ax_coast.plot(
-        gauge_x,
-        gauge_y,
-        "bs",
-        markersize=12,
-        markeredgecolor="white",
-        markeredgewidth=2,
-        zorder=10,
-        label="Reference",
-    )
+    if has_reference:
+        ax_coast.plot(
+            gauge_x,
+            gauge_y,
+            "bs",
+            markersize=12,
+            markeredgecolor="white",
+            markeredgewidth=2,
+            zorder=10,
+            label="Reference",
+        )
 
-    # Draw connection line between station and gauge
-    ax_coast.plot(
-        [station_x, gauge_x],
-        [station_y, gauge_y],
-        "gray",
-        linestyle="--",
-        linewidth=1.5,
-        alpha=0.6,
-        zorder=9,
-    )
+        # Draw connection line between station and gauge
+        ax_coast.plot(
+            [station_x, gauge_x],
+            [station_y, gauge_y],
+            "gray",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.6,
+            zorder=9,
+        )
 
     # Calculate appropriate buffer size based on station and gauge separation
-    # Distance in Web Mercator meters
     from math import sqrt
 
-    gauge_distance_m = sqrt((gauge_x - station_x) ** 2 + (gauge_y - station_y) ** 2)
+    if has_reference:
+        gauge_distance_m = sqrt((gauge_x - station_x) ** 2 + (gauge_y - station_y) ** 2)
+    else:
+        gauge_distance_m = 0
 
     # Set buffer to show both stations with comfortable margins
     if gauge_distance_m < 1000:  # Very close (<1km) - like GLBX/Bartlett Cove
@@ -671,12 +1676,23 @@ def create_frame(
     # === Bottom middle: Regional context (variable scale) ===
     ax_map = fig.add_subplot(gs[1, 1])
 
-    # Center the map between station and gauge for better view
-    center_x = (station_x + gauge_x) / 2
-    center_y = (station_y + gauge_y) / 2
+    # Determine coordinate origin for regional panel
+    use_regional_local = (
+        cached_basemaps.get("regional_local_coords", False) if cached_basemaps else False
+    )
+    if use_regional_local:
+        reg_sx, reg_sy = 0, 0
+        reg_gx = gauge_x - station_x
+        reg_gy = gauge_y - station_y
+        reg_cx, reg_cy = reg_sx, reg_sy
+    else:
+        reg_sx, reg_sy = station_x, station_y
+        reg_gx, reg_gy = gauge_x, gauge_y
+        reg_cx = (station_x + gauge_x) / 2
+        reg_cy = (station_y + gauge_y) / 2
 
-    ax_map.set_xlim(center_x - buffer_wide, center_x + buffer_wide)
-    ax_map.set_ylim(center_y - buffer_wide, center_y + buffer_wide)
+    ax_map.set_xlim(reg_cx - buffer_wide, reg_cx + buffer_wide)
+    ax_map.set_ylim(reg_cy - buffer_wide, reg_cy + buffer_wide)
 
     # Use cached basemap if available, otherwise fetch
     if cached_basemaps and "regional" in cached_basemaps:
@@ -689,26 +1705,10 @@ def create_frame(
         except Exception:
             ax_map.set_facecolor("lightblue")
 
-    # Scaled Fresnel zone indicator (scale with buffer size)
-    fresnel_indicator_radius = min(200, buffer_wide * 0.08)  # Scale with map size
-    for az_start, az_end in az_ranges:
-        theta1, theta2 = 90 - az_end, 90 - az_start
-        wedge = Wedge(
-            (station_x, station_y),
-            fresnel_indicator_radius,
-            theta1,
-            theta2,
-            facecolor="cyan",
-            edgecolor="blue",
-            alpha=0.35,
-            linewidth=1.5,
-        )
-        ax_map.add_patch(wedge)
-
     # Station and gauge markers
     ax_map.plot(
-        station_x,
-        station_y,
+        reg_sx,
+        reg_sy,
         "r^",
         markersize=12,
         markeredgecolor="white",
@@ -718,45 +1718,46 @@ def create_frame(
         label="GNSS Station",
     )
 
-    # Use appropriate label based on reference source
-    if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
-        gauge_label = ref_source
-    else:
-        gauge_label = f"{ref_source} {ref_site_id}"
-    ax_map.plot(
-        gauge_x,
-        gauge_y,
-        "bs",
-        markersize=10,
-        markeredgecolor="white",
-        markeredgewidth=1.5,
-        alpha=0.8,
-        zorder=10,
-        label=gauge_label,
-    )
-    ax_map.plot([station_x, gauge_x], [station_y, gauge_y], "w-", linewidth=1.5, alpha=0.5)
+    if has_reference:
+        # Use appropriate label based on reference source
+        if "ERDDAP" in ref_source or "CO-OPS" in ref_source:
+            gauge_label = ref_source
+        else:
+            gauge_label = f"{ref_source} {ref_site_id}"
+        ax_map.plot(
+            reg_gx,
+            reg_gy,
+            "bs",
+            markersize=10,
+            markeredgecolor="white",
+            markeredgewidth=1.5,
+            alpha=0.8,
+            zorder=10,
+            label=gauge_label,
+        )
+        ax_map.plot([reg_sx, reg_gx], [reg_sy, reg_gy], "w-", linewidth=1.5, alpha=0.5)
 
-    # Draw box showing Fresnel zone extent
+    # Draw box showing reflection point view extent
     buffer_close = 60
     box_x2 = [
-        station_x - buffer_close,
-        station_x + buffer_close,
-        station_x + buffer_close,
-        station_x - buffer_close,
-        station_x - buffer_close,
+        reg_sx - buffer_close,
+        reg_sx + buffer_close,
+        reg_sx + buffer_close,
+        reg_sx - buffer_close,
+        reg_sx - buffer_close,
     ]
     box_y2 = [
-        station_y - buffer_close,
-        station_y - buffer_close,
-        station_y + buffer_close,
-        station_y + buffer_close,
-        station_y - buffer_close,
+        reg_sy - buffer_close,
+        reg_sy - buffer_close,
+        reg_sy + buffer_close,
+        reg_sy + buffer_close,
+        reg_sy - buffer_close,
     ]
     ax_map.plot(box_x2, box_y2, "cyan", linewidth=2, zorder=9)
 
     ax_map.annotate(
         "N",
-        (center_x, center_y + buffer_wide * 0.85),
+        (reg_cx, reg_cy + buffer_wide * 0.85),
         ha="center",
         fontsize=12,
         fontweight="bold",
@@ -769,13 +1770,19 @@ def create_frame(
     map_scale_km = (buffer_wide * 2) / 1000  # Total width in km
     ax_map.set_title(f"Regional ({map_scale_km:.0f} km)", fontsize=11, fontweight="bold")
 
-    # === Bottom right: Fresnel zone close-up with data ===
+    # === Bottom right: Reflection point close-up with data ===
     ax_sat = fig.add_subplot(gs[1, 2])
     # Buffer needs to encompass outer reflection zone plus some margin
-    buffer_close = int(outer_refl_dist + outer_fresnel_r + 20)
+    buffer_close = int(outer_refl_dist + 20)
 
-    ax_sat.set_xlim(station_x - buffer_close, station_x + buffer_close)
-    ax_sat.set_ylim(station_y - buffer_close, station_y + buffer_close)
+    # Local coords: origin at (0,0) in real meters from antenna
+    # Web Mercator coords: origin at (station_x, station_y)
+    use_local = cached_basemaps.get("fresnel_local_coords", False) if cached_basemaps else False
+    origin_x = 0 if use_local else station_x
+    origin_y = 0 if use_local else station_y
+
+    ax_sat.set_xlim(origin_x - buffer_close, origin_x + buffer_close)
+    ax_sat.set_ylim(origin_y - buffer_close, origin_y + buffer_close)
 
     # Use cached basemap if available, otherwise fetch
     if cached_basemaps and "fresnel" in cached_basemaps:
@@ -786,7 +1793,7 @@ def create_frame(
         try:
             ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom="auto")
         except Exception as e:
-            print(f"Warning: Could not load Fresnel zone basemap at zoom 18: {e}")
+            print(f"Warning: Could not load basemap at zoom 18: {e}")
             try:
                 ctx.add_basemap(ax_sat, source=ctx.providers.Esri.WorldImagery, zoom=17)
                 print("  Loaded with zoom=17 instead")
@@ -794,66 +1801,10 @@ def create_frame(
                 print(f"  Fallback to zoom 17 also failed: {e2}")
                 ax_sat.set_facecolor("lightblue")
 
-    # Draw Fresnel zone boundaries as annular rings at reflection distances
-    for az_start, az_end in az_ranges:
-        theta1, theta2 = 90 - az_end, 90 - az_start
-
-        # Inner Fresnel zone (high elevation, close to antenna)
-        inner_annulus_inner = Wedge(
-            (station_x, station_y),
-            inner_refl_dist - inner_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="yellow",
-            alpha=0.6,
-            linewidth=1.5,
-            linestyle="--",
-        )
-        inner_annulus_outer = Wedge(
-            (station_x, station_y),
-            inner_refl_dist + inner_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="yellow",
-            alpha=0.6,
-            linewidth=1.5,
-            linestyle="--",
-        )
-        ax_sat.add_patch(inner_annulus_inner)
-        ax_sat.add_patch(inner_annulus_outer)
-
-        # Outer Fresnel zone (low elevation, far from antenna)
-        outer_annulus_inner = Wedge(
-            (station_x, station_y),
-            outer_refl_dist - outer_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="cyan",
-            alpha=0.6,
-            linewidth=2,
-            linestyle="-",
-        )
-        outer_annulus_outer = Wedge(
-            (station_x, station_y),
-            outer_refl_dist + outer_fresnel_r,
-            theta1,
-            theta2,
-            facecolor="none",
-            edgecolor="cyan",
-            alpha=0.6,
-            linewidth=2,
-            linestyle="-",
-        )
-        ax_sat.add_patch(outer_annulus_inner)
-        ax_sat.add_patch(outer_annulus_outer)
-
     # Station marker
     ax_sat.plot(
-        station_x,
-        station_y,
+        origin_x,
+        origin_y,
         "r^",
         markersize=12,
         markeredgecolor="white",
@@ -861,46 +1812,60 @@ def create_frame(
         zorder=10,
     )
 
+    # Reflection wedge overlay
+    wedge_result = _draw_reflection_wedge(ax_sat, origin_x, origin_y, df_all)
+    inner_dist = wedge_result[0] if wedge_result else 0
+    outer_dist_wedge = wedge_result[1] if wedge_result else outer_refl_dist
+
     # Colormap for water level
     cmap = plt.cm.coolwarm
     norm = mcolors.Normalize(vmin=vmin_wl, vmax=vmax_wl)
 
-    # Plot accumulated data with varying reflection distances
+    # Plot accumulated data with age-based fading. Points stay bright for 1/4
+    # of the total duration, then linearly fade to a minimum alpha.
+    total_duration_s = (end_time - start_time).total_seconds()
+    fade_start_s = total_duration_s / 4  # bright for first quarter
+    fade_alpha_min = 0.12
+
     if len(df_accumulated) > 0:
         for _, row in df_accumulated.iterrows():
             az_rad = np.radians(row["Azim"])
-            # Calculate elevation angle (average of min and max observed)
             elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
             elev_rad = np.radians(elev_deg)
-
-            # Calculate reflection distance using actual RH for this retrieval
-            # As water level changes, the reflection point moves horizontally
             reflection_dist = row["RH"] / np.tan(elev_rad)
 
             # Convert to Cartesian (N=up, E=right)
             dx = reflection_dist * np.sin(az_rad)
             dy = reflection_dist * np.cos(az_rad)
 
+            # Age-based alpha: bright for 1/4 of duration, then fade
+            age_s = (frame_time - row["datetime"]).total_seconds()
+            if age_s <= fade_start_s:
+                pt_alpha = 0.8
+            elif total_duration_s > fade_start_s:
+                fade_frac = (age_s - fade_start_s) / (total_duration_s - fade_start_s)
+                pt_alpha = max(fade_alpha_min, 0.8 - fade_frac * (0.8 - fade_alpha_min))
+            else:
+                pt_alpha = 0.8
+
             color = cmap(norm(row["WSE_dm"] * 100))
             ax_sat.plot(
-                station_x + dx,
-                station_y + dy,
+                origin_x + dx,
+                origin_y + dy,
                 "o",
                 markersize=4,
                 color=color,
-                alpha=0.5,
+                alpha=pt_alpha,
                 markeredgecolor="none",
+                zorder=3,
             )
 
     # Plot current bin data larger
     if len(df_current) > 0:
         for _, row in df_current.iterrows():
             az_rad = np.radians(row["Azim"])
-            # Calculate elevation angle (average of min and max observed)
             elev_deg = (row["eminO"] + row["emaxO"]) / 2.0
             elev_rad = np.radians(elev_deg)
-
-            # Calculate reflection distance using actual RH for this retrieval
             reflection_dist = row["RH"] / np.tan(elev_rad)
 
             dx = reflection_dist * np.sin(az_rad)
@@ -908,8 +1873,8 @@ def create_frame(
 
             color = cmap(norm(row["WSE_dm"] * 100))
             ax_sat.plot(
-                station_x + dx,
-                station_y + dy,
+                origin_x + dx,
+                origin_y + dy,
                 "o",
                 markersize=12,
                 color=color,
@@ -926,10 +1891,10 @@ def create_frame(
     cbar.set_label("Water Level (cm)", fontsize=9)
 
     # Compass and labels (positioned for larger view extent)
-    compass_offset = buffer_close * 0.8  # Position near edge of view
+    compass_offset = buffer_close * 0.8
     ax_sat.annotate(
         "N",
-        (station_x, station_y + compass_offset),
+        (origin_x, origin_y + compass_offset),
         ha="center",
         fontsize=11,
         fontweight="bold",
@@ -937,7 +1902,7 @@ def create_frame(
     )
     ax_sat.annotate(
         "E",
-        (station_x + compass_offset, station_y),
+        (origin_x + compass_offset, origin_y),
         ha="center",
         fontsize=11,
         fontweight="bold",
@@ -947,13 +1912,75 @@ def create_frame(
     ax_sat.set_aspect("equal")
     ax_sat.axis("off")
     ax_sat.set_title(
-        f"Reflection Distances ({inner_refl_dist:.0f}-{outer_refl_dist:.0f}m) | "
+        f"Fresnel Zone ({inner_dist:.0f}-{outer_dist_wedge:.0f}m) | "
         f"Current: {len(df_current)} pts",
         fontsize=10,
     )
 
     plt.savefig(output_path, dpi=80, bbox_inches="tight", facecolor="white")
     plt.close()
+
+
+# Module-level state for multiprocessing workers
+_worker_shared = {}
+
+
+def _init_frame_worker(shared_data):
+    """Initialize each worker process with shared data."""
+    global _worker_shared
+    _worker_shared = shared_data
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+
+def _render_frame_task(frame_args):
+    """Render a single animation frame (called in worker process)."""
+    i, bin_start, bin_end, frame_path_str = frame_args
+    d = _worker_shared
+    frame_path = Path(frame_path_str)
+
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
+    df = d["df"]
+    df_all_unfiltered = d["df_all_unfiltered"]
+
+    df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
+
+    df_filtered_out = df_all_unfiltered[
+        (df_all_unfiltered["datetime"] < bin_end)
+        & (df_all_unfiltered["PkNoise"] <= d["pknoise_median"])
+    ].copy()
+    df_accumulated = df[df["datetime"] < bin_end].copy()
+
+    create_frame(
+        df,
+        df_current,
+        df_accumulated,
+        df_filtered_out,
+        d["ref_df"],
+        d["metadata"],
+        bin_end,
+        i + 1,
+        d["total_frames"],
+        frame_path,
+        d["start_time"],
+        d["end_time"],
+        d["vmin_wl"],
+        d["vmax_wl"],
+        transformer,
+        d["station_x"],
+        d["station_y"],
+        d["gauge_x"],
+        d["gauge_y"],
+        d["region_bounds"],
+        cached_basemaps=d["cached_basemaps"],
+    )
+
+    if (i + 1) % 10 == 0:
+        print(f"  Created frame {i + 1}/{d['total_frames']}")
+
+    return frame_path_str
 
 
 def create_animation(
@@ -965,9 +1992,14 @@ def create_animation(
     output_path: Path,
     quality_filter: bool = True,
     fps: int = 4,
-    bin_hours: int = 12,
+    bin_hours: int = 6,
+    window_hours: int = 6,
+    n_workers: int = 0,
+    mode: str = "presentation",
+    output_format: str = "gif",
+    wl_range: float = None,
 ):
-    """Create the full animation."""
+    """Create the full animation. Uses multiprocessing when n_workers > 1."""
 
     df, ref_df, metadata = load_data(station, year, results_dir)
 
@@ -1006,6 +2038,9 @@ def create_animation(
             vmin_wl = min(vmin_wl, ref_min)
             vmax_wl = max(vmax_wl, ref_max)
 
+    if wl_range is not None:
+        vmin_wl, vmax_wl = -wl_range, wl_range
+
     print(f"Water level range: {vmin_wl:.1f} to {vmax_wl:.1f} cm")
 
     # Transform coordinates from metadata
@@ -1033,50 +2068,115 @@ def create_animation(
             & (ref_df["datetime"] <= end_time + timedelta(days=1))
         ].copy()
 
-    bin_times = pd.date_range(
-        start=start_time.floor(f"{bin_hours}h") + timedelta(hours=bin_hours),
-        end=end_time.ceil(f"{bin_hours}h"),
-        freq=f"{bin_hours}h",
+    # Build frame windows (mode-dependent: variable tidal windows in analysis,
+    # fixed bins in presentation)
+    frame_windows = build_frame_windows(
+        mode=mode,
+        ref_df=ref_df,
+        df=df,
+        start_time=start_time,
+        end_time=end_time,
+        bin_hours=bin_hours,
+        window_hours=window_hours,
     )
-
-    total_frames = len(bin_times)
+    total_frames = len(frame_windows)
+    if mode == "analysis":
+        spans = [(w[1] - w[0]).total_seconds() / 3600 for w in frame_windows]
+        if spans:
+            print(
+                f"Analysis mode: {total_frames} tidal-phase frames "
+                f"(avg {np.mean(spans):.1f}h, range {min(spans):.1f}-{max(spans):.1f}h)"
+            )
+    else:
+        print(f"Presentation mode: {total_frames} frames")
     print(f"Creating {total_frames} frames...")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir_path = Path(tmpdir)
+    frames_dir = (
+        results_dir / station / "animation_frames" / f"{station}_{year}_DOY{doy_start}-{doy_end}"
+    )
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Saving frames to {frames_dir}")
 
-        # Pre-render and cache basemaps (huge speedup - only fetch tiles once)
-        print("Pre-rendering basemaps (this happens once)...")
-        cached_basemaps = render_cached_basemaps(
-            metadata,
-            transformer,
-            station_x,
-            station_y,
-            gauge_x,
-            gauge_y,
-            region_bounds,
-            tmpdir_path,
-        )
+    # Load local satellite imagery or DEM for reflection point basemap
+    local_satellite = None
+    local_dem = None
+    sat_path = results_dir / station / f"{station.lower()}_sentinel2_10m.tif"
+    dem_path = results_dir / station / f"{station.lower()}_arcticdem_2m.tif"
 
+    if sat_path.exists():
+        local_satellite = (str(sat_path), metadata["station_lat"], metadata["station_lon"])
+        print(f"Loaded satellite imagery: {sat_path.name}")
+    elif dem_path.exists():
+        try:
+            import rasterio
+
+            with rasterio.open(dem_path) as src:
+                local_dem = (src.read(1).astype(float), src.res[0])
+                print(f"Loaded local DEM: {dem_path.name} ({local_dem[0].shape})")
+        except ImportError:
+            print("rasterio not available, skipping local DEM")
+        except Exception as e:
+            print(f"Failed to load local DEM: {e}")
+
+    # Pre-render and cache basemaps (huge speedup - only fetch tiles once)
+    print("Pre-rendering basemaps (this happens once)...")
+    cached_basemaps = render_cached_basemaps(
+        metadata,
+        transformer,
+        station_x,
+        station_y,
+        gauge_x,
+        gauge_y,
+        region_bounds,
+        frames_dir,
+        local_dem=local_dem,
+        local_satellite=local_satellite,
+    )
+
+    # Build frame_config dict shared across all frames
+    # Build frame arguments from windows
+    frame_args = []
+    for i, (bin_start, bin_end, center_time) in enumerate(frame_windows):
+        frame_path = frames_dir / f"frame_{i:04d}.png"
+        frame_args.append((i, bin_start, bin_end, str(frame_path)))
+
+    if n_workers == 0:
+        n_workers = min(mp.cpu_count(), 8)
+
+    if n_workers > 1:
+        shared_data = {
+            "df": df,
+            "df_all_unfiltered": df_all_unfiltered,
+            "pknoise_median": pknoise_median,
+            "ref_df": ref_df,
+            "metadata": metadata,
+            "total_frames": total_frames,
+            "start_time": start_time,
+            "end_time": end_time,
+            "vmin_wl": vmin_wl,
+            "vmax_wl": vmax_wl,
+            "station_x": station_x,
+            "station_y": station_y,
+            "gauge_x": gauge_x,
+            "gauge_y": gauge_y,
+            "region_bounds": region_bounds,
+            "cached_basemaps": cached_basemaps,
+        }
+        print(f"Rendering {total_frames} frames using {n_workers} workers...")
+        with mp.Pool(n_workers, initializer=_init_frame_worker, initargs=(shared_data,)) as pool:
+            results = pool.map(_render_frame_task, frame_args)
+        frame_paths = [Path(p) for p in results]
+    else:
+        # Serial fallback
         frame_paths = []
-        df_accumulated = pd.DataFrame()
-
-        for i, bin_end in enumerate(bin_times):
-            bin_start = bin_end - timedelta(hours=bin_hours)
-
-            # Get quality-passed points for current bin (these accumulate)
+        for i, bin_start, bin_end, frame_path_str in frame_args:
+            frame_path = Path(frame_path_str)
             df_current = df[(df["datetime"] >= bin_start) & (df["datetime"] < bin_end)].copy()
-
-            # Get filtered-out (low quality) points for current bin (shown but don't accumulate)
-            df_current_all = df_all_unfiltered[
-                (df_all_unfiltered["datetime"] >= bin_start)
-                & (df_all_unfiltered["datetime"] < bin_end)
-            ]
-            df_filtered_out = df_current_all[df_current_all["PkNoise"] <= pknoise_median].copy()
-
-            df_accumulated = pd.concat([df_accumulated, df_current], ignore_index=True)
-
-            frame_path = tmpdir_path / f"frame_{i:04d}.png"
+            df_filtered_out = df_all_unfiltered[
+                (df_all_unfiltered["datetime"] < bin_end)
+                & (df_all_unfiltered["PkNoise"] <= pknoise_median)
+            ].copy()
+            df_accumulated = df[df["datetime"] < bin_end].copy()
             create_frame(
                 df,
                 df_current,
@@ -1101,28 +2201,20 @@ def create_animation(
                 cached_basemaps=cached_basemaps,
             )
             frame_paths.append(frame_path)
-
             if (i + 1) % 10 == 0:
                 print(f"  Created frame {i+1}/{total_frames}")
 
-        print(f"Compiling GIF at {fps} fps...")
-        images = [imageio.imread(str(fp)) for fp in frame_paths]
-        # Add pause frames at the end
-        for _ in range(fps * 2):
-            images.append(images[-1])
+    # Assemble animation with ffmpeg (no cover frame — original layout has context in every frame)
+    # Use first frame as stand-in for cover since all frames have the map panels
+    print(f"Compiling {output_format.upper()} at {fps} fps...")
+    assemble_with_ffmpeg(
+        frames_dir=frames_dir,
+        cover_frame_path=frame_paths[0],
+        output_path=output_path,
+        fps=fps,
+        output_format=output_format,
+    )
 
-        # Use pillow plugin with optimization for smaller file size
-        imageio.mimsave(
-            str(output_path),
-            images,
-            fps=fps,
-            loop=0,
-            plugin="pillow",
-            optimize=True,
-            quantizer="nq",
-        )
-
-    print(f"Saved animation to {output_path}")
     return total_frames
 
 
@@ -1137,29 +2229,104 @@ def main():
     )
     parser.add_argument("--fps", type=int, default=4)
     parser.add_argument(
-        "--bin_hours", type=int, default=12, help="Time bin size in hours (default: 12)"
+        "--bin_hours",
+        type=int,
+        default=6,
+        help="Fallback time bin size in hours when no tidal signal detected (default: 6)",
+    )
+    parser.add_argument(
+        "--window_hours",
+        type=int,
+        default=6,
+        help="Plotting window size in hours centered on each frame (default: 6)",
     )
     parser.add_argument("--no_quality_filter", action="store_true")
+    parser.add_argument(
+        "--no_split",
+        action="store_true",
+        help="Disable automatic seasonal splitting for large DOY ranges",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Number of parallel workers for frame rendering (0=auto, 1=serial)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["presentation", "analysis"],
+        default="presentation",
+        help="Animation mode: presentation (NPS, fixed bins, 14-day rolling TS) "
+        "or analysis (EarthScope, tidal-synced, 3-day rolling TS) (default: presentation)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["gif", "mp4"],
+        default="gif",
+        help="Output format (default: gif)",
+    )
+    parser.add_argument(
+        "--wl_range",
+        type=float,
+        default=None,
+        help="Symmetric water level axis range in cm, e.g. 30 for ±30 cm (default: auto from data)",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
-    output_path = (
-        results_dir
-        / args.station
-        / f"{args.station}_{args.year}_polar_animation_DOY{args.doy_start}-{args.doy_end}.gif"
-    )
+    quality_filter = not args.no_quality_filter
 
-    create_animation(
-        args.station,
-        args.year,
-        args.doy_start,
-        args.doy_end,
-        results_dir,
-        output_path,
-        quality_filter=not args.no_quality_filter,
-        fps=args.fps,
-        bin_hours=args.bin_hours,
-    )
+    ext = args.format
+    doy_range = args.doy_end - args.doy_start + 1
+    if doy_range > SEASONAL_CHUNK_DAYS and not args.no_split:
+        chunks = split_into_seasons(args.doy_start, args.doy_end)
+        print(
+            f"Splitting {doy_range}-day range into {len(chunks)} seasonal animations: "
+            + ", ".join(f"DOY {s}-{e}" for s, e in chunks)
+        )
+        for doy_s, doy_e in chunks:
+            output_path = (
+                results_dir
+                / args.station
+                / f"{args.station}_{args.year}_polar_animation_DOY{doy_s}-{doy_e}.{ext}"
+            )
+            create_animation(
+                args.station,
+                args.year,
+                doy_s,
+                doy_e,
+                results_dir,
+                output_path,
+                quality_filter=quality_filter,
+                fps=args.fps,
+                bin_hours=args.bin_hours,
+                window_hours=args.window_hours,
+                n_workers=args.workers,
+                mode=args.mode,
+                output_format=args.format,
+                wl_range=args.wl_range,
+            )
+    else:
+        output_path = (
+            results_dir / args.station / f"{args.station}_{args.year}_polar_animation_"
+            f"DOY{args.doy_start}-{args.doy_end}.{ext}"
+        )
+        create_animation(
+            args.station,
+            args.year,
+            args.doy_start,
+            args.doy_end,
+            results_dir,
+            output_path,
+            quality_filter=quality_filter,
+            fps=args.fps,
+            bin_hours=args.bin_hours,
+            window_hours=args.window_hours,
+            n_workers=args.workers,
+            mode=args.mode,
+            output_format=args.format,
+            wl_range=args.wl_range,
+        )
 
 
 if __name__ == "__main__":

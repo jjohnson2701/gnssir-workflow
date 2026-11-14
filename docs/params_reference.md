@@ -200,7 +200,7 @@ Here's a complete params file for a coastal GNSS station:
     "minH": 5.0,
     "maxH": 12.0,
     "e1": 2.0,
-    "e2": 5.0,
+    "e2": 10.0,
     "NReg": [5.0, 12.0],
     "PkNoise": 2.0,
     "polyV": 4,
@@ -243,6 +243,41 @@ Here's a complete params file for a coastal GNSS station:
 - Ensure RINEX data exists for the station/date
 
 ---
+
+## Findings from tests in 2024
+
+From three stations: GLBX (Gustavus AK, elevation 2 to 5 degrees, 6 m tide), SC02 (Friday Harbor WA, 5 to 13 degrees, 3 m tide) and FORA (Fort Raleigh NC, wind-driven water level). Each test had its plan written before the run.
+
+### Peak-to-noise limit (PkNoise)
+
+Process a month with the limits off (`reqAmp` all 0, `PkNoise` 0, as an extension) and plot the scatter against a gauge for each limit. `scripts/station_page.py` makes this plot.
+
+- GLBX: scatter falls from 0.29 m with no limit to 0.20 m at 2.0, and the slope against the gauge moves from 0.954 to 1.000. Weak arcs are biased toward the middle of the height window, not only noisy. Above 2.0 the time coverage drops.
+- SC02: the limit changes the scatter by 1% up to 2.8.
+- GLBX with the wider range of 2 to 10 degrees: the limit changes almost nothing (0.094 m with and without it). The limit matters where the arcs are short.
+- Once the peak-to-noise limit is set, the amplitude limit (`reqAmp`) removed almost nothing at these stations.
+
+Most arcs that the limit rejects still hold the true peak: at GLBX 58% of rejected arcs have a peak at the expected height, against 0.2% at a wrong height. The inverse method uses that information.
+
+### Refraction
+
+Keep `refraction` on. With no correction the heights have a scale error: 4.7% at 2 to 5 degrees, 1.5% at 5 to 13 degrees. The default model (1, Bennett) gives a slope of 1 within 0.4% at both stations. Model 5 (NITE) is not better in gnssrefl, which uses a climatology for all models.
+
+### Sample interval
+
+Slower sampling costs arcs before it costs precision. At GLBX (arcs of about 10 minutes): 5 s keeps 97% of the arcs, 15 s keeps 80%, 30 s keeps 51%. At SC02 30 s keeps 99%. To decimate, use the command-line option `gnssir ... -dec N`; a `dec` value in the station file is ignored.
+
+### Inverse method
+
+`scripts/inverse_heights.py` needs enough arcs per 3 hours. Where the periodogram range is narrow, give the inverse method a wider elevation range with `inverse_elevation` in `config/stations.yaml`. GLBX: 7.1 cm with 2 to 5 degrees, 4.1 cm with 2 to 10 degrees. Use all signals together; single-signal runs were unstable at GLBX.
+
+### L2 signal
+
+A RINEX 3 file can hold both the civil L2 signal (L2C; codes S2L, S2S, S2X) and the legacy signal (S2W, S2P). gnssrefl 4 reads L2C from a RINEX 3 file. A conversion to RINEX 2 can put the legacy signal in its place: its SNR is 7 to 19 dB lower. `scripts/station_check.py` lists what a file holds.
+
+### Height above the surface and distance from the water level
+
+The circular plot (`scripts/visualizer/periodogram_circle.py`) shows both. Use the second view at tidal stations to choose the azimuth mask: reflections that follow the water lie on the ring; fixed reflectors do not.
 
 ## Further Reading
 

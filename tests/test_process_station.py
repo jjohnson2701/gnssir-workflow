@@ -20,7 +20,7 @@ class TestLoadConfig:
     @pytest.mark.unit
     def test_load_valid_station(self, config_dir):
         """Test loading a valid station configuration."""
-        config_path = config_dir / "stations_config.json"
+        config_path = config_dir / "stations.yaml"
         if not config_path.exists():
             pytest.skip("Config file not found")
 
@@ -34,7 +34,7 @@ class TestLoadConfig:
     @pytest.mark.unit
     def test_load_nonexistent_station_raises(self, config_dir):
         """Test that loading non-existent station raises ValueError."""
-        config_path = config_dir / "stations_config.json"
+        config_path = config_dir / "stations.yaml"
         if not config_path.exists():
             pytest.skip("Config file not found")
 
@@ -46,7 +46,7 @@ class TestLoadConfig:
     @pytest.mark.unit
     def test_load_case_insensitive(self, config_dir):
         """Test that station names are case-insensitive."""
-        config_path = config_dir / "stations_config.json"
+        config_path = config_dir / "stations.yaml"
         if not config_path.exists():
             pytest.skip("Config file not found")
 

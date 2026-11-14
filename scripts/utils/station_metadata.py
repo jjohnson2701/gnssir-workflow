@@ -4,27 +4,26 @@
 """
 Station Metadata Helper for Enhanced GNSS-IR Dashboard
 
-Loads station configuration from stations_config.json and provides
+Loads station configuration from config/stations.yaml and provides
 helper functions for accessing antenna heights, reference sources,
 and other station-specific metadata.
 """
 
-import json
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 from functools import lru_cache
 
 # Project root for config loading
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @lru_cache(maxsize=1)
 def _load_stations_config() -> Dict[str, Any]:
     """Load and cache the stations configuration file."""
-    config_path = PROJECT_ROOT / "config" / "stations_config.json"
-    if config_path.exists():
-        with open(config_path, "r") as f:
-            return json.load(f)
+    from scripts.utils.station_config import DEFAULT_STATIONS_PATH, load_stations
+
+    if DEFAULT_STATIONS_PATH.exists():
+        return load_stations()
     return {}
 
 

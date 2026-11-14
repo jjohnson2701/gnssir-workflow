@@ -76,7 +76,7 @@ class TestStationConfig:
     @pytest.mark.unit
     def test_load_valid_station(self, config_dir):
         """Test loading a valid station from config."""
-        config_path = config_dir / "stations_config.json"
+        config_path = config_dir / "stations.yaml"
         if not config_path.exists():
             pytest.skip("Config file not found")
 
@@ -90,7 +90,7 @@ class TestStationConfig:
     @pytest.mark.unit
     def test_load_nonexistent_station(self, config_dir):
         """Test loading a station that doesn't exist."""
-        config_path = config_dir / "stations_config.json"
+        config_path = config_dir / "stations.yaml"
         if not config_path.exists():
             pytest.skip("Config file not found")
 

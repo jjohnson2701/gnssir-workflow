@@ -11,7 +11,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
-from dashboard_components.station_metadata import (  # noqa: E402
+from scripts.utils.station_metadata import (  # noqa: E402
     get_station_config,
     get_reference_source_info,
     _calculate_coops_distance,

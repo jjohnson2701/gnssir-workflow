@@ -18,7 +18,6 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 import argparse
-import json
 
 # Add project modules
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -53,16 +52,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_station_config(station_name: str) -> dict:
-    """Load station configuration from stations_config.json."""
-    config_path = PROJECT_ROOT / "config" / "stations_config.json"
-    if not config_path.exists():
-        logging.error(f"Config file not found: {config_path}")
-        return None
+    """Load station configuration (config/stations.yaml and its reference catalog)."""
+    from scripts.utils.station_config import load_station
 
-    with open(config_path) as f:
-        config = json.load(f)
-
-    return config.get(station_name.upper())
+    return load_station(station_name)
 
 
 def find_nearest_coops_station(station_config: dict, max_distance_km: float = 50) -> dict:

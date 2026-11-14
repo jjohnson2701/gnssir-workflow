@@ -38,7 +38,6 @@ def load_tool_paths(tool_paths_config_path, project_root):
     """
     # Define default tool paths
     default_tool_paths = {
-        "gfzrnx_path": "gfzrnx",
         "rinex2snr_path": "rinex2snr",
         "gnssir_path": "gnssir",
         "quicklook_path": "quickLook",
@@ -78,7 +77,7 @@ def load_tool_paths(tool_paths_config_path, project_root):
 
 def load_station_config(stations_config_path, station_id_uppercase, project_root):
     """
-    Load station-specific configuration from stations_config.json.
+    Load station-specific configuration from config/stations.yaml.
 
     Args:
         stations_config_path (str or Path): Path to the stations configuration file
@@ -101,7 +100,13 @@ def load_station_config(stations_config_path, station_id_uppercase, project_root
 
     # Load the configuration
     logging.info(f"Loading stations configuration from {stations_config_path}")
-    stations_config = load_config(stations_config_path)
+    from scripts.utils.station_config import load_stations
+
+    try:
+        stations_config = load_stations(stations_config_path)
+    except Exception as e:
+        logging.error(f"Error loading {stations_config_path}: {e}")
+        stations_config = None
 
     # Check if configuration was loaded successfully
     if stations_config is None:

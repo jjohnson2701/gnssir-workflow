@@ -1,0 +1,61 @@
+{
+    "station": "mdai",
+    "lat": 38.1390532246,
+    "lon": -75.1888452235,
+    "ht": -33.159,
+    "minH": 1.0,
+    "maxH": 6.0,
+    "e1": 5.0,
+    "e2": 25.0,
+    "NReg": [
+        1.0,
+        6.0
+    ],
+    "PkNoise": 3.0,
+    "polyV": 4,
+    "pele": [
+        5.0,
+        30
+    ],
+    "ediff": 2.0,
+    "desiredP": 0.005,
+    "azval2": [
+        0.0,
+        360.0
+    ],
+    "freqs": [
+        1,
+        20,
+        5,
+        101,
+        102,
+        201,
+        205,
+        206,
+        207,
+        208
+    ],
+    "reqAmp": [
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
+    ],
+    "refraction": true,
+    "overwriteResults": true,
+    "seekRinex": false,
+    "wantCompression": false,
+    "plt_screen": false,
+    "onesat": null,
+    "screenstats": false,
+    "pltname": "mdai_lsp.png",
+    "delTmax": 75.0,
+    "gzip": false,
+    "ellist": []
+}

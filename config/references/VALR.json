@@ -1,0 +1,47 @@
+{
+  "note": "Reference catalog. Written by find_reference_stations; safe to regenerate.",
+  "usgs_comparison": {
+    "search_radius_km": 100,
+    "priority_param_codes": [
+      "00065",
+      "62610",
+      "62611",
+      "62620"
+    ],
+    "target_usgs_site": "16229000",
+    "usgs_parameter_code_to_use": "00065",
+    "usgs_gauge_stated_datum": "Unknown",
+    "notes": "Using Kalihi Stream near Honolulu (16229000) at 9.8km - closest Hawaiian USGS gauge with active water level data."
+  },
+  "external_data_sources": {
+    "noaa_coops": {
+      "enabled": true,
+      "primary_reference": true,
+      "search_radius_km": 100,
+      "preferred_stations": [
+        "1612401",
+        "1612340"
+      ],
+      "nearest_station": {
+        "id": "1612401",
+        "name": "Pearl Harbor",
+        "distance_km": 2.04,
+        "latitude": 21.3642,
+        "longitude": -157.9589
+      },
+      "station_name": "Pearl Harbor, HI",
+      "distance_km": 2.04,
+      "data_products": [
+        "predictions",
+        "water_level"
+      ],
+      "datum": "MSL",
+      "time_zone": "gmt",
+      "interval": "6",
+      "notes": "CO-OPS tide gauge at Pearl Harbor - primary reference for VALR. Closest reliable tide gauge to Pearl Harbor area GNSS station."
+    },
+    "ndbc_buoys": {
+      "enabled": false
+    }
+  }
+}

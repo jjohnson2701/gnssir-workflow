@@ -6,7 +6,7 @@
 Generate matched subdaily data using ERDDAP water level reference.
 
 This script:
-1. Reads station configuration from stations_config.json
+1. Reads station configuration from config/stations.yaml
 2. Loads GNSS-IR reflector height data
 3. Loads ERDDAP water level data (based on config)
 4. Matches observations based on timestamps (nearest neighbor)
@@ -18,8 +18,8 @@ Usage:
 """
 
 import argparse
-import json
 import logging
+import os
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 
 def load_station_config(station: str, config_path: Path) -> dict:
     """Load station configuration from JSON file."""
-    with open(config_path) as f:
-        config = json.load(f)
+    from scripts.utils.station_config import load_stations
+
+    config = load_stations(config_path)
 
     if station not in config:
         raise ValueError(f"Station {station} not found in config. Available: {list(config.keys())}")
@@ -89,6 +90,7 @@ def load_erddap_data(erddap_file: Path, erddap_config: dict) -> pd.DataFrame:
         possible_cols = [
             "water_surface_above_navd88",
             "sea_surface_height_above_geopotential_datum",
+            "sea_level",
             "water_level",
             "wl",
         ]
@@ -100,9 +102,13 @@ def load_erddap_data(erddap_file: Path, erddap_config: dict) -> pd.DataFrame:
     if wl_col is None or wl_col not in df.columns:
         raise ValueError(f"Could not find water level column. Available: {df.columns.tolist()}")
 
-    df["wl"] = df[wl_col]
+    # Apply unit conversion if configured (e.g., mm to m: units_scale=0.001)
+    units_scale = erddap_config.get("variables", {}).get("units_scale", 1.0)
+    df["wl"] = df[wl_col] * units_scale
 
     logger.info(f"  Using water level column: {wl_col}")
+    if units_scale != 1.0:
+        logger.info(f"  Applied units_scale={units_scale}")
     logger.info(f"  Date range: {df['datetime'].min()} to {df['datetime'].max()}")
     logger.info(f"  Water level range: {df['wl'].min():.2f} to {df['wl'].max():.2f} m")
 
@@ -163,6 +169,69 @@ def match_observations(
     return matched_df
 
 
+def match_spline_to_reference(
+    spline_df: pd.DataFrame,
+    ref_df: pd.DataFrame,
+    ref_name: str = "erddap",
+    max_time_diff_min: int = 30,
+) -> pd.DataFrame:
+    """
+    Match subdaily spline output to reference water level data.
+
+    Uses merge_asof for efficient time-based matching between the regular
+    spline grid and reference observations.
+
+    Args:
+        spline_df: DataFrame from subdaily_loader with datetime, wse_ortho_m, datum
+        ref_df: Reference DataFrame with datetime and wl columns
+        ref_name: Name prefix for reference columns
+        max_time_diff_min: Maximum allowed time difference in minutes
+
+    Returns:
+        DataFrame with matched spline and reference values, plus demeaned columns
+    """
+    logger.info(f"Matching spline output to {ref_name} reference...")
+
+    spline_sorted = spline_df.sort_values("datetime").copy()
+    ref_sorted = ref_df[["datetime", "wl"]].sort_values("datetime").copy()
+
+    matched = pd.merge_asof(
+        spline_sorted,
+        ref_sorted,
+        on="datetime",
+        tolerance=pd.Timedelta(minutes=max_time_diff_min),
+        direction="nearest",
+    )
+
+    # Drop rows where no reference match was found
+    matched = matched.dropna(subset=["wl"]).reset_index(drop=True)
+
+    # Rename columns for consistency with existing output format
+    matched = matched.rename(
+        columns={
+            "datetime": "spline_datetime",
+            "wse_ortho_m": "spline_wse",
+            "wl": f"{ref_name}_wl",
+        }
+    )
+
+    if len(matched) == 0:
+        logger.warning("No spline points matched to reference within tolerance")
+        return matched
+
+    # Compute demeaned values
+    spline_mean = matched["spline_wse"].mean()
+    ref_mean = matched[f"{ref_name}_wl"].mean()
+    matched["spline_dm"] = matched["spline_wse"] - spline_mean
+    matched[f"{ref_name}_dm"] = matched[f"{ref_name}_wl"] - ref_mean
+    matched["spline_residual"] = matched["spline_dm"] - matched[f"{ref_name}_dm"]
+
+    match_pct = len(matched) / len(spline_sorted) * 100
+    logger.info(f"  Matched {len(matched):,} spline points ({match_pct:.1f}%)")
+
+    return matched
+
+
 def compute_statistics(matched_df: pd.DataFrame, ref_name: str = "erddap") -> dict:
     """Compute demeaned values, residuals, and statistics."""
     logger.info("Computing demeaned values and residuals...")
@@ -217,7 +286,7 @@ def main():
         "--config",
         type=str,
         default=None,
-        help="Path to stations_config.json (default: auto-detect)",
+        help="Path to stations.yaml (default: auto-detect)",
     )
     args = parser.parse_args()
 
@@ -228,7 +297,7 @@ def main():
     if args.config:
         config_path = Path(args.config)
     else:
-        config_path = project_root / "config" / "stations_config.json"
+        config_path = project_root / "config" / "stations.yaml"
 
     results_dir = project_root / "results_annual" / args.station
 
@@ -323,10 +392,53 @@ def main():
     # Compute statistics
     stats = compute_statistics(matched_df, ref_name)
 
-    # Save output
+    # Save raw-matched output
     output_file = results_dir / f"{args.station}_{args.year}_subdaily_matched.csv"
     matched_df.to_csv(output_file, index=False)
-    logger.info(f"Saved to: {output_file}")
+    logger.info(f"Saved raw-matched to: {output_file}")
+
+    # Match spline output to reference (if subdaily has been run)
+    from scripts.utils.subdaily_runner import find_spline_output
+
+    station_lower = args.station.lower()
+
+    # Check local workspace first, then REFL_CODE env var
+    local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
+    refl_code_base = (
+        local_refl if local_refl.exists() else Path(os.environ.get("REFL_CODE", str(local_refl)))
+    )
+
+    spline_path = find_spline_output(station_lower, refl_code_base)
+    spline_stats = None
+
+    if spline_path is not None:
+        from scripts.utils.subdaily_loader import load_subdaily_results
+
+        spline_df = load_subdaily_results(spline_path)
+        logger.info(f"Loaded {len(spline_df)} spline points for matching")
+
+        spline_matched = match_spline_to_reference(
+            spline_df,
+            ref_df,
+            ref_name,
+            args.max_time_diff,
+        )
+
+        if len(spline_matched) > 0:
+            spline_output = results_dir / f"{args.station}_{args.year}_spline_matched.csv"
+            spline_matched.to_csv(spline_output, index=False)
+            logger.info(f"Saved spline-matched to: {spline_output}")
+
+            # Compute spline statistics
+            spline_corr = spline_matched["spline_dm"].corr(spline_matched[f"{ref_name}_dm"])
+            spline_rmse = np.sqrt((spline_matched["spline_residual"] ** 2).mean())
+            spline_stats = {
+                "correlation": spline_corr,
+                "rmse": spline_rmse,
+                "n_matched": len(spline_matched),
+            }
+    else:
+        logger.info("No subdaily spline output found — run subdaily first for spline matching")
 
     # Print summary
     print()
@@ -334,11 +446,20 @@ def main():
     print(f"SUCCESS: {args.station} matched data generation complete")
     print("=" * 70)
     print()
-    print("Summary Statistics:")
+    print("Raw Retrieval Statistics:")
     print(f"  Total GNSS-IR obs: {len(gnss_df):,}")
     print(f"  Matched obs: {stats['n_matched']:,} ({stats['n_matched']/len(gnss_df)*100:.1f}%)")
     print(f"  Correlation: r = {stats['correlation']:.3f}")
     print(f"  RMSE: {stats['rmse']:.3f} m")
+
+    if spline_stats:
+        print()
+        print("Spline-Corrected Statistics:")
+        print(f"  Matched points: {spline_stats['n_matched']:,}")
+        print(f"  Correlation: r = {spline_stats['correlation']:.3f}")
+        print(f"  RMSE: {spline_stats['rmse']:.3f} m")
+
+    print()
     print(f"  Reference: {erddap_config.get('station_name', 'ERDDAP')}")
     print(f"  Distance: {erddap_config.get('distance_km', 'unknown')} km")
 

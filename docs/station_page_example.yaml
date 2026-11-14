@@ -1,0 +1,49 @@
+year: 2024
+doy: 60
+doy_end: 91
+circle_doy: 70
+circle_freqs: [1, 20, 5]
+series_days: [70, 77]
+title: GNSS-IR Station Results
+stations:
+  glbx:
+    place: Gustavus, Alaska
+    role: Accuracy test at very low elevation. Tide range about 6 m.
+    receiver: Trimble Alloy, 1 s files
+    gauge_csv: ./results_annual/GLBX/bartlett_cove_2024_raw.csv
+    gauge_time: time
+    gauge_level: water_surface_above_navd88
+    gauge_name: Bartlett Cove gauge, 0.3 km
+    inverse_csv: /path/to/work/page/glbx_inverse.csv
+    open_extension: open
+    rinex: /path/to/work/week/data/GLBX/2024/rinex3/GLBX0600.24o
+    notes:
+      - The inverse method uses elevation 2 to 10 degrees and azimuth 270 to 360 degrees. The tool accepts one azimuth range.
+      - "Slower sampling: 5 s keeps the precision and 97% of the arcs; 15 s keeps 80% of the arcs; 30 s keeps 51%."
+  sc02:
+    place: Friday Harbor, Washington
+    role: Open view and many arcs. Tide range about 3 m. Wind sensor at the gauge.
+    receiver: Septentrio PolaRx5, 15 s files
+    gauge_csv: /path/to/work/sc02/ref/friday_harbor_2024.csv
+    gauge_time: time
+    gauge_level: level_m
+    gauge_name: NOAA 9449880, about 0.3 km
+    inverse_csv: /path/to/work/sc02/sc02_inverse.csv
+    open_extension: open
+    rinex: /path/to/work/sc02/SC0200USA_R_20240600000_01D_15S_MO.rnx
+    wind_csv: /path/to/work/sc02/ref/friday_harbor_wind_2024.csv
+    wind_time: time
+    wind_speed: speed
+    wind_name: sensor at the NOAA gauge
+    notes:
+      - "Published for this station: about 0.12 m per height with GPS L1 (Larson, Ray and Williams 2017). GPS L1 alone gives 0.10 to 0.14 m here."
+      - A 30 s rate keeps 99% of the arcs with 3% more scatter.
+  fora:
+    place: Fort Raleigh, North Carolina
+    role: No usable gauge. Wind-driven water level with a tide of a few centimetres.
+    receiver: Trimble NetR9, 1 s files
+    inverse_csv: /path/to/work/fora_ref/fora_inverse.csv
+    rinex: /path/to/work/week/data/FORA/2024/rinex3/FORA0600.24o
+    notes:
+      - The nearest NOAA gauges, at 21 and 27 km, do not match this station.
+      - The inverse method ran with azimuth 0 to 80 degrees only, in four segments outside its gap rule.

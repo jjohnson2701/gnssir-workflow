@@ -1,0 +1,167 @@
+# ABOUTME: Downloads daily RINEX 3 files of one station from EarthScope and makes SNR files.
+# ABOUTME: For stations whose multi-GNSS data are in the EarthScope rinex3 archive (15 s files).
+"""EarthScope RINEX 3 to SNR files.
+
+For each day: download the compact RINEX 3 file, unpack it with CRX2RNX, and run
+`rinex2snr -input_file`. The unpacked file is removed afterwards.
+
+You need a free EarthScope account and a saved login. Make it once with:
+    es login          (from the earthscope-cli package)
+The token is read from the saved login and is never printed.
+
+Usage:
+    python -m scripts.earthscope_rinex3 --station sc02 --year 2024 --doy 60 --doy_end 91 \
+        --keep downloads/
+    (REFL_CODE, ORBITS and EXE must be set; CRX2RNX must be in $EXE or on PATH)
+"""
+import argparse
+import gzip
+import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
+
+URL = "https://gage-data.earthscope.org/archive/gnss/rinex3/obs/{year}/{doy:03d}/{name}"
+
+
+def file_name(station9, year, doy, interval="15S"):
+    return f"{station9}_R_{year}{doy:03d}0000_01D_{interval}_MO.crx.gz"
+
+
+def access_token():
+    from earthscope_sdk.auth.device_code_flow import DeviceCodeFlowSimple
+
+    return DeviceCodeFlowSimple(
+        Path.home() / ".config/earthscope"
+    ).get_access_token_refresh_if_necessary()
+
+
+def crx2rnx_path():
+    exe = os.environ.get("EXE")
+    for name in ("CRX2RNX", "crx2rnx"):
+        for cand in (Path(exe) / name if exe else None, shutil.which(name)):
+            if cand and Path(cand).exists():
+                return str(cand)
+    raise FileNotFoundError("CRX2RNX not found in $EXE or on PATH.")
+
+
+def download(station9, year, doy, out_dir, interval="15S", tries=3):
+    """Download one day. Returns the path, or None when the archive has no file (answer 404).
+
+    Any other failure (login refused, server error, no connection) raises RuntimeError, so
+    that it is not taken for a missing file.
+    """
+    import requests
+
+    name = file_name(station9, year, doy, interval)
+    path = Path(out_dir) / name
+    if path.exists() and path.stat().st_size > 100_000:
+        return path
+    problem = "no answer"
+    for _ in range(tries):
+        try:
+            r = requests.get(
+                URL.format(year=year, doy=doy, name=name),
+                headers={"Authorization": f"Bearer {access_token()}"},
+                timeout=300,
+            )
+        except requests.RequestException as e:
+            problem = type(e).__name__
+            time.sleep(5)
+            continue
+        if r.status_code == 200:
+            part = path.with_name(path.name + ".part")  # a stopped download must not look complete
+            part.write_bytes(r.content)
+            part.replace(path)
+            return path
+        if r.status_code == 404:
+            return None
+        problem = f"HTTP {r.status_code}"
+        if r.status_code in (401, 403):  # the login is refused; a new try does not help
+            break
+        time.sleep(5)
+    raise RuntimeError(f"EarthScope download of {name} failed: {problem}")
+
+
+def unpack(crx_gz, work_dir):
+    """Unpack one compact RINEX 3 file (.crx.gz) to a RINEX 3 observation file. Returns its path."""
+    work_dir = Path(work_dir)
+    crx = work_dir / Path(crx_gz).name[:-3]
+    with gzip.open(crx_gz, "rb") as src, open(crx, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    try:
+        subprocess.run([crx2rnx_path(), "-f", str(crx)], check=True, cwd=work_dir)
+    finally:
+        crx.unlink(missing_ok=True)
+    return crx.with_suffix(".rnx")
+
+
+def translate(crx_gz, work_dir, snr_type=66, orbit="gnss"):
+    """Unpack one compact RINEX 3 file and run rinex2snr on it. Returns True on success.
+
+    orbit "gnss" gives multi-GNSS orbits, BeiDou included; the rinex2snr default leaves BeiDou out.
+    """
+    rnx = unpack(crx_gz, work_dir)
+    try:
+        done = subprocess.run(
+            ["rinex2snr", "-input_file", str(rnx), "-snr", str(snr_type), "-orb", orbit],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+        )
+        return "SUCCESS" in done.stdout
+    finally:
+        rnx.unlink(missing_ok=True)
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description="Download EarthScope RINEX 3 files and make SNR files.")
+    p.add_argument("--station", required=True, help="4-character name, for example sc02")
+    p.add_argument("--long_name", help="9-character RINEX 3 name; default <STATION>00USA")
+    p.add_argument("--year", type=int, required=True)
+    p.add_argument("--doy", type=int, required=True)
+    p.add_argument("--doy_end", type=int)
+    p.add_argument(
+        "--interval", default="15S", help="sample interval in the file name (default 15S)"
+    )
+    p.add_argument(
+        "--orbit",
+        default="gnss",
+        help="rinex2snr orbit choice (default gnss: all systems, BeiDou included)",
+    )
+    p.add_argument("--keep", default="earthscope_rinex3", help="folder for the downloaded files")
+    a = p.parse_args(argv)
+    for var in ("REFL_CODE", "ORBITS"):
+        if not os.environ.get(var):
+            raise SystemExit(f"Set {var}.")
+    station9 = (a.long_name or f"{a.station.upper()}00USA").upper()
+    keep = Path(a.keep)
+    keep.mkdir(parents=True, exist_ok=True)
+    ok, missing, failed = 0, [], []
+    for doy in range(a.doy, (a.doy_end or a.doy) + 1):
+        try:
+            f = download(station9, a.year, doy, keep, a.interval)
+        except RuntimeError as e:
+            print(e)
+            failed.append(doy)
+            continue
+        if f is None:
+            missing.append(doy)
+            continue
+        if translate(f, keep, orbit=a.orbit):
+            ok += 1
+        else:
+            failed.append(doy)
+    print(
+        f"{ok} days translated to SNR files in "
+        f"{os.environ['REFL_CODE']}/{a.year}/snr/{a.station.lower()}/"
+    )
+    if missing:
+        print("No file in the archive for days:", ", ".join(f"{d:03d}" for d in missing))
+    if failed:
+        print("Download or translation failed for days:", ", ".join(f"{d:03d}" for d in failed))
+
+
+if __name__ == "__main__":
+    main()

@@ -6,9 +6,10 @@
 GNSS-IR Station Processing Script
 
 This script runs the complete processing workflow for a station based on
-configuration in stations_config.json:
+configuration in config/stations.yaml:
 
 1. Core GNSS-IR Processing (RINEX download, conversion, SNR extraction, RH retrieval)
+1.5. Subdaily Spline Analysis (RHdot correction, IF bias removal, spline fitting)
 2. Reference Data Matching (auto-selects USGS, ERDDAP, or CO-OPS based on config)
 3. Visualization (resolution comparison, polar animation)
 
@@ -38,13 +39,17 @@ sys.path.insert(0, str(project_root))
 from scripts.core_processing.config_loader import load_tool_paths, load_station_config  # noqa: E402
 from scripts.utils.logging_config import setup_main_logger  # noqa: E402
 from scripts.core_processing.parallel_orchestrator import process_station_parallel  # noqa: E402
+from scripts.utils.subdaily_runner import (  # noqa: E402
+    run_subdaily_command,
+    process_subdaily_output,
+)  # noqa: E402
 import scripts.results_handler as results_handler  # noqa: E402
 
-# Default paths
-DEFAULT_GNSSREFL_WORKSPACE = project_root / "gnssrefl_data_workspace"
+# Default paths - use ~/gnssir_ws symlink to keep paths short for Fortran string limits
+DEFAULT_GNSSREFL_WORKSPACE = Path.home() / "gnssir_ws"
 DEFAULT_REFL_CODE_BASE = DEFAULT_GNSSREFL_WORKSPACE / "refl_code"
 DEFAULT_ORBITS_BASE = DEFAULT_GNSSREFL_WORKSPACE / "orbits"
-DEFAULT_STATIONS_CONFIG_PATH = project_root / "config" / "stations_config.json"
+DEFAULT_STATIONS_CONFIG_PATH = project_root / "config" / "stations.yaml"
 DEFAULT_TOOL_PATHS_CONFIG_PATH = project_root / "config" / "tool_paths.json"
 DEFAULT_MAIN_LOG_FILE = project_root / "run_log.txt"
 
@@ -54,8 +59,9 @@ logger = logging.getLogger(__name__)
 
 def load_config(station: str, config_path: Path) -> dict:
     """Load station configuration."""
-    with open(config_path) as f:
-        config = json.load(f)
+    from scripts.utils.station_config import load_stations
+
+    config = load_stations(config_path)
 
     if station not in config:
         available = list(config.keys())
@@ -71,7 +77,19 @@ def get_reference_source(station_config: dict) -> tuple:
     Returns:
         tuple: (source_name, reason) - e.g., ('erddap', 'primary_reference=true')
     """
-    # Check ERDDAP first (highest priority)
+    # The `reference:` line of stations.yaml decides, when it is present
+    chosen = station_config.get("reference")
+    if isinstance(chosen, dict) and chosen.get("source"):
+        return (
+            chosen["source"],
+            (
+                f"reference: {chosen['source']}:{chosen.get('id')}"
+                if chosen["source"] != "none"
+                else "reference: none"
+            ),
+        )
+
+    # Old single-file format: ERDDAP first (highest priority)
     erddap = station_config.get("erddap", {})
     if not erddap:
         erddap = station_config.get("external_data_sources", {}).get("erddap", {})
@@ -159,7 +177,6 @@ def validate_configuration(station: str, station_config: dict, project_root: Pat
             tool_paths = json.load(f)
 
     required_tools = {
-        "gfzrnx_path": "gfzrnx",
         "rinex2snr_path": "rinex2snr",
         "gnssir_path": "gnssir",
     }
@@ -175,7 +192,11 @@ def validate_configuration(station: str, station_config: dict, project_root: Pat
         else:
             found = shutil.which(tool_path)
             if not found:
-                issues.append(f"Tool '{tool_path}' not found in PATH")
+                issues.append(
+                    f"Tool '{tool_path}' not found in PATH. Activate the environment that has "
+                    "gnssrefl "
+                    "(for example: conda activate <your gnssrefl environment>) and run again."
+                )
 
     # Check REFL_CODE workspace is writable
     refl_code = os.environ.get(
@@ -206,7 +227,11 @@ def run_command(cmd: list, description: str) -> bool:
     logger.info(f"  Command: {' '.join(cmd)}")
 
     try:
-        subprocess.run(cmd, check=True, capture_output=False)
+        # Sub-steps import "scripts.*", so the project root must be on the path
+        root = str(Path(__file__).resolve().parent.parent)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
+        subprocess.run(cmd, check=True, capture_output=False, env=env)
         logger.info(f"  {description} completed successfully")
         return True
     except subprocess.CalledProcessError as e:
@@ -255,9 +280,12 @@ Examples:
     parser.add_argument(
         "--skip_gnssir", action="store_true", help="Skip GNSS-IR processing (use existing results)"
     )
+    parser.add_argument(
+        "--skip_subdaily", action="store_true", help="Skip subdaily spline analysis"
+    )
     parser.add_argument("--skip_comparison", action="store_true", help="Skip reference comparison")
     parser.add_argument("--skip_viz", action="store_true", help="Skip visualization scripts")
-    parser.add_argument("--config", type=str, default=None, help="Path to stations_config.json")
+    parser.add_argument("--config", type=str, default=None, help="Path to stations.yaml")
     parser.add_argument(
         "--validate", action="store_true", help="Validate configuration and exit without processing"
     )
@@ -302,7 +330,7 @@ Examples:
     if args.config:
         config_path = Path(args.config)
     else:
-        config_path = project_root / "config" / "stations_config.json"
+        config_path = project_root / "config" / "stations.yaml"
 
     python_exe = sys.executable
 
@@ -312,6 +340,7 @@ Examples:
     print()
 
     # Load configuration
+    args.station = args.station.upper()
     logger.info(f"Loading configuration from {config_path}")
     station_config = load_config(args.station, config_path)
 
@@ -358,10 +387,10 @@ Examples:
         print("To find and configure a reference station, run:")
         print(f"  python scripts/find_reference_stations.py --station {args.station}")
         print()
-        print("Then add the reference to config/stations_config.json under:")
-        print("  - 'usgs_comparison.target_usgs_site' for USGS gauges")
-        print("  - 'external_data_sources.noaa_coops' for CO-OPS tide gauges")
-        print("  - 'erddap' for ERDDAP data sources")
+        print("Then set the reference line in config/stations.yaml, for example:")
+        print("  reference: usgs:02043433")
+        print("  reference: coops:8651370")
+        print("  reference: erddap:<dataset_id>")
         print()
         print("Processing will continue, but Phase 2 (Reference Matching) will be skipped.")
         print("=" * 70)
@@ -398,9 +427,7 @@ Examples:
             tool_paths = load_tool_paths(DEFAULT_TOOL_PATHS_CONFIG_PATH, project_root)
 
             # Load station-specific configuration for processing
-            processing_config = load_station_config(
-                DEFAULT_STATIONS_CONFIG_PATH, args.station.upper(), project_root
-            )
+            processing_config = load_station_config(config_path, args.station.upper(), project_root)
 
             # Process station in parallel
             gnssir_results = process_station_parallel(
@@ -415,7 +442,6 @@ Examples:
                 results_handler=results_handler,
                 skip_options={
                     "skip_download": args.skip_download,
-                    "skip_rinex_conversion": False,
                     "skip_snr": False,
                     "skip_rh": False,
                     "skip_quicklook": False,
@@ -444,7 +470,60 @@ Examples:
         results["gnssir"] = True
 
     # =========================================================================
-    # Step 8: Reference Data Matching
+    # Phase 1.5: Subdaily Spline Analysis
+    # =========================================================================
+    if not args.skip_subdaily:
+        print("-" * 70)
+        print("PHASE 1.5: Subdaily Spline Analysis")
+        print("-" * 70)
+
+        try:
+            station_lower = args.station.lower()
+
+            # Check local workspace first, then REFL_CODE env var
+            local_refl = project_root / "gnssrefl_data_workspace" / "refl_code"
+            refl_code_base = (
+                local_refl
+                if local_refl.exists()
+                else Path(os.environ.get("REFL_CODE", str(local_refl)))
+            )
+
+            # Run gnssrefl subdaily
+            subdaily_ok = run_subdaily_command(
+                station=station_lower,
+                year=args.year,
+                doy_start=args.doy_start,
+                doy_end=args.doy_end,
+            )
+
+            if subdaily_ok:
+                # Process output into annotated CSV
+                results_dir = project_root / "results_annual" / args.station
+                subdaily_csv = process_subdaily_output(
+                    station=station_lower,
+                    year=args.year,
+                    refl_code_base=refl_code_base,
+                    output_dir=results_dir,
+                )
+                if subdaily_csv:
+                    logger.info(f"  Subdaily output saved to {subdaily_csv}")
+                    results["subdaily"] = True
+                else:
+                    logger.warning("  Subdaily ran but no spline output found")
+                    results["subdaily"] = False
+            else:
+                logger.error("  Subdaily command failed")
+                results["subdaily"] = False
+        except Exception as e:
+            logger.error(f"  ✗ Subdaily analysis failed: {e}")
+            results["subdaily"] = False
+        print()
+    else:
+        logger.info("Skipping subdaily analysis (--skip_subdaily)")
+        results["subdaily"] = True
+
+    # =========================================================================
+    # Phase 2: Reference Data Matching
     # =========================================================================
     if not args.skip_comparison:
         print("-" * 70)
@@ -490,7 +569,7 @@ Examples:
         results["comparison"] = True
 
     # =========================================================================
-    # Step 9: Visualization
+    # Phase 3: Visualization
     # =========================================================================
     if not args.skip_viz:
         print("-" * 70)
@@ -549,7 +628,7 @@ Examples:
 
     print()
     print("Next step: Run the dashboard")
-    print("  streamlit run dashboard.py")
+    print("  python -m dashboard")
 
     # Exit with error if any step failed
     if not all(results.values()):
